@@ -705,6 +705,10 @@ printed page breaks, wraps and justifies where the page shown does.
   setting one up is the system's (the window opens its printer settings). Asked on a thread each
   time the window opens; a job is written to a temporary PDF that `lp` reads before it answers.
   **Tests never reach the system's printers**: they put a `Spool` in `App::print.spooler`.
+- **In the browser there are no printers to ask** (a page cannot reach them): the window has no
+  printer row, "Save PDF" downloads the pages (R31), and "Print…" opens the same PDF in a new tab
+  (`platform::show_pdf`), whose viewer prints with the browser's own dialog. Checked by
+  `web/smoke.mjs`.
 - Ctrl+P opens it, but not with Shift: Ctrl+Shift+P takes up the pen (guarded by
   `a_loop_drawn_with_the_pen_selects_the_text_inside_it`).
 - Tests: `ctrl_p_prints_the_page_shown_on_the_default_printer`,
@@ -1230,6 +1234,7 @@ them; it asks `platform` instead, whose desktop half does what Caprice always di
     kept in memory only; a file to write (Word, PDF, the scene picture) gets a path in
     `/downloads`, and writing there downloads it. "Download a copy (.caprice)" in the File menu
     is the browser's way to take a story to the computer.
+  Printing in the browser is R20's PDF, downloaded or opened in a tab.
   So a writer of files writes through `platform::fs` (never `image::save_buffer` and the like,
   which go to the disk themselves): the scene picture's PNG is made in memory first.
 - **"Follow my writing" is not offered in the browser** (the Scene menu hides its checkbox), for
@@ -1246,9 +1251,10 @@ natively). `the_browser_s_files_are_read_back_as_written_and_folders_hold_what_i
 `in_the_browser_opening_lists_the_stories_kept_and_opens_the_one_chosen` and
 `in_the_browser_escape_saves_nothing` test the shelf, given a folder as the browser has. The browser build
 is checked by `web/build.sh`, and running it by `web/smoke.mjs` (headless Chromium: the welcome, a
-blank story, typing, a picture uploaded, the PDF downloaded, a worker, a version kept in IndexedDB
+blank story, typing, a picture uploaded, the PDF downloaded and opened to print, a version kept in IndexedDB
 and listed again after a reload, a story saved by name, downloaded as `.caprice` and Word,
-uploaded back, and listed on the welcome; it reports any error on the page). The native tests cover the desktop half.
+uploaded back, a story with a scene drawn behind the page in a worker, and the stories listed on
+the welcome; it reports any error on the page). The native tests cover the desktop half.
 
 ---
 

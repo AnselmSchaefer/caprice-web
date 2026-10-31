@@ -2,6 +2,7 @@
 // taking screenshots: node web/smoke.mjs [out dir]. Serve web/dist first (node web/serve.mjs 8080).
 // It prints what it found, and every error on the page.
 import { chromium } from "playwright-core";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -51,13 +52,18 @@ async function download(...clicks) {
 // Clicks that open the page's file picker, which is given `file`.
 async function upload(file, ...clicks) {
   const [chooser] = await Promise.all([
-    page.waitForEvent("filechooser", { timeout: 5000 }),
+    page.waitForEvent("filechooser", { timeout: 5000 }).catch(async e => {
+      await page.screenshot({ path: `${out}/failed-upload.png` });
+      throw e;
+    }),
     (async () => { for (const [x, y] of clicks) await click(x, y); })(),
   ]);
   await chooser.setFiles(file);
   await page.waitForTimeout(1500);
 }
 
+// The shelf's upload button, below a row for each story kept.
+const uploadButton = async () => [565, 190 + 38 * Math.max(0, (await stories()).length - 1)];
 const FILE = [85, 38], OPEN = [93, 75], SAVE = [84, 113], EXPORT = [140, 189], PRINT = [90, 227];
 const VERSIONS = [100, 265], DOWNLOAD = [120, 379];
 
@@ -78,9 +84,19 @@ await page.keyboard.press("Enter");
 await upload(icon, [797, 38], [803, 75]);
 await page.screenshot({ path: `${out}/3-picture.png` });
 
-// The Print window asks for printers in the background (a Web Worker); the pages as a PDF are a download.
-console.log("PDF:", await download(FILE, PRINT, [758, 389]));
-console.log("workers started:", workers.length);
+// Print: the pages as a PDF are a download, or open in a new tab for the browser to print.
+console.log("PDF:", await download(FILE, PRINT, [691, 286]));
+// (Headless Chromium shows a PDF tab with no address, so what the page opens is noted on the way.)
+await page.evaluate(() => {
+  const open = window.open;
+  window.opened = [];
+  window.open = (url, ...rest) => (window.opened.push(String(url)), open.call(window, url, ...rest));
+});
+await click(...FILE);
+await click(...PRINT);
+await click(770, 286);
+console.log("printing in a tab:", await page.evaluate(() => window.opened.map(u => u.split(":")[0])));
+for (const tab of page.context().pages().filter(p => p !== page)) await tab.close();
 
 // File → Versions… keeps a version of the story, in the browser's files.
 await click(...FILE);
@@ -119,13 +135,25 @@ await click(...FILE);
 await click(...OPEN);
 await page.waitForTimeout(800);
 await page.screenshot({ path: `${out}/6-open.png` });
-await upload(`${out}/${copy}`, [565, 190]);
+await upload(`${out}/${copy}`, await uploadButton());
 console.log("stories kept after the upload:", await stories());
+
+// A story with a scene in it: the scene is drawn behind the page in a Web Worker.
+const story = JSON.parse(fs.readFileSync(`${out}/${copy}`, "utf8"));
+const circles = [...Array(40).keys()].map(k => `<circle cx="${(k * 37) % 400}" cy="${(k * 53) % 560}" r="${10 + k % 30}" fill="hsl(${k * 9} 60% 55%)"/>`);
+story.scenes = [{ at: 0, versions: [`<svg xmlns="http://www.w3.org/2000/svg" width="400" height="560">${circles.join("")}</svg>`] }];
+fs.writeFileSync(`${out}/With a scene.caprice`, JSON.stringify(story));
+// The story opened before has its title come in first.
+await page.waitForTimeout(2000);
+await upload(`${out}/With a scene.caprice`, FILE, OPEN, await uploadButton());
+await page.waitForTimeout(2000);
+await page.screenshot({ path: `${out}/7-scene.png` });
+console.log("workers started:", workers.length);
 
 // Opened again, the welcome lists the stories last opened or saved.
 await page.reload();
 await page.waitForTimeout(4000);
-await page.screenshot({ path: `${out}/7-welcome-again.png` });
+await page.screenshot({ path: `${out}/8-welcome-again.png` });
 
 console.log(errors.length ? "errors:\n  " + [...new Set(errors)].slice(0, 8).join("\n  ") : "no errors");
 await browser.close();

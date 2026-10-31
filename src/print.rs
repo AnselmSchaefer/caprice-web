@@ -30,6 +30,7 @@ use crate::App;
 use crate::fileio::DialogFor;
 use crate::layout::Ink;
 use crate::theme::INK;
+use crate::platform::fs;
 
 /// The printers the system has, and the one it prints to unless told otherwise.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -246,7 +247,10 @@ impl App {
         if p.from > n || p.upto > n || p.upto == 0 {
             (p.from, p.upto) = (1, n);
         }
-        p.ask_printers(ctx);
+        // A page cannot reach the system's printers: the browser prints the PDF itself.
+        if cfg!(not(target_arch = "wasm32")) {
+            p.ask_printers(ctx);
+        }
     }
 
     /// The document's name, for a print job or a PDF.
@@ -264,7 +268,8 @@ impl App {
         let n = self.doc.pages();
         let shown = self.target.min(n - 1);
         let mut open = true;
-        let (mut go, mut settings, mut cancel) = (false, false, false);
+        let (mut go, mut settings, mut cancel, mut in_tab) = (false, false, false, false);
+        let browser = cfg!(target_arch = "wasm32");
         let screen = ctx.content_rect();
         egui::Window::new("Print")
             .id(Id::new("print"))
@@ -275,47 +280,51 @@ impl App {
             .show(ctx, |ui| {
                 let p = &mut self.print;
                 egui::Grid::new("print_grid").num_columns(2).spacing(vec2(12.0, 10.0)).show(ui, |ui| {
-                    ui.label("Printer");
-                    ui.horizontal(|ui| {
-                        let names = match &p.printers {
-                            Some(Ok(list)) => list.names.clone(),
-                            _ => Vec::new(),
-                        };
-                        let current = p.to.as_deref().map_or("PDF file".to_owned(), shown_name);
-                        egui::ComboBox::from_id_salt("print_to").selected_text(current).width(200.0).show_ui(ui, |ui| {
-                            for name in &names {
-                                if ui.selectable_label(p.to.as_ref() == Some(name), shown_name(name)).clicked() {
-                                    (p.to, p.chosen) = (Some(name.clone()), true);
+                    // In the browser there is no printer to choose: its own print dialog has them.
+                    if !browser {
+                        ui.label("Printer");
+                        ui.horizontal(|ui| {
+                            let names = match &p.printers {
+                                Some(Ok(list)) => list.names.clone(),
+                                _ => Vec::new(),
+                            };
+                            let current = p.to.as_deref().map_or("PDF file".to_owned(), shown_name);
+                            egui::ComboBox::from_id_salt("print_to").selected_text(current).width(200.0).show_ui(ui, |ui| {
+                                for name in &names {
+                                    if ui.selectable_label(p.to.as_ref() == Some(name), shown_name(name)).clicked() {
+                                        (p.to, p.chosen) = (Some(name.clone()), true);
+                                    }
                                 }
-                            }
-                            if ui.selectable_label(p.to.is_none(), "PDF file").clicked() {
-                                (p.to, p.chosen) = (None, true);
+                                if ui.selectable_label(p.to.is_none(), "PDF file").clicked() {
+                                    (p.to, p.chosen) = (None, true);
+                                }
+                            });
+                            if p.asking.is_some() {
+                                ui.spinner();
                             }
                         });
-                        if p.asking.is_some() {
-                            ui.spinner();
-                        }
-                    });
-                    ui.end_row();
+                        ui.end_row();
 
-                    match &p.printers {
-                        Some(Ok(list)) if list.names.is_empty() => {
-                            ui.label("");
-                            ui.vertical(|ui| {
-                                ui.label("No printer is set up.");
-                                settings = ui.button("Printer settings…").on_hover_text("Add a printer in the system's settings").clicked();
-                            });
-                            ui.end_row();
+                        match &p.printers {
+                            Some(Ok(list)) if list.names.is_empty() => {
+                                ui.label("");
+                                ui.vertical(|ui| {
+                                    ui.label("No printer is set up.");
+                                    let tip = "Add a printer in the system's settings";
+                                    settings = ui.button("Printer settings…").on_hover_text(tip).clicked();
+                                });
+                                ui.end_row();
+                            }
+                            Some(Err(e)) => {
+                                ui.label("");
+                                ui.vertical(|ui| {
+                                    ui.colored_label(ui.visuals().warn_fg_color, format!("No printers: {e}"));
+                                    ui.label("Saving a PDF still works.");
+                                });
+                                ui.end_row();
+                            }
+                            _ => {}
                         }
-                        Some(Err(e)) => {
-                            ui.label("");
-                            ui.vertical(|ui| {
-                                ui.colored_label(ui.visuals().warn_fg_color, format!("No printers: {e}"));
-                                ui.label("Saving a PDF still works.");
-                            });
-                            ui.end_row();
-                        }
-                        _ => {}
                     }
 
                     ui.label("Pages");
@@ -347,13 +356,28 @@ impl App {
                 // Inside `horizontal`, so the row is as wide as the window and no wider (R16).
                 ui.horizontal(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let label = if p.to.is_some() { "Print" } else { "Save PDF…" };
+                        if browser {
+                            let tip = "The pages as a PDF in a new tab, to print from there";
+                            in_tab = ui.button("Print\u{2026}").on_hover_text(tip).clicked();
+                        }
+                        let label = if p.to.is_some() { "Print" } else if browser { "Save PDF" } else { "Save PDF…" };
                         go = ui.add_enabled(p.sending.is_none(), egui::Button::new(label)).clicked();
                         cancel = ui.button("Cancel").clicked();
                     });
                 });
             });
-        self.print.open = open && !cancel && !go;
+        self.print.open = open && !cancel && !go && !in_tab;
+        #[cfg(target_arch = "wasm32")]
+        if in_tab {
+            let pages = self.print.pages(self.target, self.doc.pages());
+            self.status = match self.pdf(ctx, pages) {
+                Ok(pdf) => {
+                    crate::platform::show_pdf(&pdf);
+                    "- the pages are in a new tab, to print".into()
+                }
+                Err(e) => format!("- PDF failed: {e}"),
+            };
+        }
         if settings && let Err(e) = open_printer_settings() {
             self.status = format!("- {e}");
         }
@@ -366,7 +390,8 @@ impl App {
     fn print_now(&mut self, ctx: &egui::Context) {
         let Some(printer) = self.print.to.clone() else {
             let name = format!("{}.pdf", self.print_title());
-            self.ask_path(ctx, DialogFor::PrintPdf, crate::platform::Dialog::new().add_filter("PDF", &["pdf"]).set_file_name(name));
+            let dialog = crate::platform::Dialog::new().add_filter("PDF", &["pdf"]).set_file_name(name);
+            self.ask_path(ctx, DialogFor::PrintPdf, dialog);
             return;
         };
         let pages = self.print.pages(self.target, self.doc.pages());
@@ -386,7 +411,7 @@ impl App {
         };
         // lp reads the file before it answers, so it can go as soon as lp is done with it.
         let file = std::env::temp_dir().join(format!("caprice-print-{}-{}.pdf", crate::platform::run_id(), self.doc.version));
-        if let Err(e) = crate::platform::fs::write(&file, pdf) {
+        if let Err(e) = fs::write(&file, pdf) {
             self.status = format!("- printing failed: {e}");
             return;
         }
@@ -394,7 +419,7 @@ impl App {
         let (spooler, wake) = (self.print.spooler.clone(), crate::platform::Waker::new(ctx));
         crate::platform::spawn(move || {
             let said = spooler.print(&job, &file).map(|_| format!("- sent to {}", shown_name(&job.printer)));
-            let _ = crate::platform::fs::remove_file(&file);
+            let _ = fs::remove_file(&file);
             let _ = tx.send(said);
             wake.wake();
         });
@@ -416,7 +441,7 @@ impl App {
     /// Save the chosen pages as a PDF at `path`.
     pub(crate) fn print_pdf_to(&mut self, ctx: &egui::Context, path: PathBuf) {
         let pages = self.print.pages(self.target, self.doc.pages());
-        let written = self.pdf(ctx, pages).and_then(|b| crate::platform::fs::write(&path, b).map_err(|e| e.to_string()));
+        let written = self.pdf(ctx, pages).and_then(|b| fs::write(&path, b).map_err(|e| e.to_string()));
         self.status = match written {
             Ok(()) => format!("- saved {}", path.file_name().map_or(String::new(), |n| n.to_string_lossy().into_owned())),
             Err(e) => format!("- PDF failed: {e}"),

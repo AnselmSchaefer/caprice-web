@@ -92,7 +92,8 @@ impl App {
                 Asking::Name { name, focused, .. } => {
                     ui.label("Stories are kept in this browser, under a name of their own:");
                     ui.add_space(4.0);
-                    let field = ui.add(egui::TextEdit::singleline(name).hint_text("Name of the story").desired_width(f32::INFINITY));
+                    let edit = egui::TextEdit::singleline(name).hint_text("Name of the story").desired_width(f32::INFINITY);
+                    let field = ui.add(edit);
                     if !*focused {
                         field.request_focus();
                         *focused = true;

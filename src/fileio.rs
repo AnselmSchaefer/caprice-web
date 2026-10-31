@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::App;
 use crate::model::{Character, Doc, Look, Flow, ImageData, Note, PAGE_BREAK, PageSetup, ParaAttrs, Scene, Style};
+use crate::platform::fs;
 
 #[derive(Serialize, Deserialize)]
 struct Run {
@@ -456,7 +457,7 @@ impl App {
 
     pub fn save_to(&mut self, path: PathBuf) {
         let json = serde_json::to_string_pretty(&self.doc_file());
-        let written = json.map_err(|e| e.to_string()).and_then(|j| crate::platform::fs::write(&path, j).map_err(|e| e.to_string()));
+        let written = json.map_err(|e| e.to_string()).and_then(|j| fs::write(&path, j).map_err(|e| e.to_string()));
         self.status = match written {
             Ok(()) => {
                 self.start.remember(&path, self.keep.now());
@@ -482,7 +483,7 @@ impl App {
     }
 
     pub(crate) fn export_docx_to(&mut self, path: PathBuf) {
-        let written = crate::export::to_docx(&self.doc).and_then(|b| crate::platform::fs::write(&path, b).map_err(|e| e.to_string()));
+        let written = crate::export::to_docx(&self.doc).and_then(|b| fs::write(&path, b).map_err(|e| e.to_string()));
         self.status = match written {
             Ok(()) => format!("- exported {}", path.file_name().map_or(String::new(), |n| n.to_string_lossy().into_owned())),
             Err(e) => format!("- export failed: {e}"),
@@ -541,7 +542,7 @@ impl App {
         let json = serde_json::to_string_pretty(&self.doc_file()).unwrap_or_default();
         let name = format!("{}.caprice", if self.path.is_some() { self.story_name() } else { self.suggested_name() });
         let path = PathBuf::from(crate::platform::DOWNLOADS).join(&name);
-        self.status = match crate::platform::fs::write(path, json) {
+        self.status = match fs::write(path, json) {
             Ok(()) => format!("- downloaded {name}"),
             Err(e) => format!("- download failed: {e}"),
         };
@@ -606,14 +607,14 @@ impl App {
     }
 
     pub fn open_path(&mut self, ctx: &egui::Context, path: std::path::PathBuf) {
-        let loaded = crate::platform::fs::read_to_string(&path)
+        let loaded = fs::read_to_string(&path)
             .map_err(|e| e.to_string())
             .and_then(|s| serde_json::from_str::<DocFile>(&s).map_err(|e| e.to_string()));
         match loaded {
             Ok(file) => {
                 self.story_id = if file.id.is_empty() { crate::versions::new_id() } else { file.id.clone() };
                 // Older files say nothing: the file's own date is the best guess (written with the next save).
-                let made = crate::platform::fs::made(&path).unwrap_or(0);
+                let made = fs::made(&path).unwrap_or(0);
                 self.created = if file.created > 0 { file.created } else { made };
                 self.adopt(ctx, file);
                 self.start.remember(&path, self.keep.now());

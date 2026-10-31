@@ -307,7 +307,8 @@ mod tests {
         m.write(Path::new("/caprice/theme.json"), b"\"City\"", 300);
         assert_eq!(m.read(Path::new("/caprice/versions/b2/200.caprice")).unwrap(), b"two");
         let folders = m.read_dir(Path::new("/caprice/versions")).unwrap();
-        assert_eq!(folders, [PathBuf::from("/caprice/versions/a1"), PathBuf::from("/caprice/versions/b2")], "each story's folder once");
+        let (a1, b2) = (PathBuf::from("/caprice/versions/a1"), PathBuf::from("/caprice/versions/b2"));
+        assert_eq!(folders, [a1, b2], "each story's folder once");
         let top = m.read_dir(Path::new("/caprice")).unwrap();
         assert_eq!(top, [PathBuf::from("/caprice/theme.json"), PathBuf::from("/caprice/versions")]);
         assert!(m.exists(Path::new("/caprice/versions/a1")) && m.exists(Path::new("/caprice/theme.json")));

@@ -195,7 +195,8 @@ pub fn upload(dialog: &Dialog, into: PathBuf, tx: std::sync::mpsc::Sender<Option
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub fn free_name(dir: &std::path::Path, name: &str) -> PathBuf {
     let path = std::path::Path::new(name);
-    let (stem, ext) = (path.file_stem().map_or(name.into(), |s| s.to_string_lossy()), path.extension().map(|e| e.to_string_lossy()));
+    let stem = path.file_stem().map_or(name.into(), |s| s.to_string_lossy());
+    let ext = path.extension().map(|e| e.to_string_lossy());
     (1..)
         .map(|k| {
             let stem = if k == 1 { stem.to_string() } else { format!("{stem} {k}") };
@@ -209,8 +210,9 @@ pub fn free_name(dir: &std::path::Path, name: &str) -> PathBuf {
 mod browser {
     use wasm_bindgen::prelude::*;
 
-    // What the page does for files: its picker, downloads, and fetching its own. Bytes going out are copied out of the
-    // app's memory first, which is shared with the workers and so cannot go into a Blob as it is.
+    // What the page does for files: its picker, downloads, a PDF in a tab, and fetching its own.
+    // Bytes going out are copied out of the app's memory first, which is shared with the workers
+    // and so cannot go into a Blob as it is.
     #[wasm_bindgen(inline_js = r#"
         export function pick_file(accept) {
             return new Promise(done => {
@@ -230,6 +232,11 @@ mod browser {
             if (!r.ok) throw new Error(`${url}: ${r.status}`);
             return new Uint8Array(await r.arrayBuffer());
         }
+        export function show_pdf(bytes) {
+            const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: "application/pdf" }));
+            window.open(url, "_blank");
+            setTimeout(() => URL.revokeObjectURL(url), 600000);
+        }
         export function download(name, bytes) {
             const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)]));
             const a = document.createElement("a");
@@ -246,6 +253,8 @@ mod browser {
         async fn js_pick_file(accept: &str) -> JsValue;
         #[wasm_bindgen(js_name = download)]
         fn js_download(name: &str, bytes: &[u8]);
+        #[wasm_bindgen(js_name = show_pdf)]
+        fn js_show_pdf(bytes: &[u8]);
         #[wasm_bindgen(js_name = fetch_bytes, catch)]
         async fn js_fetch_bytes(url: &str) -> Result<JsValue, JsValue>;
     }
@@ -269,7 +278,12 @@ mod browser {
     pub fn download(name: &str, bytes: &[u8]) {
         js_download(name, bytes);
     }
+
+    /// A PDF in a new tab, where the browser shows it and can print it.
+    pub fn show_pdf(bytes: &[u8]) {
+        js_show_pdf(bytes);
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) use browser::{download, fetch};
+pub(crate) use browser::{download, fetch, show_pdf};

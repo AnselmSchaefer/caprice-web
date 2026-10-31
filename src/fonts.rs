@@ -57,8 +57,12 @@ pub fn drawn_with(font: &str, installed: &BTreeSet<String>) -> Option<String> {
 /// New Roman, Arial and Courier New, and a book face. Each is fetched from `fonts/` (`web/fonts`)
 /// the first time it is wanted, its four faces as `<file>-Regular.ttf` and so on.
 #[cfg(target_arch = "wasm32")]
-const SHIPPED: [(&str, &str); 4] =
-    [("Liberation Serif", "LiberationSerif"), ("Liberation Sans", "LiberationSans"), ("Liberation Mono", "LiberationMono"), ("Noto Serif", "NotoSerif")];
+const SHIPPED: [(&str, &str); 4] = [
+    ("Liberation Serif", "LiberationSerif"),
+    ("Liberation Sans", "LiberationSans"),
+    ("Liberation Mono", "LiberationMono"),
+    ("Noto Serif", "NotoSerif"),
+];
 
 pub struct FontBook {
     db: fontdb::Database,
@@ -97,7 +101,7 @@ impl FontBook {
             .collect();
         // In the browser the shipped fonts count as installed: they are there for the fetching.
         #[cfg(target_arch = "wasm32")]
-        let installed: BTreeSet<String> = installed.into_iter().chain(SHIPPED.iter().map(|(family, _)| (*family).to_owned())).collect();
+        let installed: BTreeSet<String> = installed.into_iter().chain(SHIPPED.iter().map(|(f, _)| (*f).to_owned())).collect();
         let mut families: Vec<(String, String)> = COMMON_FONTS
             .iter()
             .filter(|f| installed.contains(**f))
@@ -247,7 +251,8 @@ impl FontBook {
             self.db.load_font_data(bytes);
         }
         let has = |db: &fontdb::Database, family: &str| db.faces().any(|f| f.families.iter().any(|(n, _)| n == family));
-        let (ready, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.waiting).into_iter().partition(|(_, a)| has(&self.db, a));
+        let waiting = std::mem::take(&mut self.waiting);
+        let (ready, waiting): (Vec<_>, Vec<_>) = waiting.into_iter().partition(|(_, a)| has(&self.db, a));
         self.waiting = waiting;
         for (font, actual) in ready {
             self.load(ctx, &font, &actual, false);

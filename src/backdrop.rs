@@ -22,6 +22,7 @@ use crate::App;
 use crate::claude::{Outcome, run_claude};
 use crate::model::{Character, Doc, IMAGE_CHAR, PAGE_BREAK, Scene, is_terminator};
 use crate::theme::pal;
+use crate::platform::fs;
 
 /// How strongly a scene shows through the paper.
 pub const OPACITY: f32 = 0.2;
@@ -932,15 +933,16 @@ impl App {
         let Some(svg) = self.scene_here().and_then(|s| s.svg()).map(str::to_owned) else { return };
         let is_svg = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("svg"));
         let written = if is_svg {
-            crate::platform::fs::write(&path, svg.as_bytes()).map_err(|e| e.to_string())
+            fs::write(&path, svg.as_bytes()).map_err(|e| e.to_string())
         } else {
             rasterize(&svg, RENDER_WIDTH).and_then(|image| {
                 let rgba: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
-                let rgba = image::RgbaImage::from_raw(image.size[0] as u32, image.size[1] as u32, rgba).ok_or("the picture has no size")?;
+                let (w, h) = (image.size[0] as u32, image.size[1] as u32);
+                let rgba = image::RgbaImage::from_raw(w, h, rgba).ok_or("the picture has no size")?;
                 // Made in memory, then written as any file is (in the browser, downloaded).
                 let mut png = std::io::Cursor::new(Vec::new());
                 rgba.write_to(&mut png, image::ImageFormat::Png).map_err(|e| e.to_string())?;
-                crate::platform::fs::write(&path, png.into_inner()).map_err(|e| e.to_string())
+                fs::write(&path, png.into_inner()).map_err(|e| e.to_string())
             })
         };
         let name = path.file_name().map_or(String::new(), |n| n.to_string_lossy().into_owned());

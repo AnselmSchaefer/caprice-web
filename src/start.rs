@@ -20,6 +20,7 @@ use crate::fileio::DocFile;
 use crate::fonts::{FontBook, family_for};
 use crate::model::{Align, Band, BandLook, CHAPTER_FIELD, Doc, Flow, PAGE_FIELD, PageSetup, ParaAttrs, ParaKind, Style};
 use crate::theme::{self, INK, PAPER, pal};
+use crate::platform::fs;
 
 /// How many stories the list remembers.
 const REMEMBER: usize = 8;
@@ -328,9 +329,9 @@ impl Sheet {
 
 /// Read what the welcome page tells about a story from its file.
 fn read_story(l: &Lately) -> Option<Story> {
-    let json = crate::platform::fs::read_to_string(&l.path).ok()?;
+    let json = fs::read_to_string(&l.path).ok()?;
     let doc: Doc = serde_json::from_str::<DocFile>(&json).ok()?.into_doc();
-    let changed = crate::platform::fs::modified(&l.path);
+    let changed = fs::modified(&l.path);
     let paras = paragraphs(&doc);
     let excerpt = first_body(&paras).map_or(String::new(), |(t, _)| t.split_whitespace().take(60).collect::<Vec<_>>().join(" "));
     let seed = l.path.to_string_lossy().bytes().fold(7u64, |h, b| h.wrapping_mul(31).wrapping_add(b.into()));
@@ -379,14 +380,14 @@ impl Start {
 
     /// The list kept in `file`.
     pub fn kept_in(file: Option<PathBuf>) -> Self {
-        let recent = file.as_ref().and_then(|f| crate::platform::fs::read_to_string(f).ok()).and_then(|j| serde_json::from_str(&j).ok());
+        let recent = file.as_ref().and_then(|f| fs::read_to_string(f).ok()).and_then(|j| serde_json::from_str(&j).ok());
         Self { open: false, file, recent: recent.unwrap_or_default(), stories: None, flight: None, shown_at: None }
     }
 
     /// A story was opened or saved, at `now`: it goes to the top of the list.
     pub fn remember(&mut self, path: &Path, now: u64) {
         // The full path, so a story opened from the command line is the same as from the dialog.
-        let path = crate::platform::fs::canonicalize(path);
+        let path = fs::canonicalize(path);
         // Autosave saves often: saving the story already on top changes nothing.
         if self.recent.first().is_some_and(|l| l.path == path) {
             return;
@@ -395,8 +396,8 @@ impl Start {
         self.recent.insert(0, Lately { path, opened: now });
         self.recent.truncate(REMEMBER);
         if let (Some(file), Ok(json)) = (&self.file, serde_json::to_string(&self.recent)) {
-            let _ = file.parent().map(crate::platform::fs::create_dir_all);
-            let _ = crate::platform::fs::write(file, json);
+            let _ = file.parent().map(fs::create_dir_all);
+            let _ = fs::write(file, json);
         }
     }
 
