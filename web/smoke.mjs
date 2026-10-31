@@ -198,6 +198,23 @@ await page.evaluate(() => {
 await page.waitForTimeout(6000);
 console.log("leaving asks, once saved:", await leavingAsks());
 
+// Typing beyond ASCII, through an input method too (a composition, then what it settles on),
+// and copying to the computer's clipboard.
+await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(url).origin });
+await click(640, 500);
+await page.keyboard.press("Control+End");
+await page.keyboard.type(" Café, naïve, Größe, «Ελληνικά» ", { delay: 15 });
+const cdp = await page.context().newCDPSession(page);
+await cdp.send("Input.imeSetComposition", { text: "ni", selectionStart: 2, selectionEnd: 2 });
+await cdp.send("Input.insertText", { text: "你好" });
+await page.waitForTimeout(500);
+await page.keyboard.press("Control+a");
+await page.keyboard.press("Control+c");
+await page.waitForTimeout(500);
+const copied = await page.evaluate(() => navigator.clipboard.readText());
+console.log("typed and copied:", copied.endsWith("Café, naïve, Größe, «Ελληνικά» 你好"));
+await page.waitForTimeout(6000);
+
 // Opened again, the welcome lists the stories last opened or saved.
 await page.reload();
 await page.waitForTimeout(4000);
