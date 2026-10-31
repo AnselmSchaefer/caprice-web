@@ -1,0 +1,8 @@
+{
+  "name": "caprice-web-checks",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "playwright-core": "1.64.1"
+  }
+}

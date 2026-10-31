@@ -1,0 +1,6 @@
+# These compile for the browser and panic there when run: use `platform.rs` (ARCHITECTURE.md R31).
+disallowed-methods = [
+    { path = "std::thread::spawn", reason = "panics in the browser: use platform::spawn" },
+    { path = "std::time::SystemTime::now", reason = "panics in the browser: use platform::since_epoch" },
+    { path = "std::process::id", reason = "panics in the browser: use platform::run_id" },
+]

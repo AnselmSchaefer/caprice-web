@@ -10,7 +10,6 @@
 use std::collections::BTreeSet;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use eframe::egui::{self, Id, pos2, vec2};
 use serde::{Deserialize, Serialize};
@@ -42,8 +41,8 @@ pub fn default_dir() -> Option<PathBuf> {
 /// A new story's id: unlikely ever to be another's.
 pub fn new_id() -> String {
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos().hash(&mut h);
-    std::process::id().hash(&mut h);
+    crate::platform::since_epoch().as_nanos().hash(&mut h);
+    crate::platform::run_id().hash(&mut h);
     format!("{:016x}", h.finish())
 }
 
@@ -109,7 +108,7 @@ impl Keeper {
     }
 
     pub fn now(&self) -> u64 {
-        self.clock.unwrap_or_else(|| SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs()))
+        self.clock.unwrap_or_else(|| crate::platform::since_epoch().as_secs())
     }
 
     /// Another story is shown: its newest version is what it holds, unless it has changed since.

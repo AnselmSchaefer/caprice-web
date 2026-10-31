@@ -196,10 +196,10 @@ impl Print {
 
     fn ask_printers(&mut self, ctx: &egui::Context) {
         let (tx, rx) = channel();
-        let (spooler, ctx) = (self.spooler.clone(), ctx.clone());
-        std::thread::spawn(move || {
+        let (spooler, wake) = (self.spooler.clone(), crate::platform::Waker::new(ctx));
+        crate::platform::spawn(move || {
             let _ = tx.send(spooler.printers());
-            ctx.request_repaint();
+            wake.wake();
         });
         self.asking = Some(rx);
     }
@@ -367,7 +367,7 @@ impl App {
         let Some(printer) = self.print.to.clone() else {
             let name = format!("{}.pdf", self.print_title());
             self.ask_path(ctx, DialogFor::PrintPdf, move || {
-                rfd::FileDialog::new().add_filter("PDF", &["pdf"]).set_file_name(name).save_file()
+                crate::platform::FileDialog::new().add_filter("PDF", &["pdf"]).set_file_name(name).save_file()
             });
             return;
         };
@@ -387,18 +387,18 @@ impl App {
             media: media_name(self.doc.setup.size()),
         };
         // lp reads the file before it answers, so it can go as soon as lp is done with it.
-        let file = std::env::temp_dir().join(format!("caprice-print-{}-{}.pdf", std::process::id(), self.doc.version));
+        let file = std::env::temp_dir().join(format!("caprice-print-{}-{}.pdf", crate::platform::run_id(), self.doc.version));
         if let Err(e) = std::fs::write(&file, pdf) {
             self.status = format!("- printing failed: {e}");
             return;
         }
         let (tx, rx) = channel();
-        let (spooler, ctx) = (self.print.spooler.clone(), ctx.clone());
-        std::thread::spawn(move || {
+        let (spooler, wake) = (self.print.spooler.clone(), crate::platform::Waker::new(ctx));
+        crate::platform::spawn(move || {
             let said = spooler.print(&job, &file).map(|_| format!("- sent to {}", shown_name(&job.printer)));
             let _ = std::fs::remove_file(&file);
             let _ = tx.send(said);
-            ctx.request_repaint();
+            wake.wake();
         });
         self.print.sending = Some(rx);
         self.status = "- printing…".into();

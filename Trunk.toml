@@ -1,0 +1,11 @@
+[build]
+target = "web/index.html"
+dist = "web/dist"
+
+[tools]
+# Installed with `cargo install wasm-bindgen-cli --version 0.2.130`: Trunk cannot download it here.
+wasm_bindgen = "0.2.130"
+
+[serve]
+# Without these two the page gets no shared memory, and the workers cannot start.
+headers = { "Cross-Origin-Opener-Policy" = "same-origin", "Cross-Origin-Embedder-Policy" = "require-corp" }

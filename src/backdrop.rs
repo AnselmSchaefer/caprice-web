@@ -385,11 +385,11 @@ impl Backdrop {
         if have.contains_key(&key) || !self.rendering.insert((key, thumb)) {
             return;
         }
-        let (tx, ctx, svg) = (self.rendered.0.clone(), ctx.clone(), svg.to_owned());
-        std::thread::spawn(move || {
+        let (tx, wake, svg) = (self.rendered.0.clone(), crate::platform::Waker::new(ctx), svg.to_owned());
+        crate::platform::spawn(move || {
             let image = rasterize(&svg, if thumb { THUMB_WIDTH } else { RENDER_WIDTH });
             let _ = tx.send(Rendered { key, thumb, image });
-            ctx.request_repaint();
+            wake.wake();
         });
     }
 }
@@ -433,12 +433,12 @@ impl App {
             job.people = people;
         }
         self.backdrop.asked = prompt.clone();
-        let ctx = ctx.clone();
-        std::thread::spawn(move || {
+        let wake = crate::platform::Waker::new(ctx);
+        crate::platform::spawn(move || {
             if let Some(result) = draw_scene(&prompt, &cancel).transpose() {
                 let _ = tx.send(result);
             }
-            ctx.request_repaint();
+            wake.wake();
         });
     }
 
@@ -638,7 +638,7 @@ impl App {
         let (tx, rx) = channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let (ask, n, stop) = (prompt.clone(), sentences.len(), cancel.clone());
-        std::thread::spawn(move || {
+        crate::platform::spawn(move || {
             let _ = tx.send(read_sentences(&ask, n, &stop));
         });
         if let Some(o) = &mut self.backdrop.open {
@@ -859,10 +859,13 @@ impl App {
         let tip = "Pictures Claude paints faintly behind the pages, each for its part of the story";
         egui::containers::menu::MenuButton::new(title).ui(ui, |ui| {
             ui.set_min_width(230.0);
-            let mut follow = mode == Mode::Writing;
-            let follow_tip = "As you write, Claude groups your sentences into scenes and paints each once the next begins";
-            if ui.checkbox(&mut follow, "Follow my writing").on_hover_text(follow_tip).changed() {
-                mode = if follow { Mode::Writing } else { Mode::Described };
+            // Not in the browser, for now: there it is the only way into following the writing.
+            if cfg!(not(target_arch = "wasm32")) {
+                let mut follow = mode == Mode::Writing;
+                let follow_tip = "As you write, Claude groups your sentences into scenes and paints each once the next begins";
+                if ui.checkbox(&mut follow, "Follow my writing").on_hover_text(follow_tip).changed() {
+                    mode = if follow { Mode::Writing } else { Mode::Described };
+                }
             }
             if ui.add(egui::Button::new("Describe the scene\u{2026}").frame(false)).clicked() {
                 describe = true;
@@ -919,7 +922,7 @@ impl App {
         }
         let stem = self.path.as_ref().and_then(|p| p.file_stem()).map_or("Scene".to_owned(), |s| format!("{} scene", s.to_string_lossy()));
         self.ask_path(ctx, crate::fileio::DialogFor::ScenePicture, move || {
-            rfd::FileDialog::new()
+            crate::platform::FileDialog::new()
                 .add_filter("PNG picture", &["png"])
                 .add_filter("SVG drawing", &["svg"])
                 .set_file_name(format!("{stem}.png"))

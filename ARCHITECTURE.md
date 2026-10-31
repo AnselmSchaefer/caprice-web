@@ -4,7 +4,7 @@ How Caprice is put together, and the rules that hold it together. The rules (§4
 read before changing anything: each says what depends on what, what to check when touching it, and
 which tests guard it. Keep this file true: a change that alters a rule updates it in the same commit.
 
-*Last brought up to date: 2026-10-23 (themes for the desk and docks).*
+*Last brought up to date: 2026-10-31 (Caprice Web: `platform.rs`, the browser build, R31).*
 
 ---
 
@@ -95,6 +95,7 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `fonts.rs` | Installed fonts loaded on demand, a missing one drawn with a twin of the same widths |
 | `theme.rs` | The themes (`Theme`, `Palette`): colours and egui visuals around the page, the palette in use (`pal`), fading from one to the next, the choice kept in the data folder; the page's own `PAPER` and `INK` |
 | `eggs.rs` | What is hidden in the magic themes: in the Magic Garden a plant a chapter growing on the desk and a balloon flying in each new chapter title; in the Magic City a street of houses a chapter, a floor a page, and a dragon flying a new title in held in its feet; in the Magic Sea a ship a chapter, built in a yard a part a page and launched into the bay when the next chapter begins |
+| `platform.rs` | What the desktop and the browser do differently: background work (`spawn`, `Waker`, `keep_awake`), the time, the run's id, file dialogs (R31) |
 
 ---
 
@@ -1175,9 +1176,43 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   `going_on_writing_while_a_title_is_brought_sets_it_down_at_once`,
   `print_shows_neither_the_garden_the_houses_the_ships_nor_what_brings_a_title`.
 
+### R31 — The desktop and the browser differ only in `platform.rs`
+
+Caprice Web builds for the browser (`wasm32-unknown-unknown`, with threads) and natively, where
+the tests run. Much of `std` compiles for the browser and panics or fails there only when run:
+threads, the system clock, the process id, files, programs. So nothing outside `platform.rs` calls
+them; it asks `platform` instead, whose desktop half does what Caprice always did.
+
+- **Background work** goes to `platform::spawn`: a thread on the desktop, a Web Worker sharing the
+  app's memory in the browser. The work gets owned data and answers on a channel, which the frame
+  reads with `try_recv`. It shares no lock with the main thread: in Chromium a page's main thread
+  that waits on a lock is stopped dead ("Atomics.wait cannot be called in this context").
+- **It asks for a frame with a `platform::Waker`**, never egui's `Context`: with threads on, egui
+  makes `Context` impossible to send to a worker at all. On the desktop `wake` asks egui for a
+  repaint, as before; in the browser it leaves word, and `platform::keep_awake` (each frame, in
+  `App::frame`) asks for a frame at once when there is word, and every 50 ms while any work runs.
+- **The time now** is `platform::since_epoch`, a run's id `platform::run_id`. Times read from
+  files' metadata stay `std`: there are no files in the browser to ask.
+- **File dialogs** are `platform::FileDialog`: `rfd`'s on the desktop; in the browser, for now, one
+  that chooses nothing (as if cancelled), until the browser's own ways come in (`WEB_PLAN.md`).
+- **"Follow my writing" is not offered in the browser** (the Scene menu hides its checkbox), for
+  now. It is the only way into `Mode::Writing`, which is never saved.
+
+When touching it: anything new in the background takes a `Waker`, not a `Context`, and moves no
+lock or `App` state into the work. Anything new that needs the system goes through `platform`.
+
+Tests: `clippy.toml` disallows `std::thread::spawn`, `SystemTime::now` and `std::process::id`
+outside `platform.rs` (the tests' module is let off: it runs only natively). The browser build is
+checked by `web/build.sh`, and running it by `web/smoke.mjs` (headless Chromium: the welcome, a
+blank story, typing; it reports any error on the page). The native tests cover the desktop half.
+
 ---
 
 ## 5. Checklists for common changes
+
+**Something new in the background** (a rendering, a request): `platform::spawn` with owned data in,
+a channel out, a `platform::Waker` to ask for a frame; nothing behind a lock shared with the frame
+(R31). Then check it in the browser: `web/build.sh`, `web/smoke.mjs`.
 
 **A new paragraph attribute** (like line spacing or chapter title): `ParaAttrs` → `run_format` /
 `paragraph_job` → the toolbar (`ui.rs`) → file format default (R9) → Word mapping (R10) → whether
@@ -1378,5 +1413,11 @@ when the writer goes on; nothing moved in the layout, nothing in print or the fi
   per chapter, like the city's floors, so nothing new is saved (R9, R30); a ship has a fixed number
   of parts, so a long chapter's ship is simply whole. Finished ships stay in the bay for good,
   whatever happens to their chapters, as plants and floors do.
+- **2026-10-31 — Caprice Web is a copy, not a mode of the desktop app.** The browser version was
+  asked for with the desktop Caprice left unchanged, so it is an independent copy of it (at
+  `5c87d3d`) that builds both ways, rather than code shared with the desktop app. Its background
+  work runs in Web Workers (`wasm_thread`): tried first in a spike, which found egui's `Context`
+  cannot go to a worker and a lock the main thread waits on crashes Chromium (R31). Chromium is
+  the target, Firefox nice to have, Safari not supported. "Follow my writing" is left out for now.
 - **No `.docx` import.** Export only.
 - **Contents heading is "Contents"** (English), in the app and in Word.

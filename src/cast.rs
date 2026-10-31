@@ -290,10 +290,10 @@ impl CastPanel {
         if self.sheets.contains_key(&key) || !self.rendering.insert(key) {
             return;
         }
-        let (tx, ctx, svg) = (self.rendered.0.clone(), ctx.clone(), svg.to_owned());
-        std::thread::spawn(move || {
+        let (tx, wake, svg) = (self.rendered.0.clone(), crate::platform::Waker::new(ctx), svg.to_owned());
+        crate::platform::spawn(move || {
             let _ = tx.send((key, rasterize(&svg, SHEET_WIDTH)));
-            ctx.request_repaint();
+            wake.wake();
         });
     }
 
@@ -319,12 +319,12 @@ impl App {
         let prompt = if peek { crate::peek::puppet_prompt(c, l) } else { sheet_prompt(c, l) };
         let (tx, cancel) = self.sheet_job(id, look, peek);
         self.cast_panel.asked = prompt.clone();
-        let ctx = ctx.clone();
-        std::thread::spawn(move || {
+        let wake = crate::platform::Waker::new(ctx);
+        crate::platform::spawn(move || {
             if let Some(result) = draw_sheet(&prompt, peek, &cancel).transpose() {
                 let _ = tx.send(result);
             }
-            ctx.request_repaint();
+            wake.wake();
         });
     }
 

@@ -6,3 +6,5 @@ FORK_REQUIREMENTS.md
 CHAPTERS_PLAN.md
 WEB_PLAN.md
 mutants.out*/
+/web/dist
+/web/node_modules

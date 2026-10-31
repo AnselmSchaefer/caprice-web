@@ -21,6 +21,7 @@ mod notes;
 mod numbers;
 mod paginate;
 mod peek;
+mod platform;
 mod print;
 mod render;
 mod review;
@@ -45,6 +46,7 @@ use search::Search;
 use theme::apply_theme;
 
 /// The app icon, for window managers that take it from the window (the launcher uses the installed files).
+#[cfg(not(target_arch = "wasm32"))]
 fn window_icon() -> egui::IconData {
     let bytes = include_bytes!("../assets/icon-256.png");
     match image::load_from_memory(bytes) {
@@ -56,6 +58,15 @@ fn window_icon() -> egui::IconData {
     }
 }
 
+/// The app as it starts, on the desktop and in the browser alike.
+fn start_app(cc: &eframe::CreationContext) -> App {
+    apply_theme(&cc.egui_ctx);
+    // We handle zoom ourselves so the docks keep their size.
+    cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
+    App::new(&cc.egui_ctx)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -71,10 +82,7 @@ fn main() -> eframe::Result {
         "Caprice",
         options,
         Box::new(|cc| {
-            apply_theme(&cc.egui_ctx);
-            // We handle zoom ourselves so the docks keep their size.
-            cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
-            let mut app = App::new(&cc.egui_ctx);
+            let mut app = start_app(cc);
             // `caprice some.caprice` opens that document (once the first frame has fonts to lay it out).
             app.startup_file = std::env::args_os().nth(1).map(Into::into);
             // Without one, it welcomes the writer and asks what to write in (`start.rs`).
@@ -82,6 +90,33 @@ fn main() -> eframe::Result {
             Ok(Box::new(app))
         }),
     )
+}
+
+/// In the browser the app draws on the page's canvas, and always begins with the welcome.
+#[cfg(target_arch = "wasm32")]
+fn main() {
+    use wasm_bindgen::JsCast;
+    let canvas = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.get_element_by_id("caprice"))
+        .and_then(|c| c.dyn_into::<web_sys::HtmlCanvasElement>().ok())
+        .expect("the page has a canvas with the id caprice");
+    wasm_bindgen_futures::spawn_local(async {
+        let started = eframe::WebRunner::new()
+            .start(
+                canvas,
+                eframe::WebOptions::default(),
+                Box::new(|cc| {
+                    let mut app = start_app(cc);
+                    app.start.open = true;
+                    Ok(Box::new(app))
+                }),
+            )
+            .await;
+        if let Err(e) = started {
+            web_sys::console::error_1(&e);
+        }
+    });
 }
 
 /// How the pages look and move as you go through them.
@@ -310,7 +345,7 @@ impl App {
             saved_at: None,
             leave_about: None,
             words: words::Words::new(),
-            created: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()),
+            created: platform::since_epoch().as_secs(),
             saved_hash: 0,
             leaving: None,
             after_save: None,
@@ -521,6 +556,7 @@ impl App {
         let ctx = ui.ctx().clone();
         let area = ui.max_rect();
         self.eggs.desk = area;
+        platform::keep_awake(&ctx);
         self.themes.show(&ctx);
         theme::paint_desk(ui.painter(), area);
 
@@ -693,6 +729,8 @@ impl App {
 }
 
 #[cfg(test)]
+// Tests run only on the desktop, where these are what `platform` uses anyway.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 

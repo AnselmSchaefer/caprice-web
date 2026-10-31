@@ -241,21 +241,21 @@ fn ends(passage: &str) -> (String, String) {
 fn start(ctx: &egui::Context, prompt: String) -> (Receiver<Msg>, Arc<AtomicBool>) {
     let (tx, rx) = channel();
     let cancel = Arc::new(AtomicBool::new(false));
-    let (ctx, stop) = (ctx.clone(), cancel.clone());
-    std::thread::spawn(move || {
-        if let Err(e) = ask(&prompt, &tx, &ctx, &stop) {
+    let (wake, stop) = (crate::platform::Waker::new(ctx), cancel.clone());
+    crate::platform::spawn(move || {
+        if let Err(e) = ask(&prompt, &tx, &wake, &stop) {
             let _ = tx.send(Msg::Failed(e));
         }
-        ctx.request_repaint();
+        wake.wake();
     });
     (rx, cancel)
 }
 
 /// Stream Claude's answer to `prompt` into `tx`, until done or `cancel` is set.
-fn ask(prompt: &str, tx: &Sender<Msg>, ctx: &egui::Context, cancel: &AtomicBool) -> Result<(), String> {
+fn ask(prompt: &str, tx: &Sender<Msg>, wake: &crate::platform::Waker, cancel: &AtomicBool) -> Result<(), String> {
     let mut on_text = |t: &str| {
         let _ = tx.send(Msg::Text(t.to_owned()));
-        ctx.request_repaint();
+        wake.wake();
     };
     match run_claude(MODEL, SYSTEM, prompt, "medium", cancel, &mut on_text)? {
         Outcome::Finished => {
@@ -280,8 +280,8 @@ impl Pending {
     pub fn start(ctx: &egui::Context, system: &'static str, prompt: String, effort: &'static str) -> Self {
         let (tx, rx) = channel();
         let cancel = Arc::new(AtomicBool::new(false));
-        let (ctx, stop) = (ctx.clone(), cancel.clone());
-        std::thread::spawn(move || {
+        let (wake, stop) = (crate::platform::Waker::new(ctx), cancel.clone());
+        crate::platform::spawn(move || {
             let mut reply = String::new();
             let result = match run_claude(MODEL, system, &prompt, effort, &stop, &mut |t| reply.push_str(t)) {
                 Ok(Outcome::Finished) => Ok(reply),
@@ -290,7 +290,7 @@ impl Pending {
                 Err(e) => Err(e),
             };
             let _ = tx.send(result);
-            ctx.request_repaint();
+            wake.wake();
         });
         Pending { rx, cancel }
     }
@@ -962,7 +962,7 @@ mod tests {
         let (tx, rx) = channel();
         let ctx = egui::Context::default();
         let prompt = format!("<passage>\nTheir is a dog in the gardn.\n</passage>\n\n{}", Command::Grammar.instruction());
-        ask(&prompt, &tx, &ctx, &AtomicBool::new(false)).unwrap();
+        ask(&prompt, &tx, &crate::platform::Waker::new(&ctx), &AtomicBool::new(false)).unwrap();
         let text: String = rx.try_iter().filter_map(|m| if let Msg::Text(t) = m { Some(t) } else { None }).collect();
         println!("answer: {text}");
         assert!(text.contains("There") && text.contains("garden"));
@@ -985,7 +985,7 @@ mod tests {
         let note = Command::Bridge(note.into());
         let said = |prompt: &str| {
             let (tx, rx) = channel();
-            ask(prompt, &tx, &ctx, &AtomicBool::new(false)).unwrap();
+            ask(prompt, &tx, &crate::platform::Waker::new(&ctx), &AtomicBool::new(false)).unwrap();
             rx.try_iter().filter_map(|m| if let Msg::Text(t) = m { Some(t) } else { None }).collect::<String>()
         };
         let mut answer = app.new_answer(0, end, note, Pos2::ZERO);

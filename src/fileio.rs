@@ -449,7 +449,7 @@ impl App {
                     None => format!("{}.caprice", self.suggested_name()),
                 };
                 self.ask_path(ctx, DialogFor::Save, move || {
-                    rfd::FileDialog::new().add_filter("Caprice document", &["caprice"]).set_file_name(name).save_file()
+                    crate::platform::FileDialog::new().add_filter("Caprice document", &["caprice"]).set_file_name(name).save_file()
                 });
             }
         }
@@ -479,7 +479,7 @@ impl App {
             .and_then(|p| p.file_stem())
             .map_or("Untitled".to_owned(), |s| s.to_string_lossy().into_owned());
         self.ask_path(ctx, DialogFor::ExportDocx, move || {
-            rfd::FileDialog::new()
+            crate::platform::FileDialog::new()
                 .add_filter("Word document", &["docx"])
                 .set_file_name(format!("{stem}.docx"))
                 .save_file()
@@ -506,7 +506,7 @@ impl App {
 
     fn choose_file_to_open(&mut self, ctx: &egui::Context) {
         self.ask_path(ctx, DialogFor::Open, || {
-            rfd::FileDialog::new().add_filter("Caprice document", &["caprice"]).pick_file()
+            crate::platform::FileDialog::new().add_filter("Caprice document", &["caprice"]).pick_file()
         });
     }
 
@@ -517,10 +517,10 @@ impl App {
             return;
         }
         let (tx, rx) = channel();
-        let ctx = ctx.clone();
-        std::thread::spawn(move || {
+        let wake = crate::platform::Waker::new(ctx);
+        crate::platform::spawn(move || {
             let _ = tx.send(show());
-            ctx.request_repaint();
+            wake.wake();
         });
         self.dialog = Some(PendingDialog { purpose, rx });
     }

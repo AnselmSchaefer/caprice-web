@@ -687,9 +687,7 @@ fn styles_xml(default: &Style, tab: i32) -> String {
 
 /// Current UTC time as `2026-10-02T17:00:00Z` (days-to-date after Howard Hinnant's algorithm).
 fn timestamp_now() -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() as i64);
+    let secs = crate::platform::since_epoch().as_secs() as i64;
     iso8601(secs)
 }
 

@@ -11,6 +11,10 @@ behaviour**: its rules (§4) say what depends on what, and which tests guard eac
 ## Commands
 
 - `cargo build`, `cargo test` (headless, about 13 s), `cargo clippy --all-targets`
+- Browser: `web/build.sh` (nightly, std built with atomics; into `web/dist`), then
+  `node web/serve.mjs 8080` (it sends the two headers workers need) and open http://localhost:8080/.
+  `node web/smoke.mjs <dir>` with the server running: headless Chromium, screenshots, page errors.
+  `cd web && npm install` once for it. Trunk and `wasm-bindgen-cli` 0.2.130 come from `cargo install`.
 - `cargo mutants` for untested code. `/tmp` is a small tmpfs here: set `TMPDIR` to a dir on disk.
 - Word output check: `CAPRICE_SAMPLE_OUT=out.docx cargo test sample_docx`, then
   `soffice --headless --convert-to pdf out.docx`
@@ -19,6 +23,7 @@ behaviour**: its rules (§4) say what depends on what, and which tests guard eac
 ## Done means
 
 - `cargo test` passes, and clippy has no warnings beyond the ones already there (15 today).
+- `web/build.sh` builds, and `web/smoke.mjs` shows no errors on the page.
 - Behaviour you can see in the app has an app-level test (`Harness` in `main.rs`). A bug fix has a
   test that fails without the fix: check that it does.
 - If a change alters a rule in `ARCHITECTURE.md`, or adds one, update the file in the same commit.
@@ -87,6 +92,10 @@ Full list with reasons and tests in `ARCHITECTURE.md` §4.
 13. **Colours around the page come from `theme::pal()`**, never literals; the page itself (`PAPER`, `INK`)
     is the same in every theme.
     Pictures (the emblem, the garden, houses, ships and sea, balloon and dragon) keep their own colours.
+
+14. **The desktop and the browser differ only in `platform.rs`.** Background work is
+    `platform::spawn` with a `platform::Waker`, never a `Context` or a lock shared with the frame;
+    the time is `platform::since_epoch`. `clippy.toml` flags the `std` calls that panic in the browser.
 
 ## Files
 

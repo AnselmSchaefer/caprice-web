@@ -195,7 +195,7 @@ pub struct Peeks {
 
 impl Default for Peeks {
     fn default() -> Self {
-        let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(7, |d| d.as_nanos() as u64);
+        let seed = crate::platform::since_epoch().as_nanos() as u64;
         Self {
             next_at: None,
             busy_at: f64::NEG_INFINITY,
@@ -261,10 +261,10 @@ impl App {
         for svg in wanted {
             let key = hash_of(svg);
             if !self.peeks.puppets.contains_key(&key) && self.peeks.cutting.insert(key) {
-                let (tx, ctx, svg) = (self.peeks.cut.0.clone(), ctx.clone(), (*svg).to_owned());
-                std::thread::spawn(move || {
+                let (tx, wake, svg) = (self.peeks.cut.0.clone(), crate::platform::Waker::new(ctx), (*svg).to_owned());
+                crate::platform::spawn(move || {
                     let _ = tx.send((key, cut(&svg)));
-                    ctx.request_repaint();
+                    wake.wake();
                 });
             }
         }

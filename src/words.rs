@@ -130,7 +130,7 @@ impl Words {
     }
 
     pub fn day(&self) -> i64 {
-        let now = self.clock.unwrap_or_else(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()));
+        let now = self.clock.unwrap_or_else(|| crate::platform::since_epoch().as_secs());
         today(now)
     }
 

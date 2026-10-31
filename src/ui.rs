@@ -15,6 +15,7 @@ pub const DOCK_GAP: f32 = 14.0;
 pub const RESERVED: f32 = DOCK_GAP + DOCK_H + 10.0;
 /// The smallest the window gets: the docks then still hold File, "⋯" and a little of the name on
 /// top, and Scratchpad, Fit, the zoom and "+" below.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub const MIN_WINDOW: [f32; 2] = [340.0, 400.0];
 /// Widest the docks get.
 pub const DOCK_MAX_W: f32 = 1180.0;
@@ -794,7 +795,7 @@ impl App {
         match out.insert {
             Some(InsertAction::Picture) => {
                 self.ask_path(ctx, crate::fileio::DialogFor::Picture, || {
-                    rfd::FileDialog::new().add_filter("Pictures", &["png", "jpg", "jpeg"]).pick_file()
+                    crate::platform::FileDialog::new().add_filter("Pictures", &["png", "jpg", "jpeg"]).pick_file()
                 });
             }
             Some(InsertAction::TextBox(look)) => self.insert_text_box(ctx, look),

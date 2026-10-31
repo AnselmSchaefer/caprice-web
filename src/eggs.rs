@@ -247,7 +247,7 @@ pub struct Lift {
 
 impl Default for Eggs {
     fn default() -> Self {
-        let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(7, |d| d.as_nanos() as u64);
+        let seed = crate::platform::since_epoch().as_nanos() as u64;
         Self { grown_for: None, grown: Vec::new(), grown_at: 0.0, measured: None, lift: None, place: None, desk: Rect::NOTHING, odds: None, from_right: false, rng: seed | 1, plants: Vec::new(),
             built_for: None, built: 0.0, built_at: 0.0, houses: Vec::new(), light: None, sailed_for: None, rigged: 0.0, rigged_at: 0.0,
             launch: None, ships: Vec::new() }
