@@ -388,7 +388,7 @@ impl App {
         };
         // lp reads the file before it answers, so it can go as soon as lp is done with it.
         let file = std::env::temp_dir().join(format!("caprice-print-{}-{}.pdf", crate::platform::run_id(), self.doc.version));
-        if let Err(e) = std::fs::write(&file, pdf) {
+        if let Err(e) = crate::platform::fs::write(&file, pdf) {
             self.status = format!("- printing failed: {e}");
             return;
         }
@@ -396,7 +396,7 @@ impl App {
         let (spooler, wake) = (self.print.spooler.clone(), crate::platform::Waker::new(ctx));
         crate::platform::spawn(move || {
             let said = spooler.print(&job, &file).map(|_| format!("- sent to {}", shown_name(&job.printer)));
-            let _ = std::fs::remove_file(&file);
+            let _ = crate::platform::fs::remove_file(&file);
             let _ = tx.send(said);
             wake.wake();
         });
@@ -418,7 +418,7 @@ impl App {
     /// Save the chosen pages as a PDF at `path`.
     pub(crate) fn print_pdf_to(&mut self, ctx: &egui::Context, path: PathBuf) {
         let pages = self.print.pages(self.target, self.doc.pages());
-        let written = self.pdf(ctx, pages).and_then(|b| std::fs::write(&path, b).map_err(|e| e.to_string()));
+        let written = self.pdf(ctx, pages).and_then(|b| crate::platform::fs::write(&path, b).map_err(|e| e.to_string()));
         self.status = match written {
             Ok(()) => format!("- saved {}", path.file_name().map_or(String::new(), |n| n.to_string_lossy().into_owned())),
             Err(e) => format!("- PDF failed: {e}"),

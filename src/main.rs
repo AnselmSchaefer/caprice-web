@@ -92,7 +92,8 @@ fn main() -> eframe::Result {
     )
 }
 
-/// In the browser the app draws on the page's canvas, and always begins with the welcome.
+/// In the browser the app reads its files, then draws on the page's canvas, and always begins with
+/// the welcome.
 #[cfg(target_arch = "wasm32")]
 fn main() {
     use wasm_bindgen::JsCast;
@@ -102,6 +103,10 @@ fn main() {
         .and_then(|c| c.dyn_into::<web_sys::HtmlCanvasElement>().ok())
         .expect("the page has a canvas with the id caprice");
     wasm_bindgen_futures::spawn_local(async {
+        // The browser's files first (versions, theme, stories), so the app never waits for one.
+        if let Err(e) = platform::fs::load().await {
+            web_sys::console::error_1(&format!("Caprice could not read its files: {e}").into());
+        }
         let started = eframe::WebRunner::new()
             .start(
                 canvas,

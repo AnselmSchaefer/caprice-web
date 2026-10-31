@@ -934,7 +934,7 @@ impl App {
         let Some(svg) = self.scene_here().and_then(|s| s.svg()).map(str::to_owned) else { return };
         let is_svg = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("svg"));
         let written = if is_svg {
-            std::fs::write(&path, svg.as_bytes()).map_err(|e| e.to_string())
+            crate::platform::fs::write(&path, svg.as_bytes()).map_err(|e| e.to_string())
         } else {
             rasterize(&svg, RENDER_WIDTH).and_then(|image| {
                 let rgba: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();

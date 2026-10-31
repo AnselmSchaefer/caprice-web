@@ -457,7 +457,7 @@ impl App {
 
     pub fn save_to(&mut self, path: PathBuf) {
         let json = serde_json::to_string_pretty(&self.doc_file());
-        let written = json.map_err(|e| e.to_string()).and_then(|j| std::fs::write(&path, j).map_err(|e| e.to_string()));
+        let written = json.map_err(|e| e.to_string()).and_then(|j| crate::platform::fs::write(&path, j).map_err(|e| e.to_string()));
         self.status = match written {
             Ok(()) => {
                 self.start.remember(&path, self.keep.now());
@@ -487,7 +487,7 @@ impl App {
     }
 
     pub(crate) fn export_docx_to(&mut self, path: PathBuf) {
-        let written = crate::export::to_docx(&self.doc).and_then(|b| std::fs::write(&path, b).map_err(|e| e.to_string()));
+        let written = crate::export::to_docx(&self.doc).and_then(|b| crate::platform::fs::write(&path, b).map_err(|e| e.to_string()));
         self.status = match written {
             Ok(()) => format!("- exported {}", path.file_name().map_or(String::new(), |n| n.to_string_lossy().into_owned())),
             Err(e) => format!("- export failed: {e}"),
@@ -584,16 +584,14 @@ impl App {
     }
 
     pub fn open_path(&mut self, ctx: &egui::Context, path: std::path::PathBuf) {
-        let loaded = std::fs::read_to_string(&path)
+        let loaded = crate::platform::fs::read_to_string(&path)
             .map_err(|e| e.to_string())
             .and_then(|s| serde_json::from_str::<DocFile>(&s).map_err(|e| e.to_string()));
         match loaded {
             Ok(file) => {
                 self.story_id = if file.id.is_empty() { crate::versions::new_id() } else { file.id.clone() };
                 // Older files say nothing: the file's own date is the best guess (written with the next save).
-                let meta = std::fs::metadata(&path).ok();
-                let made = meta.and_then(|m| m.created().or_else(|_| m.modified()).ok());
-                let made = made.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
+                let made = crate::platform::fs::made(&path).unwrap_or(0);
                 self.created = if file.created > 0 { file.created } else { made };
                 self.adopt(ctx, file);
                 self.start.remember(&path, self.keep.now());

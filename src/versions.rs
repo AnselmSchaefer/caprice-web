@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::App;
 use crate::fileio::DocFile;
+use crate::platform::fs;
 
 /// Changes this old (seconds) are saved, in a story with a file.
 pub const SAVE_AFTER: f64 = 30.0;
@@ -28,14 +29,9 @@ const KEEP_NEWEST: usize = 20;
 const KEEP_DAYS: u64 = 30;
 const DAY: u64 = 86_400;
 
-/// Where the versions go: the app's data folder, as each system has it.
+/// Where the versions go: in the app's data folder.
 pub fn default_dir() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    if cfg!(target_os = "macos") {
-        return home.map(|h| h.join("Library/Application Support/Caprice Web/Versions"));
-    }
-    let data = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).filter(|p| p.is_absolute());
-    data.or_else(|| home.map(|h| h.join(".local/share"))).map(|d| d.join("caprice-web/versions"))
+    crate::platform::data_dir().map(|d| d.join(if cfg!(target_os = "macos") { "Versions" } else { "versions" }))
 }
 
 /// A new story's id: unlikely ever to be another's.
@@ -114,7 +110,7 @@ impl Keeper {
     /// Another story is shown: its newest version is what it holds, unless it has changed since.
     pub fn opened(&mut self, id: &str) {
         let newest = self.dir.as_ref().and_then(|d| versions_in(&d.join(id)).into_iter().next_back());
-        self.kept_hash = newest.and_then(|(_, f)| std::fs::read_to_string(f).ok()).map_or(0, |j| hash_of(&j));
+        self.kept_hash = newest.and_then(|(_, f)| fs::read_to_string(f).ok()).map_or(0, |j| hash_of(&j));
         (self.kept_at, self.changed_since, self.checked_at) = (f64::NEG_INFINITY, None, f64::NEG_INFINITY);
     }
 }
@@ -126,10 +122,10 @@ pub fn times_kept(dir: &Path) -> Vec<u64> {
 
 /// The versions in a story's folder, oldest first: (when, file).
 fn versions_in(dir: &Path) -> Vec<(u64, PathBuf)> {
-    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let Ok(entries) = fs::read_dir(dir) else { return Vec::new() };
     let mut found: Vec<(u64, PathBuf)> = entries
-        .filter_map(|e| {
-            let path = e.ok()?.path();
+        .into_iter()
+        .filter_map(|path| {
             let at = path.file_name()?.to_str()?.strip_suffix(".caprice")?.parse().ok()?;
             Some((at, path))
         })
@@ -259,13 +255,13 @@ impl App {
         let Some(dir) = self.keep.dir.as_ref().map(|d| d.join(&self.story_id)) else { return };
         // Two in one second (going back, then opening the list) must not write over each other.
         let mut now = self.keep.now();
-        while dir.join(format!("{now}.caprice")).exists() {
+        while fs::exists(dir.join(format!("{now}.caprice"))) {
             now += 1;
         }
         let about = About { name: self.story_name(), path: self.path.clone() };
-        let written = std::fs::create_dir_all(&dir)
-            .and_then(|()| std::fs::write(dir.join(format!("{now}.caprice")), json))
-            .and_then(|()| std::fs::write(dir.join("story.json"), serde_json::to_string(&about).unwrap_or_default()));
+        let written = fs::create_dir_all(&dir)
+            .and_then(|()| fs::write(dir.join(format!("{now}.caprice")), json))
+            .and_then(|()| fs::write(dir.join("story.json"), serde_json::to_string(&about).unwrap_or_default()));
         match written {
             Ok(()) => {
                 self.keep.kept_hash = hash_of(json);
@@ -273,7 +269,7 @@ impl App {
                 let times: Vec<u64> = versions.iter().map(|(t, _)| *t).collect();
                 for ((_, file), keep) in versions.iter().zip(kept(&times, now)) {
                     if !keep {
-                        let _ = std::fs::remove_file(file);
+                        let _ = fs::remove_file(file);
                     }
                 }
             }
@@ -291,20 +287,20 @@ impl App {
     fn read_versions(&mut self) {
         let Some(dir) = self.keep.dir.clone() else { return };
         let read = |id: &str, (at, file): (u64, PathBuf)| -> Option<Kept> {
-            let about: About = std::fs::read_to_string(dir.join(id).join("story.json")).ok().and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
-            let story: DocFile = serde_json::from_str(&std::fs::read_to_string(&file).ok()?).ok()?;
+            let about: About = fs::read_to_string(dir.join(id).join("story.json")).ok().and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
+            let story: DocFile = serde_json::from_str(&fs::read_to_string(&file).ok()?).ok()?;
             Some(Kept { file, at, words: story.words(), name: about.name, id: id.to_owned() })
         };
         self.keep.mine = versions_in(&dir.join(&self.story_id)).into_iter().rev().filter_map(|v| read(&self.story_id, v)).collect();
         let mut others = Vec::new();
-        let ids: BTreeSet<String> = std::fs::read_dir(&dir)
+        let ids: BTreeSet<String> = fs::read_dir(&dir)
             .into_iter()
             .flatten()
-            .filter_map(|e| e.ok()?.file_name().into_string().ok())
+            .filter_map(|p| p.file_name()?.to_str().map(str::to_owned))
             .filter(|id| *id != self.story_id)
             .collect();
         for id in ids {
-            let about: Option<About> = std::fs::read_to_string(dir.join(&id).join("story.json")).ok().and_then(|j| serde_json::from_str(&j).ok());
+            let about: Option<About> = fs::read_to_string(dir.join(&id).join("story.json")).ok().and_then(|j| serde_json::from_str(&j).ok());
             if about.is_some_and(|a| a.path.is_none())
                 && let Some(newest) = versions_in(&dir.join(&id)).pop()
                 && let Some(k) = read(&id, newest)
@@ -319,7 +315,7 @@ impl App {
     /// Show the version `k` in place of the story shown, which is kept first. A version of this
     /// story keeps its file, to be saved over; a story never saved stays without one.
     pub fn go_back_to(&mut self, ctx: &egui::Context, k: &Kept) {
-        let Some(file) = std::fs::read_to_string(&k.file).ok().and_then(|j| serde_json::from_str::<DocFile>(&j).ok()) else {
+        let Some(file) = fs::read_to_string(&k.file).ok().and_then(|j| serde_json::from_str::<DocFile>(&j).ok()) else {
             self.status = "- that version cannot be read".into();
             return;
         };

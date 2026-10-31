@@ -95,7 +95,8 @@ Full list with reasons and tests in `ARCHITECTURE.md` §4.
 
 14. **The desktop and the browser differ only in `platform.rs`.** Background work is
     `platform::spawn` with a `platform::Waker`, never a `Context` or a lock shared with the frame;
-    the time is `platform::since_epoch`. `clippy.toml` flags the `std` calls that panic in the browser.
+    files are `platform::fs` (IndexedDB in the browser); the time is `platform::since_epoch`.
+    `clippy.toml` flags the `std` calls that panic or fail in the browser.
 
 ## Files
 

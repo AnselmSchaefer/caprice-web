@@ -1,6 +1,15 @@
-# These compile for the browser and panic there when run: use `platform.rs` (ARCHITECTURE.md R31).
+# These compile for the browser and panic or fail there when run: use `platform.rs` (ARCHITECTURE.md R31).
 disallowed-methods = [
     { path = "std::thread::spawn", reason = "panics in the browser: use platform::spawn" },
     { path = "std::time::SystemTime::now", reason = "panics in the browser: use platform::since_epoch" },
     { path = "std::process::id", reason = "panics in the browser: use platform::run_id" },
+    { path = "std::fs::read", reason = "no files in the browser: use platform::fs" },
+    { path = "std::fs::read_to_string", reason = "no files in the browser: use platform::fs" },
+    { path = "std::fs::write", reason = "no files in the browser: use platform::fs" },
+    { path = "std::fs::create_dir_all", reason = "no files in the browser: use platform::fs" },
+    { path = "std::fs::remove_file", reason = "no files in the browser: use platform::fs" },
+    { path = "std::fs::read_dir", reason = "no files in the browser: use platform::fs" },
+    { path = "std::fs::metadata", reason = "no files in the browser: use platform::fs" },
+    { path = "std::fs::canonicalize", reason = "no files in the browser: use platform::fs" },
+    { path = "std::path::Path::exists", reason = "no files in the browser: use platform::fs::exists" },
 ]

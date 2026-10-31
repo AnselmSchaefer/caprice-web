@@ -349,7 +349,7 @@ impl Themes {
     }
 
     pub fn kept_in(file: Option<PathBuf>) -> Self {
-        let theme = file.as_ref().and_then(|f| std::fs::read_to_string(f).ok()).and_then(|j| serde_json::from_str(&j).ok());
+        let theme = file.as_ref().and_then(|f| crate::platform::fs::read_to_string(f).ok()).and_then(|j| serde_json::from_str(&j).ok());
         Self { theme: theme.unwrap_or_default(), file, fade: None }
     }
 
@@ -361,8 +361,8 @@ impl Themes {
         self.theme = theme;
         self.fade = Some((pal(), ctx.input(|i| i.time)));
         if let (Some(file), Ok(json)) = (&self.file, serde_json::to_string(&theme)) {
-            let _ = file.parent().map(std::fs::create_dir_all);
-            let _ = std::fs::write(file, json);
+            let _ = file.parent().map(crate::platform::fs::create_dir_all);
+            let _ = crate::platform::fs::write(file, json);
         }
     }
 

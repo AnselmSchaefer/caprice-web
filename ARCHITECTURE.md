@@ -95,7 +95,8 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `fonts.rs` | Installed fonts loaded on demand, a missing one drawn with a twin of the same widths |
 | `theme.rs` | The themes (`Theme`, `Palette`): colours and egui visuals around the page, the palette in use (`pal`), fading from one to the next, the choice kept in the data folder; the page's own `PAPER` and `INK` |
 | `eggs.rs` | What is hidden in the magic themes: in the Magic Garden a plant a chapter growing on the desk and a balloon flying in each new chapter title; in the Magic City a street of houses a chapter, a floor a page, and a dragon flying a new title in held in its feet; in the Magic Sea a ship a chapter, built in a yard a part a page and launched into the bay when the next chapter begins |
-| `platform.rs` | What the desktop and the browser do differently: background work (`spawn`, `Waker`, `keep_awake`), the time, the run's id, file dialogs (R31) |
+| `platform.rs` | What the desktop and the browser do differently: background work (`spawn`, `Waker`, `keep_awake`), the time, the run's id, the data folder, file dialogs (R31) |
+| `platform/fs.rs` | Files: the system's on the desktop; in the browser, kept in memory by path and mirrored to IndexedDB (R31) |
 
 ---
 
@@ -1191,8 +1192,15 @@ them; it asks `platform` instead, whose desktop half does what Caprice always di
   makes `Context` impossible to send to a worker at all. On the desktop `wake` asks egui for a
   repaint, as before; in the browser it leaves word, and `platform::keep_awake` (each frame, in
   `App::frame`) asks for a frame at once when there is word, and every 50 ms while any work runs.
-- **The time now** is `platform::since_epoch`, a run's id `platform::run_id`. Times read from
-  files' metadata stay `std`: there are no files in the browser to ask.
+- **Files** are `platform::fs`, with the calls of `std::fs` the app uses, and `modified`, `made`
+  (a file's dates) and `canonicalize`. On the desktop they are `std::fs`. In the browser the files
+  are whole byte strings by path in memory (`fs::Memory`), all read from IndexedDB (database
+  `caprice`, store `files`) before the app starts (`fs::load`, in `main`), so nothing waits for a
+  file; each write and removal is then copied to IndexedDB behind. Folders are not kept: one is
+  there while a file is in it. Only the main thread has them (a `thread_local`): a worker sees no
+  files rather than share a lock. So versions (R22), the theme, the word goal and the stories
+  last opened work the same, by path, under `platform::data_dir` (`/caprice` in the browser).
+- **The time now** is `platform::since_epoch`, a run's id `platform::run_id`.
 - **File dialogs** are `platform::FileDialog`: `rfd`'s on the desktop; in the browser, for now, one
   that chooses nothing (as if cancelled), until the browser's own ways come in (`WEB_PLAN.md`).
 - **"Follow my writing" is not offered in the browser** (the Scene menu hides its checkbox), for
@@ -1201,10 +1209,13 @@ them; it asks `platform` instead, whose desktop half does what Caprice always di
 When touching it: anything new in the background takes a `Waker`, not a `Context`, and moves no
 lock or `App` state into the work. Anything new that needs the system goes through `platform`.
 
-Tests: `clippy.toml` disallows `std::thread::spawn`, `SystemTime::now` and `std::process::id`
-outside `platform.rs` (the tests' module is let off: it runs only natively). The browser build is
-checked by `web/build.sh`, and running it by `web/smoke.mjs` (headless Chromium: the welcome, a
-blank story, typing; it reports any error on the page). The native tests cover the desktop half.
+Tests: `clippy.toml` disallows `std::thread::spawn`, `SystemTime::now`, `std::process::id`, the
+`std::fs` calls and `Path::exists` outside `platform` (test modules are let off: they run only
+natively). `the_browser_s_files_are_read_back_as_written_and_folders_hold_what_is_in_them` and
+`a_folder_of_the_browser_s_files_is_gone_with_its_last_file` test `fs::Memory`. The browser build
+is checked by `web/build.sh`, and running it by `web/smoke.mjs` (headless Chromium: the welcome, a
+worker, a blank story, typing, a version kept in IndexedDB and listed again after a reload; it
+reports any error on the page). The native tests cover the desktop half.
 
 ---
 

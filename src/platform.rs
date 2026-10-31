@@ -1,14 +1,17 @@
 //! What the desktop and the browser do differently, kept in one place. The rest of the app asks
-//! here for the time, for background work, for a file dialog and (later) for the data folder, so
+//! here for the time, for background work, for files and the data folder, and for a file dialog, so
 //! it reads the same on both. On the desktop each of these is what Caprice always did; in the
 //! browser, where `std` compiles but panics or fails when run, each has its own way. The `std`
 //! calls that panic there are disallowed everywhere else (`clippy.toml`).
 
 #![allow(clippy::disallowed_methods)]
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use eframe::egui;
+
+pub mod fs;
 
 #[cfg(target_arch = "wasm32")]
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -71,6 +74,22 @@ pub fn keep_awake(ctx: &egui::Context) {
         ctx.request_repaint();
     } else if RUNNING.load(Ordering::SeqCst) > 0 {
         ctx.request_repaint_after(Duration::from_millis(50));
+    }
+}
+
+/// The app's data folder, where its versions and settings are kept, as each system has it. In the
+/// browser it is a folder among the browser's own files (`fs`).
+pub fn data_dir() -> Option<PathBuf> {
+    #[cfg(target_arch = "wasm32")]
+    return Some(PathBuf::from("/caprice"));
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        if cfg!(target_os = "macos") {
+            return home.map(|h| h.join("Library/Application Support/Caprice Web"));
+        }
+        let data = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).filter(|p| p.is_absolute());
+        data.or_else(|| home.map(|h| h.join(".local/share"))).map(|d| d.join("caprice-web"))
     }
 }
 

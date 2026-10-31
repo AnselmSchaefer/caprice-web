@@ -856,6 +856,8 @@ pub fn to_docx(doc: &Doc) -> Result<Vec<u8>, String> {
 }
 
 #[cfg(test)]
+// Tests run only on the desktop, where `platform::fs` is `std::fs` anyway.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use crate::model::{Orientation, TextBox};
@@ -1110,6 +1112,7 @@ mod tests {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)]
 pub(crate) mod sample {
     use super::*;
     use crate::model::{BoxLook, TextBox, is_terminator};

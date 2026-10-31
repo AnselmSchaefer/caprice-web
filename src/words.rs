@@ -125,7 +125,7 @@ pub struct Words {
 impl Words {
     pub fn new() -> Self {
         let file = crate::versions::default_dir().and_then(|d| d.parent().map(|p| p.join("progress.json")));
-        let progress = file.as_ref().and_then(|f| std::fs::read_to_string(f).ok()).and_then(|j| serde_json::from_str(&j).ok());
+        let progress = file.as_ref().and_then(|f| crate::platform::fs::read_to_string(f).ok()).and_then(|j| serde_json::from_str(&j).ok());
         Self { file, progress: progress.unwrap_or_default(), clock: None, story: None, tracked_at: f64::NEG_INFINITY, open: false }
     }
 
@@ -136,8 +136,8 @@ impl Words {
 
     fn save(&self) {
         if let (Some(file), Ok(json)) = (&self.file, serde_json::to_string(&self.progress)) {
-            let _ = file.parent().map(std::fs::create_dir_all);
-            let _ = std::fs::write(file, json);
+            let _ = file.parent().map(crate::platform::fs::create_dir_all);
+            let _ = crate::platform::fs::write(file, json);
         }
     }
 }
@@ -201,7 +201,7 @@ impl App {
         let mut goal = self.words.progress.goal;
         let mut versions = false;
         let screen = ctx.content_rect();
-        let saved_at = self.path.as_ref().and_then(|p| std::fs::metadata(p).ok()).and_then(|m| m.modified().ok()).and_then(secs);
+        let saved_at = self.path.as_ref().and_then(crate::platform::fs::modified);
         let kept: Vec<u64> = self.keep.dir.as_ref().map_or(Vec::new(), |d| crate::versions::times_kept(&d.join(&self.story_id)));
         egui::Window::new("Document info")
             .id(egui::Id::new("document_info"))
@@ -294,10 +294,6 @@ impl App {
 }
 
 /// Seconds since 1970 of a file time.
-fn secs(t: std::time::SystemTime) -> Option<u64> {
-    t.duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs())
-}
-
 /// "18 Oct 2026, 17:53", in the writer's time.
 pub fn date(unix: u64) -> String {
     let local = unix as i64 + offset();

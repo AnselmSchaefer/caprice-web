@@ -158,7 +158,7 @@ impl App {
 
     /// Put the picture in the file at `path` into the text at the caret, in a paragraph of its own.
     pub fn insert_image(&mut self, ctx: &egui::Context, path: &Path) -> Result<(), String> {
-        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+        let bytes = crate::platform::fs::read(path).map_err(|e| e.to_string())?;
         self.insert_image_bytes(ctx, bytes)
     }
 

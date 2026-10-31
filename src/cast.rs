@@ -652,6 +652,8 @@ impl App {
 }
 
 #[cfg(test)]
+// Tests run only on the desktop, where `platform::fs` is `std::fs` anyway.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 
