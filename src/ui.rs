@@ -291,6 +291,8 @@ enum FileAction {
     Info,
     /// In the browser: the story as a file.
     Download,
+    /// With a shelf (in the browser): a new blank story.
+    New,
 }
 
 /// What was clicked in the tools this frame, done once they are all drawn.
@@ -541,9 +543,12 @@ impl App {
                 ("Drop changes since saving", "", FileAction::Revert),
                 ("Document info…", "", FileAction::Info),
             ];
-            // In the browser the story can also go to the computer as a file (`shelf.rs`).
+            // In the browser the story can also go to the computer as a file (`shelf.rs`), and a new
+            // one begins here, as there is no other window to begin it in. (No Ctrl+N: the browser
+            // keeps it for a new window.)
             let download = cfg!(target_arch = "wasm32").then_some(("Download a copy (.caprice)", "", FileAction::Download));
-            for (label, shortcut, action) in items.into_iter().chain(download) {
+            let new = self.shelf.dir.is_some().then_some(("New", "", FileAction::New));
+            for (label, shortcut, action) in new.into_iter().chain(items).chain(download) {
                 let button = egui::Button::new(label).shortcut_text(shortcut).frame(false);
                 if ui.add(button).clicked() {
                     out.file = Some(action);
@@ -821,6 +826,7 @@ impl App {
             Some(FileAction::Versions) => self.open_versions(),
             Some(FileAction::Revert) => self.drop_changes(ctx),
             Some(FileAction::Info) => self.open_info(),
+            Some(FileAction::New) => self.new_story(ctx),
             #[cfg(target_arch = "wasm32")]
             Some(FileAction::Download) => self.download_story(),
             #[cfg(not(target_arch = "wasm32"))]

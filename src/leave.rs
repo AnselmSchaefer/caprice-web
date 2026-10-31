@@ -82,6 +82,7 @@ impl App {
         let then = match leaving {
             Leaving::Open => "before opening another story",
             Leaving::Close => "before Caprice closes",
+            Leaving::New => "before beginning a new story",
         };
         let (title, said, change) = match &self.path {
             None => (

@@ -6148,4 +6148,60 @@ mod tests {
         assert!(!h.app.pen, "and Ctrl+Shift+P takes up no pen");
         assert_eq!(h.text(), "Nobody to ask.");
     }
+
+    impl Harness {
+        /// File → New, as in the browser.
+        fn file_new(&mut self) {
+            self.click_widget("File");
+            // A menu item is read with its shortcut, which New has none of.
+            self.click_widget("New ");
+        }
+    }
+
+    #[test]
+    fn in_the_browser_new_offers_to_save_the_story_then_begins_a_blank_one() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "new-save");
+        h.frames(3, vec![], Modifiers::NONE);
+        h.type_text("The first story.");
+        let first = h.app.story_id.clone();
+        h.file_new();
+        assert!(h.labels().contains("before beginning a new story"), "asked first");
+        assert_eq!(h.text(), "The first story.", "nothing gone yet");
+        h.click_widget("Save\u{2026}");
+        h.key(Key::Enter, Modifiers::NONE);
+        assert!(std::fs::read_to_string(dir.join("The first story.caprice")).unwrap().contains("The first story."), "saved");
+        assert_eq!(h.text(), "", "then a blank story");
+        assert!(h.app.path.is_none() && !h.app.unsaved() && h.app.story_id != first, "a new one, with nothing to save");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn in_the_browser_new_can_leave_the_story_unsaved_and_with_nothing_to_save_asks_nothing() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "new-drop");
+        h.frames(3, vec![], Modifiers::NONE);
+        h.type_text("Not worth keeping.");
+        h.file_new();
+        h.click_widget("Don\u{2019}t save");
+        assert_eq!(h.text(), "", "a blank story");
+        assert!(!dir.exists(), "and nothing saved");
+
+        h.type_text("x");
+        h.key(Key::Backspace, Modifiers::NONE);
+        let blank = h.app.story_id.clone();
+        h.file_new();
+        assert!(h.app.leaving.is_none(), "nothing to save, nothing asked");
+        assert!(h.app.story_id != blank && h.text().is_empty(), "a new blank story at once");
+    }
+
+    #[test]
+    fn on_the_desktop_the_file_menu_has_no_new() {
+        let mut h = Harness::new();
+        h.frames(3, vec![], Modifiers::NONE);
+        h.click_widget("File");
+        let shown = h.labels();
+        assert!(shown.lines().any(|l| l.starts_with("Open")), "the menu is open");
+        assert!(!shown.lines().any(|l| l.trim() == "New"), "a new story begins from the welcome there");
+    }
 }

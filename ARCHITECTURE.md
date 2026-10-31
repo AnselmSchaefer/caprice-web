@@ -802,6 +802,12 @@ must keep working: writers do it. A version (the whole `.caprice` file) is kept 
   `versions_are_kept_while_writing_and_going_back_keeps_the_story_as_it_was`,
   `a_story_never_saved_is_kept_when_caprice_closes_and_opens_again_from_versions`, and in
   `versions.rs` `kept` and `ago`.
+- **Beginning a new story is leaving this one** (`Leaving::New`, File › New, only with a shelf,
+  so in the browser: the desktop begins one from the welcome). It asks as opening another does,
+  then `begin`s a blank story, with an id of its own (R12). No Ctrl+N: the browser keeps it.
+  Tests: `in_the_browser_new_offers_to_save_the_story_then_begins_a_blank_one`,
+  `in_the_browser_new_can_leave_the_story_unsaved_and_with_nothing_to_save_asks_nothing`,
+  `on_the_desktop_the_file_menu_has_no_new`.
 - **In the browser, leaving is the page going**, with no question of Caprice's own (R31): hidden
   (another tab, or closing), a story with a file is saved and a version kept at once
   (`App::page_hidden`), and while changes are not saved the browser asks "Leave site?"
@@ -1239,7 +1245,8 @@ them; it asks `platform` instead, whose desktop half does what Caprice always di
   - on the desktop, `rfd`'s dialog on a background thread, as always;
   - with a shelf (`App::shelf.dir`: always in the browser, never on the desktop), saving and
     opening a story ask in Caprice's own windows (`shelf.rs`): a name, and the story becomes
-    `<shelf>/<name>.caprice`; or a story from the shelf's list, or one uploaded onto it. So a
+    `<shelf>/<name>.caprice`; or a story from the shelf's list, or one uploaded onto it. With a
+  shelf the File menu also has New (R22). So a
     story in the browser has a path like any other, and autosave (R22) and the stories last
     opened (R27; the welcome says "In this browser") work unchanged;
   - in the browser, a file to read (a picture) comes from the page's picker into `/uploads`,

@@ -74,8 +74,10 @@ async function upload(file, ...clicks) {
 
 // The shelf's upload button, below a row for each story kept.
 const uploadButton = async () => [565, 190 + 38 * Math.max(0, (await stories()).length - 1)];
-const FILE = [85, 38], OPEN = [93, 75], SAVE = [84, 113], EXPORT = [140, 189], PRINT = [90, 227];
-const VERSIONS = [100, 265], DOWNLOAD = [120, 379];
+// The File menu's items, a row each: New, Open, Save, Save as, Export, Print, Versions, Drop changes,
+// Document info, Download a copy.
+const FILE = [85, 38], NEW = [80, 75], OPEN = [93, 113], SAVE = [84, 151], EXPORT = [140, 227], PRINT = [90, 265];
+const VERSIONS = [100, 303], DOWNLOAD = [120, 417];
 
 await page.goto(url);
 console.log("crossOriginIsolated:", await page.evaluate(() => crossOriginIsolated));
@@ -215,10 +217,16 @@ const copied = await page.evaluate(() => navigator.clipboard.readText());
 console.log("typed and copied:", copied.endsWith("Café, naïve, Größe, «Ελληνικά» 你好"));
 await page.waitForTimeout(6000);
 
+// File → New: the story has changes since it was saved by hand, so it asks about them first.
+await click(...FILE);
+await click(...NEW);
+await page.waitForTimeout(800);
+await page.screenshot({ path: `${out}/9-new.png` });
+
 // Opened again, the welcome lists the stories last opened or saved.
 await page.reload();
 await page.waitForTimeout(4000);
-await page.screenshot({ path: `${out}/9-welcome-again.png` });
+await page.screenshot({ path: `${out}/10-welcome-again.png` });
 
 console.log(errors.length ? "errors:\n  " + [...new Set(errors)].slice(0, 8).join("\n  ") : "no errors");
 await browser.close();

@@ -410,6 +410,8 @@ pub enum Leaving {
     Open,
     /// Closing the window.
     Close,
+    /// Beginning a new blank story (in the browser's File menu).
+    New,
 }
 
 /// A file dialog showing on its own thread.
@@ -488,6 +490,16 @@ impl App {
             Ok(()) => format!("- exported {}", path.file_name().map_or(String::new(), |n| n.to_string_lossy().into_owned())),
             Err(e) => format!("- export failed: {e}"),
         };
+    }
+
+    /// Begin a new blank story, first asking about unsaved changes, as opening another does.
+    pub fn new_story(&mut self, ctx: &egui::Context) {
+        self.save_before_leaving();
+        if self.unsaved() || self.changed_since_saved() {
+            self.leaving = Some(Leaving::New);
+        } else {
+            self.leave(ctx, Leaving::New);
+        }
     }
 
     /// Choose another document to open, first asking about unsaved changes.
@@ -591,6 +603,7 @@ impl App {
                 self.may_close = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
+            Leaving::New => self.begin(ctx, crate::start::Kind::Blank),
         }
     }
 
