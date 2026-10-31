@@ -38,6 +38,16 @@ const kept = () => page.evaluate(() => new Promise((done, failed) => {
   r.onerror = () => failed(r.error);
 }));
 const stories = async () => (await kept()).filter(k => k.startsWith("/caprice/stories/"));
+// What a file kept in IndexedDB says.
+const keptText = path => page.evaluate(path => new Promise((done, failed) => {
+  const r = indexedDB.open("caprice", 1);
+  r.onsuccess = () => {
+    const req = r.result.transaction("files", "readonly").objectStore("files").get(path);
+    req.onsuccess = () => done(req.result ? new TextDecoder().decode(req.result.bytes) : "");
+    req.onerror = () => failed(req.error);
+  };
+  r.onerror = () => failed(r.error);
+}), path);
 
 // Clicks that give a download; saved to `out`, its name returned.
 async function download(...clicks) {
@@ -150,10 +160,48 @@ await page.waitForTimeout(2000);
 await page.screenshot({ path: `${out}/7-scene.png` });
 console.log("workers started:", workers.length);
 
+// Caprice's shortcuts are not the browser's: Ctrl+R aligns right rather than reloading the page,
+// and Ctrl+F finds in the story.
+await click(640, 500);
+await page.keyboard.type(" Then night fell.", { delay: 15 });
+await page.evaluate(() => { window.stillHere = true; });
+await page.keyboard.press("Control+r");
+await page.waitForTimeout(1000);
+console.log("Ctrl+R kept the page:", await page.evaluate(() => window.stillHere === true));
+await page.keyboard.press("Control+f");
+await page.waitForTimeout(800);
+await page.screenshot({ path: `${out}/8-shortcuts.png` });
+await page.keyboard.press("Escape");
+
+// With changes autosave has not taken yet, the browser asks before leaving: Caprice cancels the
+// page's beforeunload. (Headless Chromium shows no "Leave site?" itself, so the event is sent here.)
+const leavingAsks = () => page.evaluate(() => {
+  const e = new Event("beforeunload", { cancelable: true });
+  dispatchEvent(e);
+  return e.defaultPrevented;
+});
+await page.waitForTimeout(6000);
+console.log("leaving asks, with changes:", await leavingAsks());
+
+// Hidden (another tab, or closing), the story is saved at once.
+await page.evaluate(() => {
+  Object.defineProperty(Document.prototype, "hidden", { get: () => true, configurable: true });
+  document.dispatchEvent(new Event("visibilitychange"));
+});
+await page.waitForTimeout(1500);
+console.log("saved when hidden:", (await keptText("/caprice/stories/With a scene.caprice")).includes("night fell"));
+await page.evaluate(() => {
+  Object.defineProperty(Document.prototype, "hidden", { get: () => false, configurable: true });
+  document.dispatchEvent(new Event("visibilitychange"));
+});
+// The next look at the story finds it saved, and leaving asks no more.
+await page.waitForTimeout(6000);
+console.log("leaving asks, once saved:", await leavingAsks());
+
 // Opened again, the welcome lists the stories last opened or saved.
 await page.reload();
 await page.waitForTimeout(4000);
-await page.screenshot({ path: `${out}/8-welcome-again.png` });
+await page.screenshot({ path: `${out}/9-welcome-again.png` });
 
 console.log(errors.length ? "errors:\n  " + [...new Set(errors)].slice(0, 8).join("\n  ") : "no errors");
 await browser.close();

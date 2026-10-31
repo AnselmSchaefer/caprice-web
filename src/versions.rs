@@ -82,6 +82,8 @@ pub struct Keeper {
     /// What the newest version holds, so the same is not kept twice.
     kept_hash: u64,
     pub open: bool,
+    /// Was the page hidden last frame?
+    hidden: bool,
     /// This story's versions, newest first, and the newest of each story never saved.
     pub mine: Vec<Kept>,
     pub others: Vec<Kept>,
@@ -98,9 +100,15 @@ impl Keeper {
             kept_at: f64::NEG_INFINITY,
             kept_hash: 0,
             open: false,
+            hidden: false,
             mine: Vec::new(),
             others: Vec::new(),
         }
+    }
+
+    /// Has the story changed since it was last saved, as last looked (every `CHECK_EVERY`)?
+    pub fn has_changes(&self) -> bool {
+        self.changed_since.is_some()
     }
 
     pub fn now(&self) -> u64 {
@@ -177,7 +185,10 @@ impl App {
         self.keep.checked_at = now;
         let json = serde_json::to_string(&self.doc_file()).unwrap_or_default();
         let hash = hash_of(&json);
-        if hash == self.saved_hash {
+        // Unsaved as saving counts it: the garden grown is no change (R9). The whole file, garden
+        // and all, is what a version keeps.
+        let unsaved = self.unsaved();
+        if !unsaved {
             self.keep.changed_since = None;
         } else {
             let since = *self.keep.changed_since.get_or_insert(now);
@@ -187,7 +198,7 @@ impl App {
             }
         }
         // A fresh story with nothing in it is not worth keeping.
-        let blank = self.path.is_none() && hash == self.saved_hash;
+        let blank = self.path.is_none() && !unsaved;
         let due = now - self.keep.kept_at >= KEEP_EVERY;
         if self.keep.dir.is_some() && hash != self.keep.kept_hash && !blank && due {
             self.keep_version(&json);
@@ -198,6 +209,21 @@ impl App {
         if pending {
             ctx.request_repaint_after(std::time::Duration::from_secs_f64(CHECK_EVERY));
         }
+    }
+
+    /// The page was hidden (in the browser: another tab, or closing): a story with a file is saved
+    /// and a version kept now, while the page still runs, rather than waiting for its time. Shown
+    /// again, nothing happens. Called from `eframe::App::logic`, which runs while hidden too.
+    pub fn page_hidden(&mut self, hidden: bool) {
+        if hidden && !self.keep.hidden {
+            self.save_before_leaving();
+            self.keep_now();
+            // Saved, leaving loses nothing: no need to wait for the next look to say so.
+            if !self.unsaved() {
+                self.keep.changed_since = None;
+            }
+        }
+        self.keep.hidden = hidden;
     }
 
     /// Save to the story's file without saying so: it happens on its own.

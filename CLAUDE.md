@@ -97,7 +97,7 @@ Full list with reasons and tests in `ARCHITECTURE.md` §4.
     `platform::spawn` with a `platform::Waker`, never a `Context` or a lock shared with the frame;
     files are `platform::fs` (IndexedDB in the browser); file dialogs are a `platform::Dialog` to
     `ask_path` (in the browser: the shelf, the page's picker, or a download); the time is
-    `platform::since_epoch`.
+    `platform::since_epoch`. What must happen while the page is hidden goes in `App::logic`.
     `clippy.toml` flags the `std` calls that panic or fail in the browser.
 
 ## Files

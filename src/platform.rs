@@ -123,6 +123,38 @@ pub fn run_id() -> u64 {
     return (js_sys::Math::random() * u32::MAX as f64) as u64;
 }
 
+/// Is the page hidden (another tab shown, the window minimised, or the tab closing)? Never on the
+/// desktop, where closing has its own question.
+pub fn page_hidden() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    return web_sys::window().and_then(|w| w.document()).is_some_and(|d| d.hidden());
+    #[cfg(not(target_arch = "wasm32"))]
+    false
+}
+
+/// In the browser: a frame as soon as the page is hidden or shown, so the app sees it at once
+/// (`App::page_hidden`) rather than at its next frame, which may come too late for a tab closing.
+#[cfg(target_arch = "wasm32")]
+pub fn frame_on_visibility_change(ctx: &egui::Context) {
+    use wasm_bindgen::JsCast;
+    let ctx = ctx.clone();
+    let wake = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || ctx.request_repaint());
+    if let Some(document) = web_sys::window().and_then(|w| w.document()) {
+        let _ = document.add_event_listener_with_callback("visibilitychange", wake.as_ref().unchecked_ref());
+    }
+    // It listens as long as the page is there.
+    wake.forget();
+}
+
+/// In the browser: whether leaving the page now would lose changes, so that the browser asks
+/// first ("Leave site?"). It cannot ask Caprice's own question: the page is going.
+pub fn warn_on_leaving(on: bool) {
+    #[cfg(target_arch = "wasm32")]
+    browser::warn_on_leaving(on);
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = on;
+}
+
 /// A file dialog to show: the kinds of file it offers, and the name it suggests.
 #[derive(Clone, Default)]
 pub struct Dialog {
@@ -213,7 +245,24 @@ mod browser {
     // What the page does for files: its picker, downloads, a PDF in a tab, and fetching its own.
     // Bytes going out are copied out of the app's memory first, which is shared with the workers
     // and so cannot go into a Blob as it is.
+    // The page's own ways first, where Caprice wants another: the browser asks before leaving
+    // with changes not kept, and Caprice's shortcuts (`editor.rs`, `App::frame`) are not the
+    // browser's (Ctrl+R aligns right rather than reloading the page, Ctrl+F finds in the story).
+    // Copy, cut and paste stay the browser's: egui takes them from its events. Only in the page,
+    // not in a worker, which imports this too.
     #[wasm_bindgen(inline_js = r#"
+        let warn = false;
+        export function warn_on_leaving(on) { warn = on; }
+        if (typeof document !== "undefined") {
+            addEventListener("beforeunload", e => { if (warn) { e.preventDefault(); e.returnValue = ""; } });
+            const ours = new Set(["z", "y", "enter", "l", "e", "j", "b", "i", "u", "a", "f", "h", "n", "p", "=", "+", "-", "0"]);
+            addEventListener("keydown", e => {
+                if (!(e.ctrlKey || e.metaKey)) return;
+                const key = e.key.toLowerCase();
+                // Ctrl+Shift+R still reloads; Caprice has no use for it.
+                if (ours.has(key) || (key === "r" && !e.shiftKey)) e.preventDefault();
+            }, { capture: true });
+        }
         export function pick_file(accept) {
             return new Promise(done => {
                 const input = document.createElement("input");
@@ -253,6 +302,7 @@ mod browser {
         async fn js_pick_file(accept: &str) -> JsValue;
         #[wasm_bindgen(js_name = download)]
         fn js_download(name: &str, bytes: &[u8]);
+        pub fn warn_on_leaving(on: bool);
         #[wasm_bindgen(js_name = show_pdf)]
         fn js_show_pdf(bytes: &[u8]);
         #[wasm_bindgen(js_name = fetch_bytes, catch)]

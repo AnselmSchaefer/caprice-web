@@ -115,6 +115,7 @@ fn main() {
                 Box::new(|cc| {
                     let mut app = start_app(cc);
                     app.start.open = true;
+                    platform::frame_on_visibility_change(&cc.egui_ctx);
                     Ok(Box::new(app))
                 }),
             )
@@ -549,6 +550,10 @@ impl App {
 }
 
 impl eframe::App for App {
+    fn logic(&mut self, _ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.logic();
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.frame(ui);
     }
@@ -560,6 +565,13 @@ impl eframe::App for App {
 }
 
 impl App {
+    /// What is done each frame before it is drawn, and also while the page is hidden, when no
+    /// frame is drawn (in the browser): looking after the story as the page goes (R31).
+    fn logic(&mut self) {
+        self.page_hidden(platform::page_hidden());
+        platform::warn_on_leaving(self.keep.has_changes());
+    }
+
     /// One frame of the whole app (separate from `eframe::App::ui` so tests can drive it).
     fn frame(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
@@ -791,7 +803,11 @@ mod tests {
                     input.events.extend(events.clone());
                 }
                 let app = &mut self.app;
-                let mut out = self.ctx.run_ui(input, |ui| app.frame(ui));
+                // As eframe runs a frame: the logic, then the drawing.
+                let mut out = self.ctx.run_ui(input, |ui| {
+                    app.logic();
+                    app.frame(ui);
+                });
                 out.textures_delta.clear();
                 self.access = out.platform_output.accesskit_update.take().or(self.access.take());
                 self.painted = std::mem::take(&mut out.shapes);
@@ -6056,5 +6072,62 @@ mod tests {
         h.frames(2, vec![], Modifiers::NONE);
         assert!(h.app.path.is_none() && h.app.dialog.is_none() && !dir.exists(), "nothing saved, nothing waiting");
         assert!(!h.labels().contains("Stories are kept in this browser"));
+    }
+
+    #[test]
+    fn in_the_browser_hiding_the_page_saves_the_story_and_keeps_a_version_at_once() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "hidden");
+        (h.app.keep.autosave, h.app.keep.dir, h.app.keep.clock) = (true, Some(dir.join("versions")), Some(4_000_000));
+        h.frames(3, vec![], Modifiers::NONE);
+        h.type_text("Kept on the shelf.");
+        h.key(Key::S, Modifiers::COMMAND);
+        h.key(Key::Enter, Modifiers::NONE);
+        let path = dir.join("Kept on the shelf.caprice");
+        h.type_text(" And more, just before the tab was closed.");
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("And more"), "autosave has not come yet");
+        let versions = || std::fs::read_dir(dir.join("versions")).map_or(0, |d| d.flat_map(|e| std::fs::read_dir(e.unwrap().path()).unwrap()).count());
+        let before = versions();
+
+        h.app.page_hidden(true);
+        assert!(std::fs::read_to_string(&path).unwrap().contains("And more"), "saved as the page went");
+        assert!(versions() > before, "and a version kept");
+        let after = versions();
+        h.app.page_hidden(true);
+        assert_eq!(versions(), after, "still hidden: nothing more");
+        // Shown again (each frame says so), written in, and hidden again: kept again.
+        h.app.keep.clock = Some(4_000_600);
+        h.type_text(" Written after coming back.");
+        h.app.page_hidden(true);
+        assert!(versions() > after, "hidden again, kept again");
+        assert!(std::fs::read_to_string(&path).unwrap().contains("coming back"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_story_just_saved_has_no_changes_to_lose() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "no-changes");
+        h.app.keep.autosave = true;
+        h.frames(3, vec![], Modifiers::NONE);
+        h.type_text("Saved, and nothing since.");
+        h.key(Key::S, Modifiers::COMMAND);
+        h.key(Key::Enter, Modifiers::NONE);
+        assert!(!h.app.unsaved());
+        h.wait(6.0);
+        assert!(!h.app.keep.has_changes(), "the garden {:?} is no change", h.app.doc.garden);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_fresh_story_nobody_wrote_in_keeps_no_version() {
+        let mut h = Harness::new();
+        let dir = std::env::temp_dir().join(format!("caprice-blank-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        h.app.keep.dir = Some(dir.clone());
+        h.frames(3, vec![], Modifiers::NONE);
+        h.wait(6.0);
+        h.wait(versions::KEEP_EVERY);
+        assert!(!dir.exists(), "nothing worth keeping, its garden {:?} or not", h.app.doc.garden);
     }
 }

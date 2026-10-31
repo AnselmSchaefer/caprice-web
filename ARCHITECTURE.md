@@ -767,6 +767,12 @@ must keep working: writers do it. A version (the whole `.caprice` file) is kept 
   `story.json` saying its name and file (none: never saved, listed under "Stories never saved").
   Anything that starts another story (open, going back to one never saved) sets `App::story_id`
   and calls `Keeper::opened`, or its versions mix with the last story's.
+- **Changed means as saving counts it** (`unsaved`: the file without the garden, R9), never a
+  hash of the whole file: `keep_safe` once compared the whole file, garden and all, with
+  `saved_hash`, so any story with a garden counted as changed for good (autosaving the same text
+  every half minute, keeping a version of a blank story, and in the browser asking before
+  leaving always). Tests: `a_story_just_saved_has_no_changes_to_lose`,
+  `a_fresh_story_nobody_wrote_in_keeps_no_version`.
 - **The same state is not kept twice** (`kept_hash`), and a fresh story with nothing in it never.
   Two versions in one second get the next free second's name rather than writing over each other
   (dropping changes, then opening the list, did).
@@ -796,6 +802,12 @@ must keep working: writers do it. A version (the whole `.caprice` file) is kept 
   `versions_are_kept_while_writing_and_going_back_keeps_the_story_as_it_was`,
   `a_story_never_saved_is_kept_when_caprice_closes_and_opens_again_from_versions`, and in
   `versions.rs` `kept` and `ago`.
+- **In the browser, leaving is the page going**, with no question of Caprice's own (R31): hidden
+  (another tab, or closing), a story with a file is saved and a version kept at once
+  (`App::page_hidden`), and while changes are not saved the browser asks "Leave site?"
+  (`Keeper::has_changes`). Both are in `App::logic`, which eframe runs while the page is hidden
+  too (it draws no frame then), and which `Harness` runs before each frame as eframe does.
+  Test: `in_the_browser_hiding_the_page_saves_the_story_and_keeps_a_version_at_once`.
 
 ### R23 — Find and replace keep the story's formatting and undo as one; document info never touches the story
 
@@ -1237,6 +1249,12 @@ them; it asks `platform` instead, whose desktop half does what Caprice always di
   Printing in the browser is R20's PDF, downloaded or opened in a tab.
   So a writer of files writes through `platform::fs` (never `image::save_buffer` and the like,
   which go to the disk themselves): the scene picture's PNG is made in memory first.
+- **The page's ways where Caprice has its own** (`platform::browser`, at its start): Caprice's
+  Ctrl shortcuts are kept from the browser (Ctrl+R aligns right rather than reloading, Ctrl+F
+  finds in the story, Ctrl+= zooms the pages, not the page), all but copy, cut and paste. A new
+  Ctrl shortcut in `editor.rs` or `App::frame` goes into that list too. Leaving with changes not
+  saved, the browser asks (R22). Hidden, the page draws no frame, so what must happen then is in
+  `App::logic`; the page asks for one on `visibilitychange` (`frame_on_visibility_change`).
 - **"Follow my writing" is not offered in the browser** (the Scene menu hides its checkbox), for
   now. It is the only way into `Mode::Writing`, which is never saved.
 
@@ -1253,8 +1271,9 @@ natively). `the_browser_s_files_are_read_back_as_written_and_folders_hold_what_i
 is checked by `web/build.sh`, and running it by `web/smoke.mjs` (headless Chromium: the welcome, a
 blank story, typing, a picture uploaded, the PDF downloaded and opened to print, a version kept in IndexedDB
 and listed again after a reload, a story saved by name, downloaded as `.caprice` and Word,
-uploaded back, a story with a scene drawn behind the page in a worker, and the stories listed on
-the welcome; it reports any error on the page). The native tests cover the desktop half.
+uploaded back, a story with a scene drawn behind the page in a worker, Ctrl+R and Ctrl+F kept
+from the browser, leaving asking only with changes not saved, saving when the page is hidden, and
+the stories listed on the welcome; it reports any error on the page). The native tests cover the desktop half.
 
 ---
 
