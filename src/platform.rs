@@ -123,6 +123,10 @@ pub fn run_id() -> u64 {
     return (js_sys::Math::random() * u32::MAX as f64) as u64;
 }
 
+/// Can Claude be asked? Not yet in the browser, which needs a server of its own for it
+/// (WEB_PLAN step 6): until then the Claude and Scene menus are off there (`App::claude`).
+pub const CLAUDE: bool = cfg!(not(target_arch = "wasm32"));
+
 /// Is the page hidden (another tab shown, the window minimised, or the tab closing)? Never on the
 /// desktop, where closing has its own question.
 pub fn page_hidden() -> bool {

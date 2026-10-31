@@ -221,6 +221,8 @@ pub struct App {
     pub title: String,
     /// The pen is on: dragging on the page draws a loop around text to ask Claude about.
     pub pen: bool,
+    /// Claude can be asked (`platform::CLAUDE`): without, its menus and the pen are off.
+    pub claude: bool,
     /// How passages are picked with it on: circled with the pen, or selected with the cursor.
     pub picking: claude::Picking,
     pub lasso: Option<claude::Lasso>,
@@ -337,6 +339,7 @@ impl App {
             status_at: f64::NEG_INFINITY,
             title: String::new(),
             pen: false,
+            claude: platform::CLAUDE,
             picking: claude::Picking::Circle,
             lasso: None,
             answer: None,
@@ -6129,5 +6132,20 @@ mod tests {
         h.wait(6.0);
         h.wait(versions::KEEP_EVERY);
         assert!(!dir.exists(), "nothing worth keeping, its garden {:?} or not", h.app.doc.garden);
+    }
+
+    #[test]
+    fn where_claude_cannot_be_asked_its_menus_and_the_pen_are_off() {
+        let mut h = Harness::new();
+        h.app.claude = false;
+        h.frames(3, vec![], Modifiers::NONE);
+        h.type_text("Nobody to ask.");
+        h.click_widget("Claude");
+        h.click_widget("Scene");
+        let shown = h.labels();
+        assert!(!shown.contains("Circle text with the pen") && !shown.contains("Describe the scene"), "no menu opens");
+        h.key(Key::P, Modifiers::COMMAND | Modifiers::SHIFT);
+        assert!(!h.app.pen, "and Ctrl+Shift+P takes up no pen");
+        assert_eq!(h.text(), "Nobody to ask.");
     }
 }

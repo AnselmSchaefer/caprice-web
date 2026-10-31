@@ -508,9 +508,15 @@ impl App {
                     out.add_note |= ui.button("Note").on_hover_text("Attach a note to the selection or line (Ctrl+Alt+N)").clicked();
                     out.find |= ui.button("Find").on_hover_text("Search (Ctrl+F)").clicked();
                 }
-                _ => {
+                _ if self.claude => {
                     self.claude_menu(ui);
                     self.scene_menu(ui);
+                }
+                // In the browser, until Claude can be asked there: shown, so nothing seems lost.
+                _ => {
+                    let later = "Comes to the browser version later";
+                    ui.add_enabled(false, egui::Button::new("Claude")).on_disabled_hover_text(later);
+                    ui.add_enabled(false, egui::Button::new("Scene")).on_disabled_hover_text(later);
                 }
             }
         });

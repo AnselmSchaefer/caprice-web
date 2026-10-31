@@ -1255,6 +1255,11 @@ them; it asks `platform` instead, whose desktop half does what Caprice always di
   Ctrl shortcut in `editor.rs` or `App::frame` goes into that list too. Leaving with changes not
   saved, the browser asks (R22). Hidden, the page draws no frame, so what must happen then is in
   `App::logic`; the page asks for one on `visibilitychange` (`frame_on_visibility_change`).
+- **Claude cannot be asked in the browser yet** (it needs a server, `WEB_PLAN.md` step 6):
+  `platform::CLAUDE` is false there, and so `App::claude`. The Claude and Scene menus are then
+  shown greyed ("Comes to the browser version later"), and Ctrl+Shift+P takes up no pen. Scenes
+  already in a story still show behind its pages. When step 6 comes, `CLAUDE` turns true there.
+  Test: `where_claude_cannot_be_asked_its_menus_and_the_pen_are_off`.
 - **"Follow my writing" is not offered in the browser** (the Scene menu hides its checkbox), for
   now. It is the only way into `Mode::Writing`, which is never saved.
 
