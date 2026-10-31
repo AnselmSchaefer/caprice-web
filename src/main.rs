@@ -27,6 +27,7 @@ mod render;
 mod review;
 mod scratchpad;
 mod search;
+mod shelf;
 mod start;
 mod textbox;
 mod theme;
@@ -237,6 +238,8 @@ pub struct App {
     pub cast_panel: cast::CastPanel,
     /// A file dialog waiting for the user to choose.
     pub dialog: Option<fileio::PendingDialog>,
+    /// The stories kept in the browser, which saving and opening ask about there.
+    pub shelf: shelf::Shelf,
     /// The Print window and what it has chosen.
     pub print: print::Print,
     /// Which story this is, to keep its versions together (`versions.rs`).
@@ -343,6 +346,7 @@ impl App {
             backdrop: backdrop::Backdrop::default(),
             cast_panel: cast::CastPanel::default(),
             dialog: None,
+            shelf: shelf::Shelf::new(),
             print: print::Print::new(),
             story_id: versions::new_id(),
             keep: versions::Keeper::new(),
@@ -720,6 +724,7 @@ impl App {
         self.scratchpad(&ctx);
         self.print_window(&ctx);
         self.versions_window(&ctx);
+        self.shelf_window(&ctx);
         self.info_window(&ctx);
         self.keep_safe(&ctx);
         self.track_words(&ctx);
@@ -5963,5 +5968,67 @@ mod tests {
         in_the_garden(&mut h, 0.0);
         assert_eq!(h.app.doc.garden, [1]);
         assert!(!h.app.unsaved());
+    }
+
+    /// A shelf in a folder of its own, as the browser has: saving and opening ask there.
+    fn with_shelf(h: &mut Harness, name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("caprice-shelf-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        h.app.shelf.dir = Some(dir.clone());
+        dir
+    }
+
+    #[test]
+    fn in_the_browser_saving_asks_for_a_name_and_the_story_is_kept_under_it() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "save");
+        h.frames(3, vec![], Modifiers::NONE);
+        h.type_text("It was a dark night.");
+        h.key(Key::S, Modifiers::COMMAND);
+        assert!(h.labels().contains("Stories are kept in this browser"), "a name is asked for, not a place");
+        assert!(h.app.path.is_none() && h.app.unsaved(), "not saved yet");
+        // The name offered is the story's first words; typing goes to it, not to the page.
+        h.type_text(" again");
+        h.key(Key::Enter, Modifiers::NONE);
+        let path = dir.join("It was a dark night again.caprice");
+        assert_eq!(h.app.path.as_deref(), Some(path.as_path()), "saved under the name");
+        assert!(std::fs::read_to_string(&path).unwrap().contains("It was a dark night."));
+        assert_eq!(h.text(), "It was a dark night.", "the page took none of the name");
+        assert!(!h.app.unsaved() && !h.labels().contains("Stories are kept in this browser"), "and the question is gone");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn in_the_browser_opening_lists_the_stories_kept_and_opens_the_one_chosen() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "open");
+        h.frames(3, vec![], Modifiers::NONE);
+        h.type_text("The sea was calm.");
+        h.key(Key::S, Modifiers::COMMAND);
+        h.key(Key::Enter, Modifiers::NONE);
+
+        let mut again = Harness::new();
+        again.app.shelf.dir = Some(dir.clone());
+        again.frames(3, vec![], Modifiers::NONE);
+        again.key(Key::O, Modifiers::COMMAND);
+        assert!(again.labels().contains("The sea was calm"), "the story is on the list");
+        again.click_widget("The sea was calm");
+        again.frames(3, vec![], Modifiers::NONE);
+        assert_eq!(again.text(), "The sea was calm.");
+        assert_eq!(again.app.path.as_deref(), Some(dir.join("The sea was calm.caprice").as_path()), "and saves back there");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn in_the_browser_escape_saves_nothing() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "cancel");
+        h.frames(3, vec![], Modifiers::NONE);
+        h.type_text("Draft");
+        h.key(Key::S, Modifiers::COMMAND);
+        h.key(Key::Escape, Modifiers::NONE);
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.app.path.is_none() && h.app.dialog.is_none() && !dir.exists(), "nothing saved, nothing waiting");
+        assert!(!h.labels().contains("Stories are kept in this browser"));
     }
 }

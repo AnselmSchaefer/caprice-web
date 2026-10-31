@@ -409,8 +409,12 @@ impl Start {
     }
 }
 
-/// "~/Writing" for a folder in the home folder, to read at a glance.
+/// "~/Writing" for a folder in the home folder, to read at a glance. In the browser every story is
+/// kept in the browser (`shelf.rs`).
 fn folder_name(path: &Path) -> String {
+    if cfg!(target_arch = "wasm32") {
+        return "In this browser".into();
+    }
     let folder = path.parent().unwrap_or(path);
     let home = std::env::var_os("HOME").map(PathBuf::from);
     match home.as_ref().and_then(|h| folder.strip_prefix(h).ok()) {

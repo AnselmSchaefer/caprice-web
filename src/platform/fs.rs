@@ -2,7 +2,8 @@
 //! files (`std::fs` only fails there), so the browser keeps its own: whole files by path, in memory,
 //! read from IndexedDB before the app starts and written back to it after each change. Everything
 //! that keeps files (versions, the theme, the word goal, the stories last opened) works the same
-//! on both, by path.
+//! on both, by path. Two folders are special in the browser: a file written under `/downloads`
+//! is given to the writer as a download, and one under `/uploads` (a file they gave) is not kept.
 //!
 //! In the browser only the page's main thread has the files: a worker sees none, rather than
 //! share a lock with it (R31).
@@ -195,10 +196,19 @@ mod web {
         FILES.with_borrow(|f| f.read(path))
     }
 
+    /// Written to the downloads, a file is given to the writer, not kept; one they gave (in the
+    /// uploads) is kept in memory only, to be read.
     pub fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
+        use crate::platform::{DOWNLOADS, UPLOADS};
+        if path.starts_with(DOWNLOADS) {
+            crate::platform::download(&path.file_name().unwrap_or_default().to_string_lossy(), bytes);
+            return Ok(());
+        }
         let now = crate::platform::since_epoch().as_secs();
         FILES.with_borrow_mut(|f| f.write(path, bytes, now));
-        files_put(&path.to_string_lossy(), bytes, now as f64);
+        if !path.starts_with(UPLOADS) {
+            files_put(&path.to_string_lossy(), bytes, now as f64);
+        }
         Ok(())
     }
 

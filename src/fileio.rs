@@ -448,9 +448,8 @@ impl App {
                     Some(p) => p.file_name().map_or("Untitled.caprice".into(), |n| n.to_string_lossy().into_owned()),
                     None => format!("{}.caprice", self.suggested_name()),
                 };
-                self.ask_path(ctx, DialogFor::Save, move || {
-                    crate::platform::FileDialog::new().add_filter("Caprice document", &["caprice"]).set_file_name(name).save_file()
-                });
+                let dialog = crate::platform::Dialog::new().add_filter("Caprice document", &["caprice"]).set_file_name(name);
+                self.ask_path(ctx, DialogFor::Save, dialog);
             }
         }
     }
@@ -478,12 +477,8 @@ impl App {
             .as_ref()
             .and_then(|p| p.file_stem())
             .map_or("Untitled".to_owned(), |s| s.to_string_lossy().into_owned());
-        self.ask_path(ctx, DialogFor::ExportDocx, move || {
-            crate::platform::FileDialog::new()
-                .add_filter("Word document", &["docx"])
-                .set_file_name(format!("{stem}.docx"))
-                .save_file()
-        });
+        let dialog = crate::platform::Dialog::new().add_filter("Word document", &["docx"]).set_file_name(format!("{stem}.docx"));
+        self.ask_path(ctx, DialogFor::ExportDocx, dialog);
     }
 
     pub(crate) fn export_docx_to(&mut self, path: PathBuf) {
@@ -505,24 +500,51 @@ impl App {
     }
 
     fn choose_file_to_open(&mut self, ctx: &egui::Context) {
-        self.ask_path(ctx, DialogFor::Open, || {
-            crate::platform::FileDialog::new().add_filter("Caprice document", &["caprice"]).pick_file()
-        });
+        self.ask_path(ctx, DialogFor::Open, crate::platform::Dialog::new().add_filter("Caprice document", &["caprice"]));
     }
 
     /// Show a file dialog without holding up the frames: the window keeps drawing (and answering
-    /// the compositor) while it is open, and the chosen path is acted on in `poll_dialog`.
-    pub fn ask_path(&mut self, ctx: &egui::Context, purpose: DialogFor, show: impl FnOnce() -> Option<PathBuf> + Send + 'static) {
+    /// the compositor) while it is open, and the chosen path is acted on in `poll_dialog`. With a
+    /// shelf (in the browser), saving and opening a story ask there instead (`shelf.rs`). In the
+    /// browser a file to read comes from the page's picker, and one to write is downloaded.
+    pub fn ask_path(&mut self, ctx: &egui::Context, purpose: DialogFor, dialog: crate::platform::Dialog) {
         if self.dialog.is_some() {
             return;
         }
         let (tx, rx) = channel();
-        let wake = crate::platform::Waker::new(ctx);
-        crate::platform::spawn(move || {
-            let _ = tx.send(show());
-            wake.wake();
-        });
+        let pick = matches!(purpose, DialogFor::Open | DialogFor::Picture);
+        match purpose {
+            DialogFor::Save if self.shelf.dir.is_some() => self.shelf.ask_name(dialog.name, tx),
+            DialogFor::Open if self.shelf.dir.is_some() => self.shelf.ask_open(tx),
+            #[cfg(target_arch = "wasm32")]
+            _ if pick => crate::platform::upload(&dialog, crate::platform::UPLOADS.into(), tx, crate::platform::Waker::new(ctx)),
+            #[cfg(target_arch = "wasm32")]
+            _ => {
+                let name = dialog.name.unwrap_or_else(|| "Untitled".into());
+                let _ = tx.send(Some(PathBuf::from(crate::platform::DOWNLOADS).join(name)));
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            _ => {
+                let wake = crate::platform::Waker::new(ctx);
+                crate::platform::spawn(move || {
+                    let _ = tx.send(dialog.show(pick));
+                    wake.wake();
+                });
+            }
+        }
         self.dialog = Some(PendingDialog { purpose, rx });
+    }
+
+    /// In the browser: the story as a `.caprice` file, downloaded, to keep or take elsewhere.
+    #[cfg(target_arch = "wasm32")]
+    pub fn download_story(&mut self) {
+        let json = serde_json::to_string_pretty(&self.doc_file()).unwrap_or_default();
+        let name = format!("{}.caprice", if self.path.is_some() { self.story_name() } else { self.suggested_name() });
+        let path = PathBuf::from(crate::platform::DOWNLOADS).join(&name);
+        self.status = match crate::platform::fs::write(path, json) {
+            Ok(()) => format!("- downloaded {name}"),
+            Err(e) => format!("- download failed: {e}"),
+        };
     }
 
     /// Act on the path from a file dialog once the user has chosen it.

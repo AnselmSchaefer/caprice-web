@@ -95,8 +95,9 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `fonts.rs` | Installed fonts loaded on demand, a missing one drawn with a twin of the same widths |
 | `theme.rs` | The themes (`Theme`, `Palette`): colours and egui visuals around the page, the palette in use (`pal`), fading from one to the next, the choice kept in the data folder; the page's own `PAPER` and `INK` |
 | `eggs.rs` | What is hidden in the magic themes: in the Magic Garden a plant a chapter growing on the desk and a balloon flying in each new chapter title; in the Magic City a street of houses a chapter, a floor a page, and a dragon flying a new title in held in its feet; in the Magic Sea a ship a chapter, built in a yard a part a page and launched into the bay when the next chapter begins |
-| `platform.rs` | What the desktop and the browser do differently: background work (`spawn`, `Waker`, `keep_awake`), the time, the run's id, the data folder, file dialogs (R31) |
+| `platform.rs` | What the desktop and the browser do differently: background work (`spawn`, `Waker`, `keep_awake`), the time and time zone, the run's id, the data folder, file dialogs (`Dialog`), uploads and downloads (R31) |
 | `platform/fs.rs` | Files: the system's on the desktop; in the browser, kept in memory by path and mirrored to IndexedDB (R31) |
+| `shelf.rs` | Stories kept in the browser: saving asks for a name, opening lists them (with an upload), each answering the waiting file dialog with a path (R31) |
 
 ---
 
@@ -1200,9 +1201,23 @@ them; it asks `platform` instead, whose desktop half does what Caprice always di
   there while a file is in it. Only the main thread has them (a `thread_local`): a worker sees no
   files rather than share a lock. So versions (R22), the theme, the word goal and the stories
   last opened work the same, by path, under `platform::data_dir` (`/caprice` in the browser).
-- **The time now** is `platform::since_epoch`, a run's id `platform::run_id`.
-- **File dialogs** are `platform::FileDialog`: `rfd`'s on the desktop; in the browser, for now, one
-  that chooses nothing (as if cancelled), until the browser's own ways come in (`WEB_PLAN.md`).
+- **The time now** is `platform::since_epoch`, the time zone `platform::utc_offset` (`date` on the
+  desktop, the page's `Date` in the browser), a run's id `platform::run_id`.
+- **File dialogs** are described, not shown, by the code that wants a path: a `platform::Dialog`
+  (the kinds of file, a name to suggest) given to `App::ask_path` with what it is for
+  (`DialogFor`). Every answer is a path, acted on in `poll_dialog`, whichever way it came:
+  - on the desktop, `rfd`'s dialog on a background thread, as always;
+  - with a shelf (`App::shelf.dir`: always in the browser, never on the desktop), saving and
+    opening a story ask in Caprice's own windows (`shelf.rs`): a name, and the story becomes
+    `<shelf>/<name>.caprice`; or a story from the shelf's list, or one uploaded onto it. So a
+    story in the browser has a path like any other, and autosave (R22) and the stories last
+    opened (R27; the welcome says "In this browser") work unchanged;
+  - in the browser, a file to read (a picture) comes from the page's picker into `/uploads`,
+    kept in memory only; a file to write (Word, PDF, the scene picture) gets a path in
+    `/downloads`, and writing there downloads it. "Download a copy (.caprice)" in the File menu
+    is the browser's way to take a story to the computer.
+  So a writer of files writes through `platform::fs` (never `image::save_buffer` and the like,
+  which go to the disk themselves): the scene picture's PNG is made in memory first.
 - **"Follow my writing" is not offered in the browser** (the Scene menu hides its checkbox), for
   now. It is the only way into `Mode::Writing`, which is never saved.
 
@@ -1212,10 +1227,14 @@ lock or `App` state into the work. Anything new that needs the system goes throu
 Tests: `clippy.toml` disallows `std::thread::spawn`, `SystemTime::now`, `std::process::id`, the
 `std::fs` calls and `Path::exists` outside `platform` (test modules are let off: they run only
 natively). `the_browser_s_files_are_read_back_as_written_and_folders_hold_what_is_in_them` and
-`a_folder_of_the_browser_s_files_is_gone_with_its_last_file` test `fs::Memory`. The browser build
+`a_folder_of_the_browser_s_files_is_gone_with_its_last_file` test `fs::Memory`;
+`in_the_browser_saving_asks_for_a_name_and_the_story_is_kept_under_it`,
+`in_the_browser_opening_lists_the_stories_kept_and_opens_the_one_chosen` and
+`in_the_browser_escape_saves_nothing` test the shelf, given a folder as the browser has. The browser build
 is checked by `web/build.sh`, and running it by `web/smoke.mjs` (headless Chromium: the welcome, a
-worker, a blank story, typing, a version kept in IndexedDB and listed again after a reload; it
-reports any error on the page). The native tests cover the desktop half.
+blank story, typing, a picture uploaded, the PDF downloaded, a worker, a version kept in IndexedDB
+and listed again after a reload, a story saved by name, downloaded as `.caprice` and Word,
+uploaded back, and listed on the welcome; it reports any error on the page). The native tests cover the desktop half.
 
 ---
 
@@ -1224,6 +1243,10 @@ reports any error on the page). The native tests cover the desktop half.
 **Something new in the background** (a rendering, a request): `platform::spawn` with owned data in,
 a channel out, a `platform::Waker` to ask for a frame; nothing behind a lock shared with the frame
 (R31). Then check it in the browser: `web/build.sh`, `web/smoke.mjs`.
+
+**A new file dialog**: a `platform::Dialog` to `ask_path` with a new `DialogFor`, acted on in
+`poll_dialog`; it reads or writes through `platform::fs`. Decide what it is in the browser: a pick
+(from the page's picker, in `/uploads`) or a file given (`/downloads`), and add it to `smoke.mjs`.
 
 **A new paragraph attribute** (like line spacing or chapter title): `ParaAttrs` → `run_format` /
 `paragraph_job` → the toolbar (`ui.rs`) → file format default (R9) → Word mapping (R10) → whether

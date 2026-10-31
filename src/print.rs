@@ -366,9 +366,7 @@ impl App {
     fn print_now(&mut self, ctx: &egui::Context) {
         let Some(printer) = self.print.to.clone() else {
             let name = format!("{}.pdf", self.print_title());
-            self.ask_path(ctx, DialogFor::PrintPdf, move || {
-                crate::platform::FileDialog::new().add_filter("PDF", &["pdf"]).set_file_name(name).save_file()
-            });
+            self.ask_path(ctx, DialogFor::PrintPdf, crate::platform::Dialog::new().add_filter("PDF", &["pdf"]).set_file_name(name));
             return;
         };
         let pages = self.print.pages(self.target, self.doc.pages());

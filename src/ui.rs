@@ -289,6 +289,8 @@ enum FileAction {
     Versions,
     Revert,
     Info,
+    /// In the browser: the story as a file.
+    Download,
 }
 
 /// What was clicked in the tools this frame, done once they are all drawn.
@@ -533,7 +535,9 @@ impl App {
                 ("Drop changes since saving", "", FileAction::Revert),
                 ("Document info…", "", FileAction::Info),
             ];
-            for (label, shortcut, action) in items {
+            // In the browser the story can also go to the computer as a file (`shelf.rs`).
+            let download = cfg!(target_arch = "wasm32").then_some(("Download a copy (.caprice)", "", FileAction::Download));
+            for (label, shortcut, action) in items.into_iter().chain(download) {
                 let button = egui::Button::new(label).shortcut_text(shortcut).frame(false);
                 if ui.add(button).clicked() {
                     out.file = Some(action);
@@ -794,9 +798,8 @@ impl App {
         }
         match out.insert {
             Some(InsertAction::Picture) => {
-                self.ask_path(ctx, crate::fileio::DialogFor::Picture, || {
-                    crate::platform::FileDialog::new().add_filter("Pictures", &["png", "jpg", "jpeg"]).pick_file()
-                });
+                let dialog = crate::platform::Dialog::new().add_filter("Pictures", &["png", "jpg", "jpeg"]);
+                self.ask_path(ctx, crate::fileio::DialogFor::Picture, dialog);
             }
             Some(InsertAction::TextBox(look)) => self.insert_text_box(ctx, look),
             Some(InsertAction::Band(top, band)) => self.set_band(top, band),
@@ -812,6 +815,10 @@ impl App {
             Some(FileAction::Versions) => self.open_versions(),
             Some(FileAction::Revert) => self.drop_changes(ctx),
             Some(FileAction::Info) => self.open_info(),
+            #[cfg(target_arch = "wasm32")]
+            Some(FileAction::Download) => self.download_story(),
+            #[cfg(not(target_arch = "wasm32"))]
+            Some(FileAction::Download) => {}
             None => {}
         }
     }

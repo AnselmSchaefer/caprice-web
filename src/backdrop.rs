@@ -921,13 +921,11 @@ impl App {
             return;
         }
         let stem = self.path.as_ref().and_then(|p| p.file_stem()).map_or("Scene".to_owned(), |s| format!("{} scene", s.to_string_lossy()));
-        self.ask_path(ctx, crate::fileio::DialogFor::ScenePicture, move || {
-            crate::platform::FileDialog::new()
-                .add_filter("PNG picture", &["png"])
-                .add_filter("SVG drawing", &["svg"])
-                .set_file_name(format!("{stem}.png"))
-                .save_file()
-        });
+        let dialog = crate::platform::Dialog::new()
+            .add_filter("PNG picture", &["png"])
+            .add_filter("SVG drawing", &["svg"])
+            .set_file_name(format!("{stem}.png"));
+        self.ask_path(ctx, crate::fileio::DialogFor::ScenePicture, dialog);
     }
 
     pub fn save_scene_picture_to(&mut self, path: std::path::PathBuf) {
@@ -938,7 +936,11 @@ impl App {
         } else {
             rasterize(&svg, RENDER_WIDTH).and_then(|image| {
                 let rgba: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
-                image::save_buffer(&path, &rgba, image.size[0] as u32, image.size[1] as u32, image::ColorType::Rgba8).map_err(|e| e.to_string())
+                let rgba = image::RgbaImage::from_raw(image.size[0] as u32, image.size[1] as u32, rgba).ok_or("the picture has no size")?;
+                // Made in memory, then written as any file is (in the browser, downloaded).
+                let mut png = std::io::Cursor::new(Vec::new());
+                rgba.write_to(&mut png, image::ImageFormat::Png).map_err(|e| e.to_string())?;
+                crate::platform::fs::write(&path, png.into_inner()).map_err(|e| e.to_string())
             })
         };
         let name = path.file_name().map_or(String::new(), |n| n.to_string_lossy().into_owned());

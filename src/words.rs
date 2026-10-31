@@ -48,9 +48,7 @@ impl Doc {
 pub(crate) fn offset() -> i64 {
     static OFFSET: OnceLock<i64> = OnceLock::new();
     *OFFSET.get_or_init(|| {
-        let out = std::process::Command::new("date").arg("+%z").output().ok();
-        let z = out.map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned()).unwrap_or_default();
-        utc_offset(&z).unwrap_or(0)
+        crate::platform::utc_offset().unwrap_or(0)
     })
 }
 
@@ -60,7 +58,8 @@ pub fn today(unix: u64) -> i64 {
 }
 
 /// Seconds east of UTC in `date +%z` output ("+0200", "-0530").
-fn utc_offset(z: &str) -> Option<i64> {
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub(crate) fn utc_offset(z: &str) -> Option<i64> {
     let (sign, digits) = match z.as_bytes().first()? {
         b'+' => (1, &z[1..]),
         b'-' => (-1, &z[1..]),
