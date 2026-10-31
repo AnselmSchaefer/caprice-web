@@ -209,7 +209,7 @@ pub fn free_name(dir: &std::path::Path, name: &str) -> PathBuf {
 mod browser {
     use wasm_bindgen::prelude::*;
 
-    // What the page does for files: its picker, and downloads. Bytes going out are copied out of the
+    // What the page does for files: its picker, downloads, and fetching its own. Bytes going out are copied out of the
     // app's memory first, which is shared with the workers and so cannot go into a Blob as it is.
     #[wasm_bindgen(inline_js = r#"
         export function pick_file(accept) {
@@ -224,6 +224,11 @@ mod browser {
                 input.addEventListener("cancel", () => done(null));
                 input.click();
             });
+        }
+        export async function fetch_bytes(url) {
+            const r = await fetch(url);
+            if (!r.ok) throw new Error(`${url}: ${r.status}`);
+            return new Uint8Array(await r.arrayBuffer());
         }
         export function download(name, bytes) {
             const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)]));
@@ -241,6 +246,14 @@ mod browser {
         async fn js_pick_file(accept: &str) -> JsValue;
         #[wasm_bindgen(js_name = download)]
         fn js_download(name: &str, bytes: &[u8]);
+        #[wasm_bindgen(js_name = fetch_bytes, catch)]
+        async fn js_fetch_bytes(url: &str) -> Result<JsValue, JsValue>;
+    }
+
+    /// The file at `url`, from where the page came from.
+    pub async fn fetch(url: &str) -> Result<Vec<u8>, String> {
+        let bytes = js_fetch_bytes(url).await.map_err(|e| format!("{e:?}"))?;
+        Ok(js_sys::Uint8Array::new(&bytes).to_vec())
     }
 
     /// The file the writer picks: its name and bytes.
@@ -259,4 +272,4 @@ mod browser {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) use browser::download;
+pub(crate) use browser::{download, fetch};

@@ -731,7 +731,19 @@ Liberation Serif, and prints the same (R20 embeds the twin, as drawn).
 - With neither the font nor a twin installed, it is drawn with egui's own font, and the pages
   break differently. Only add a twin that is truly metric-compatible: one that is merely alike
   moves page breaks without saying so.
-- Tests: `a_story_in_a_font_not_installed_takes_the_pages_it_takes_in_its_twin_and_keeps_its_name`
+- **A font loaded is drawn from the next frame**, so pages measured before then are measured with
+  egui's own font. The frame in which fonts become usable (`FontBook::activate_pending` says so)
+  works the pages out again (`full_paginate`). Opening a story in a font not loaded yet used to
+  keep the wrong pages (a third more text on each) until something else laid them out. In the
+  browser a font's files come later still, fetched; the same frame takes them.
+- **In the browser no font is installed.** Liberation Serif, Sans and Mono (the twins of Times New
+  Roman, Arial and Courier New) and Noto Serif come with the app (`web/fonts`, with their
+  licences) and count as installed (`SHIPPED`); a family's four faces are fetched together the
+  first time it is wanted, and loaded once they are all in (`take_fetched`, after the fonts of
+  the frame before are made usable, never in the same frame: egui panics on a family it has not
+  got yet).
+- Tests: `a_story_opened_in_a_font_not_yet_loaded_has_the_pages_that_font_gives`,
+  `a_story_in_a_font_not_installed_takes_the_pages_it_takes_in_its_twin_and_keeps_its_name`
   (it finds a pair with only the twin installed, and passes quietly on a machine that has none),
   and in `fonts.rs` `a_missing_font_is_drawn_with_an_installed_twin_of_the_same_widths`.
 
@@ -1201,6 +1213,8 @@ them; it asks `platform` instead, whose desktop half does what Caprice always di
   there while a file is in it. Only the main thread has them (a `thread_local`): a worker sees no
   files rather than share a lock. So versions (R22), the theme, the word goal and the stories
   last opened work the same, by path, under `platform::data_dir` (`/caprice` in the browser).
+- **Fonts** are installed on the desktop, and come with the app in the browser, fetched with
+  `platform::fetch` when first wanted (R21).
 - **The time now** is `platform::since_epoch`, the time zone `platform::utc_offset` (`date` on the
   desktop, the page's `Date` in the browser), a run's id `platform::run_id`.
 - **File dialogs** are described, not shown, by the code that wants a path: a `platform::Dialog`

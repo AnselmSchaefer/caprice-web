@@ -569,7 +569,10 @@ impl App {
         self.themes.show(&ctx);
         theme::paint_desk(ui.painter(), area);
 
-        self.fonts.activate_pending();
+        // Pages measured before a font of theirs could be drawn are measured again with it (R21).
+        if self.fonts.activate_pending(&ctx) {
+            self.doc.full_paginate(&ctx, &self.typing);
+        }
         if let Some(path) = self.startup_file.take() {
             self.open_path(&ctx, path);
         }
@@ -4528,6 +4531,29 @@ mod tests {
         let twin_pages = pages_in(twin);
         assert!(twin_pages.len() > 1);
         assert_eq!(pages_in(missing), twin_pages, "{missing} drawn with {twin}");
+    }
+
+    #[test]
+    fn a_story_opened_in_a_font_not_yet_loaded_has_the_pages_that_font_gives() {
+        let font = "Liberation Mono";
+        if !Harness::new().app.fonts.is_installed(font) {
+            eprintln!("{font} is not installed here");
+            return;
+        }
+        let mut h = Harness::new();
+        h.frames(3, vec![], Modifiers::NONE);
+        h.type_text(&"It was nearly midnight and the Prime Minister sat alone in his office. ".repeat(120));
+        for st in &mut h.app.doc.flow.styles {
+            st.font = font.into();
+        }
+        // Opened, the font is loaded then, and drawn from the next frame (in the browser, once its
+        // files have come): the pages measured before it are measured again.
+        let mut h = h.reopened("font-later");
+        h.frames(3, vec![], Modifiers::NONE);
+        let shown: Vec<usize> = h.app.doc.spans.iter().map(|s| s.start).collect();
+        let (ctx, typing) = (h.ctx.clone(), h.app.typing.clone());
+        h.app.doc.full_paginate(&ctx, &typing);
+        assert_eq!(shown, h.app.doc.spans.iter().map(|s| s.start).collect::<Vec<_>>());
     }
 
     impl Harness {

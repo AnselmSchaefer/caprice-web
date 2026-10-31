@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "dist");
-const types = { ".html": "text/html", ".js": "text/javascript", ".wasm": "application/wasm", ".svg": "image/svg+xml" };
+const types = { ".html": "text/html", ".js": "text/javascript", ".wasm": "application/wasm", ".svg": "image/svg+xml", ".ttf": "font/ttf" };
 const port = Number(process.argv[2] ?? 8080);
 http.createServer((req, res) => {
   let file = path.join(root, decodeURIComponent(req.url.split("?")[0]));

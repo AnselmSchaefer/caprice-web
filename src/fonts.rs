@@ -53,6 +53,13 @@ pub fn drawn_with(font: &str, installed: &BTreeSet<String>) -> Option<String> {
     twins.iter().find(|t| installed.contains(**t)).map(|t| (*t).to_owned())
 }
 
+/// The fonts that come with Caprice in the browser, which has none installed: the twins of Times
+/// New Roman, Arial and Courier New, and a book face. Each is fetched from `fonts/` (`web/fonts`)
+/// the first time it is wanted, its four faces as `<file>-Regular.ttf` and so on.
+#[cfg(target_arch = "wasm32")]
+const SHIPPED: [(&str, &str); 4] =
+    [("Liberation Serif", "LiberationSerif"), ("Liberation Sans", "LiberationSans"), ("Liberation Mono", "LiberationMono"), ("Noto Serif", "NotoSerif")];
+
 pub struct FontBook {
     db: fontdb::Database,
     /// Every installed family (with an upright face).
@@ -62,17 +69,35 @@ pub struct FontBook {
     defs: egui::FontDefinitions,
     requested: BTreeSet<String>,
     pending: Vec<String>,
+    /// In the browser: fonts wanted whose family is still on its way (stored name, and the family).
+    #[cfg(target_arch = "wasm32")]
+    waiting: Vec<(String, String)>,
+    /// Font files fetched, not yet given to `db`.
+    #[cfg(target_arch = "wasm32")]
+    fetched: std::rc::Rc<std::cell::RefCell<Vec<Vec<u8>>>>,
+    #[cfg(target_arch = "wasm32")]
+    fetching: BTreeSet<String>,
 }
 
 impl FontBook {
     pub fn new() -> Self {
-        let mut db = fontdb::Database::new();
-        db.load_system_fonts();
+        // The browser has no fonts installed: they come later, fetched (`SHIPPED`).
+        #[cfg(not(target_arch = "wasm32"))]
+        let db = {
+            let mut db = fontdb::Database::new();
+            db.load_system_fonts();
+            db
+        };
+        #[cfg(target_arch = "wasm32")]
+        let db = fontdb::Database::new();
         let installed: BTreeSet<String> = db
             .faces()
             .filter(|f| f.style == fontdb::Style::Normal)
             .filter_map(|f| f.families.first().map(|(n, _)| n.clone()))
             .collect();
+        // In the browser the shipped fonts count as installed: they are there for the fetching.
+        #[cfg(target_arch = "wasm32")]
+        let installed: BTreeSet<String> = installed.into_iter().chain(SHIPPED.iter().map(|(family, _)| (*family).to_owned())).collect();
         let mut families: Vec<(String, String)> = COMMON_FONTS
             .iter()
             .filter(|f| installed.contains(**f))
@@ -89,6 +114,12 @@ impl FontBook {
             defs: egui::FontDefinitions::default(),
             requested: BTreeSet::new(),
             pending: Vec::new(),
+            #[cfg(target_arch = "wasm32")]
+            waiting: Vec::new(),
+            #[cfg(target_arch = "wasm32")]
+            fetched: Default::default(),
+            #[cfg(target_arch = "wasm32")]
+            fetching: BTreeSet::new(),
         }
     }
 
@@ -115,7 +146,19 @@ impl FontBook {
                 actual
             }
         };
-        let families = [fontdb::Family::Name(&actual)];
+        // In the browser a family's files come when first wanted; the font is loaded once they are in.
+        #[cfg(target_arch = "wasm32")]
+        if !self.db.faces().any(|f| f.families.iter().any(|(n, _)| *n == actual)) {
+            self.fetch(ctx, &actual);
+            self.waiting.push((font.to_owned(), actual));
+            return;
+        }
+        self.load(ctx, font, &actual, immediate);
+    }
+
+    /// Give egui the faces of the installed family `actual` under the stored name `font`.
+    fn load(&mut self, ctx: &egui::Context, font: &str, actual: &str, immediate: bool) {
+        let families = [fontdb::Family::Name(actual)];
         let query = |bold: bool, italic: bool| fontdb::Query {
             families: &families,
             weight: if bold { fontdb::Weight::BOLD } else { fontdb::Weight::NORMAL },
@@ -156,9 +199,58 @@ impl FontBook {
         &self.defs
     }
 
-    pub fn activate_pending(&mut self) {
-        if !self.pending.is_empty() {
-            LOADED.lock().unwrap().append(&mut self.pending);
+    /// Make the fonts loaded last frame usable (egui has them from this frame on). In the browser,
+    /// also load the fonts whose files have come since. Whether any font became usable: then the
+    /// pages are worked out again, as they were measured without it.
+    pub fn activate_pending(&mut self, ctx: &egui::Context) -> bool {
+        let any = !self.pending.is_empty();
+        LOADED.lock().unwrap().append(&mut self.pending);
+        // Only after: what is loaded now, egui has from the next frame on, so it waits until then.
+        #[cfg(target_arch = "wasm32")]
+        self.take_fetched(ctx);
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = ctx;
+        any
+    }
+
+    /// Fetch the files of the shipped family `family`, once.
+    #[cfg(target_arch = "wasm32")]
+    fn fetch(&mut self, ctx: &egui::Context, family: &str) {
+        let Some((_, file)) = SHIPPED.iter().find(|(f, _)| *f == family) else { return };
+        if !self.fetching.insert(family.to_owned()) {
+            return;
+        }
+        let (fetched, ctx) = (self.fetched.clone(), ctx.clone());
+        let file = (*file).to_owned();
+        wasm_bindgen_futures::spawn_local(async move {
+            // The faces come in together, so a family is never loaded with some of them only.
+            let mut faces = Vec::new();
+            for face in ["Regular", "Bold", "Italic", "BoldItalic"] {
+                match crate::platform::fetch(&format!("fonts/{file}-{face}.ttf")).await {
+                    Ok(bytes) => faces.push(bytes),
+                    Err(e) => web_sys::console::error_1(&format!("Caprice could not fetch a font: {e}").into()),
+                }
+            }
+            fetched.borrow_mut().extend(faces);
+            ctx.request_repaint();
+        });
+    }
+
+    /// Give `db` the font files that have come, and load the fonts that waited for them.
+    #[cfg(target_arch = "wasm32")]
+    fn take_fetched(&mut self, ctx: &egui::Context) {
+        let files = std::mem::take(&mut *self.fetched.borrow_mut());
+        if files.is_empty() {
+            return;
+        }
+        for bytes in files {
+            self.db.load_font_data(bytes);
+        }
+        let has = |db: &fontdb::Database, family: &str| db.faces().any(|f| f.families.iter().any(|(n, _)| n == family));
+        let (ready, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.waiting).into_iter().partition(|(_, a)| has(&self.db, a));
+        self.waiting = waiting;
+        for (font, actual) in ready {
+            self.load(ctx, &font, &actual, false);
         }
     }
 }
