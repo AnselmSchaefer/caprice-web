@@ -15,6 +15,10 @@ behaviour**: its rules (§4) say what depends on what, and which tests guard eac
   `node web/serve.mjs 8080` (it sends the two headers workers need) and open http://localhost:8080/.
   `node web/smoke.mjs <dir>` with the server running: headless Chromium, screenshots, page errors.
   `cd web && npm install` once for it. Trunk and `wasm-bindgen-cli` 0.2.130 come from `cargo install`.
+- Deploy, by hand only: `web/build.sh`, then `cd web && npx wrangler deploy` (Cloudflare Workers,
+  static files from `web/dist`, headers from `web/_headers`; see `DEPLOY_PLAN.md`). Live at
+  https://caprice-web.caprice-web-checks.workers.dev; check it with
+  `CAPRICE_URL=<that address> node web/smoke.mjs <dir>`. Never deploy without being asked.
 - `cargo mutants` for untested code. `/tmp` is a small tmpfs here: set `TMPDIR` to a dir on disk.
 - Word output check: `CAPRICE_SAMPLE_OUT=out.docx cargo test sample_docx`, then
   `soffice --headless --convert-to pdf out.docx`

@@ -5,6 +5,8 @@ TECHNICAL_DESCRIPTION.md
 FORK_REQUIREMENTS.md
 CHAPTERS_PLAN.md
 WEB_PLAN.md
+DEPLOY_PLAN.md
 mutants.out*/
 /web/dist
 /web/node_modules
+/web/.wrangler

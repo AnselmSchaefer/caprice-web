@@ -27,6 +27,13 @@ async function click(x, y) {
   await page.waitForTimeout(800);
 }
 
+// The app has started once the page's "Caprice is opening…" is gone (it may first download several
+// MB from far away), and drawn its first frames a moment later.
+async function started() {
+  await page.waitForSelector("#loading", { state: "detached", timeout: 120000 });
+  await page.waitForTimeout(2500);
+}
+
 // The paths of the files the browser keeps for Caprice (IndexedDB).
 const kept = () => page.evaluate(() => new Promise((done, failed) => {
   const r = indexedDB.open("caprice", 1);
@@ -81,7 +88,7 @@ const VERSIONS = [100, 303], DOWNLOAD = [120, 417];
 
 await page.goto(url);
 console.log("crossOriginIsolated:", await page.evaluate(() => crossOriginIsolated));
-await page.waitForTimeout(4000);
+await started();
 await page.screenshot({ path: `${out}/1-welcome.png` });
 
 // The welcome's "Blank page", then a story. The sheet flies onto the desk first.
@@ -119,7 +126,7 @@ console.log("versions kept:", (await kept()).filter(k => k.startsWith("/caprice/
 
 // After a reload the version is still there: a new blank story lists it as a story never saved.
 await page.reload();
-await page.waitForTimeout(4000);
+await started();
 await click(280, 340);
 await page.waitForTimeout(1500);
 await click(...FILE);
@@ -225,7 +232,7 @@ await page.screenshot({ path: `${out}/9-new.png` });
 
 // Opened again, the welcome lists the stories last opened or saved.
 await page.reload();
-await page.waitForTimeout(4000);
+await started();
 await page.screenshot({ path: `${out}/10-welcome-again.png` });
 
 console.log(errors.length ? "errors:\n  " + [...new Set(errors)].slice(0, 8).join("\n  ") : "no errors");

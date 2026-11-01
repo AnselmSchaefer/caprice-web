@@ -1,0 +1,10 @@
+// The Cloudflare Worker that serves Caprice Web: static files only, from web/dist (built by
+// web/build.sh). Deployed by hand: `npx wrangler deploy`, here in web/. See DEPLOY_PLAN.md.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "caprice-web",
+  "compatibility_date": "2026-10-31",
+  "assets": {
+    "directory": "./dist"
+  }
+}
