@@ -1,6 +1,6 @@
 // Opens Caprice in headless Chromium and goes through what the browser version can do so far,
 // taking screenshots: node web/smoke.mjs [out dir]. Serve web/dist first (node web/serve.mjs 8080).
-// It prints what it found, and every error on the page.
+// It says what it found, and fails (exit code 1) if any check fails or the page reports an error.
 import { chromium } from "playwright-core";
 import fs from "node:fs";
 import path from "node:path";
@@ -15,6 +15,13 @@ const errors = [];
 page.on("pageerror", e => errors.push(e.message.split("\n")[0]));
 page.on("console", m => { if (m.type() === "error") errors.push(m.text().split("\n")[0]); });
 const workers = [];
+
+// Each check says what it found; any that fails, or any error on the page, fails the run (CI).
+const failed = [];
+function check(name, ok, seen = "") {
+  console.log(`${ok ? "✓" : "✗"} ${name}${seen === "" ? "" : `: ${seen}`}`);
+  if (!ok) failed.push(name);
+}
 page.on("worker", w => workers.push(w.url()));
 
 // egui opens a menu on a press and a release in different frames, which an instant click is not.
@@ -87,11 +94,11 @@ const FILE = [85, 38], NEW = [80, 75], OPEN = [93, 113], SAVE = [84, 151], EXPOR
 const VERSIONS = [100, 303], DOWNLOAD = [120, 417];
 
 await page.goto(url);
-console.log("crossOriginIsolated:", await page.evaluate(() => crossOriginIsolated));
+check("the page is cross-origin isolated, so the workers share memory", await page.evaluate(() => crossOriginIsolated));
 // The Content-Security-Policy is in force: an inline script that is not one of the page's own is
 // refused, and the browser says so. (Playwright's own evaluate is exempt from the policy.)
 const errorsBefore = errors.length;
-console.log("CSP refuses a stranger's script:", await page.evaluate(() => new Promise(done => {
+check("the Content-Security-Policy refuses a stranger's script", await page.evaluate(() => new Promise(done => {
   addEventListener("securitypolicyviolation", e => done(e.violatedDirective.startsWith("script-src")), { once: true });
   const s = document.createElement("script");
   s.textContent = "window.stranger = true;";
@@ -116,7 +123,8 @@ await upload(icon, [797, 38], [803, 75]);
 await page.screenshot({ path: `${out}/3-picture.png` });
 
 // Print: the pages as a PDF are a download, or open in a new tab for the browser to print.
-console.log("PDF:", await download(FILE, PRINT, [691, 286]));
+const pdf = await download(FILE, PRINT, [691, 286]);
+check("Save PDF downloads the pages", pdf.endsWith(".pdf"), pdf);
 // (Headless Chromium shows a PDF tab with no address, so what the page opens is noted on the way.)
 await page.evaluate(() => {
   const open = window.open;
@@ -126,7 +134,8 @@ await page.evaluate(() => {
 await click(...FILE);
 await click(...PRINT);
 await click(770, 286);
-console.log("printing in a tab:", await page.evaluate(() => window.opened.map(u => u.split(":")[0])));
+const opened = await page.evaluate(() => window.opened.map(u => u.split(":")[0]));
+check("Print… opens the PDF in a new tab", opened[0] === "blob", opened.join(", "));
 for (const tab of page.context().pages().filter(p => p !== page)) await tab.close();
 
 // File → Versions… keeps a version of the story, in the browser's files.
@@ -134,7 +143,8 @@ await click(...FILE);
 await click(...VERSIONS);
 await page.waitForTimeout(1000);
 await page.screenshot({ path: `${out}/4-versions.png` });
-console.log("versions kept:", (await kept()).filter(k => k.startsWith("/caprice/versions/")).length);
+const versions = (await kept()).filter(k => k.startsWith("/caprice/versions/")).length;
+check("versions are kept in IndexedDB", versions > 0, versions);
 
 // After a reload the version is still there: a new blank story lists it as a story never saved.
 await page.reload();
@@ -155,11 +165,13 @@ await click(...FILE);
 await click(...SAVE);
 await page.keyboard.press("Enter");
 await page.waitForTimeout(800);
-console.log("stories kept:", await stories());
+check("Save keeps the story in the browser under its name",
+  (await stories()).includes("/caprice/stories/The dragon came at dusk.caprice"));
 
 // A copy of the story, and the story as Word, are downloads.
 const copy = await download(FILE, DOWNLOAD);
-console.log("downloaded:", copy, "and", await download(FILE, EXPORT));
+const word = await download(FILE, EXPORT);
+check("a copy and the Word file download", copy.endsWith(".caprice") && word.endsWith(".docx"), `${copy}, ${word}`);
 
 // Open lists the stories kept, and a file from the computer can be brought in.
 await click(...FILE);
@@ -167,7 +179,8 @@ await click(...OPEN);
 await page.waitForTimeout(800);
 await page.screenshot({ path: `${out}/6-open.png` });
 await upload(`${out}/${copy}`, await uploadButton());
-console.log("stories kept after the upload:", await stories());
+check("an uploaded story is kept beside the one of the same name",
+  (await stories()).includes("/caprice/stories/The dragon came at dusk 2.caprice"));
 
 // A story with a scene in it: the scene is drawn behind the page in a Web Worker.
 const story = JSON.parse(fs.readFileSync(`${out}/${copy}`, "utf8"));
@@ -179,7 +192,7 @@ await page.waitForTimeout(2000);
 await upload(`${out}/With a scene.caprice`, FILE, OPEN, await uploadButton());
 await page.waitForTimeout(2000);
 await page.screenshot({ path: `${out}/7-scene.png` });
-console.log("workers started:", workers.length);
+check("the scene is drawn in a Web Worker", workers.length > 0, workers.length);
 
 // Caprice's shortcuts are not the browser's: Ctrl+R aligns right rather than reloading the page,
 // and Ctrl+F finds in the story.
@@ -188,7 +201,7 @@ await page.keyboard.type(" Then night fell.", { delay: 15 });
 await page.evaluate(() => { window.stillHere = true; });
 await page.keyboard.press("Control+r");
 await page.waitForTimeout(1000);
-console.log("Ctrl+R kept the page:", await page.evaluate(() => window.stillHere === true));
+check("Ctrl+R aligns right rather than reloading the page", await page.evaluate(() => window.stillHere === true));
 await page.keyboard.press("Control+f");
 await page.waitForTimeout(800);
 await page.screenshot({ path: `${out}/8-shortcuts.png` });
@@ -202,7 +215,7 @@ const leavingAsks = () => page.evaluate(() => {
   return e.defaultPrevented;
 });
 await page.waitForTimeout(6000);
-console.log("leaving asks, with changes:", await leavingAsks());
+check("leaving with changes not saved asks first", await leavingAsks());
 
 // Hidden (another tab, or closing), the story is saved at once.
 await page.evaluate(() => {
@@ -210,14 +223,14 @@ await page.evaluate(() => {
   document.dispatchEvent(new Event("visibilitychange"));
 });
 await page.waitForTimeout(1500);
-console.log("saved when hidden:", (await keptText("/caprice/stories/With a scene.caprice")).includes("night fell"));
+check("hiding the page saves the story", (await keptText("/caprice/stories/With a scene.caprice")).includes("night fell"));
 await page.evaluate(() => {
   Object.defineProperty(Document.prototype, "hidden", { get: () => false, configurable: true });
   document.dispatchEvent(new Event("visibilitychange"));
 });
 // The next look at the story finds it saved, and leaving asks no more.
 await page.waitForTimeout(6000);
-console.log("leaving asks, once saved:", await leavingAsks());
+check("once saved, leaving asks nothing", !(await leavingAsks()));
 
 // Typing beyond ASCII, through an input method too (a composition, then what it settles on),
 // and copying to the computer's clipboard.
@@ -233,7 +246,7 @@ await page.keyboard.press("Control+a");
 await page.keyboard.press("Control+c");
 await page.waitForTimeout(500);
 const copied = await page.evaluate(() => navigator.clipboard.readText());
-console.log("typed and copied:", copied.endsWith("Café, naïve, Größe, «Ελληνικά» 你好"));
+check("typing beyond ASCII and through an input method, and copying", copied.endsWith("Café, naïve, Größe, «Ελληνικά» 你好"));
 await page.waitForTimeout(6000);
 
 // File → New: the story has changes since it was saved by hand, so it asks about them first.
@@ -247,5 +260,7 @@ await page.reload();
 await started();
 await page.screenshot({ path: `${out}/10-welcome-again.png` });
 
-console.log(errors.length ? "errors:\n  " + [...new Set(errors)].slice(0, 8).join("\n  ") : "no errors");
+check("no errors on the page", errors.length === 0, [...new Set(errors)].slice(0, 8).join("\n  "));
 await browser.close();
+console.log(failed.length ? `${failed.length} failed` : "all passed");
+process.exit(failed.length ? 1 : 0);

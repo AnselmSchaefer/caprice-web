@@ -1,0 +1,47 @@
+# cargo deny check, in CI: known vulnerabilities and yanked crates (RustSec), the licences allowed,
+# and where crates may come from.
+
+[advisories]
+yanked = "deny"
+# Crates said to be unmaintained (no known hole), each looked at (2026-11-01). Each is named, so a
+# new advisory still fails the check. Look again when egui, krilla or rfd move on.
+ignore = [
+    { id = "RUSTSEC-2026-0206", reason = "rustybuzz: krilla shapes the PDF's text with it, in fonts Caprice ships or the writer has; goes when krilla moves to harfrust" },
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser: reads the fonts Caprice loads and ships itself (fonts.rs, export, print); no untrusted fonts are opened" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names: the desktop's D-Bus, for accesskit on Linux; not in the browser build" },
+    { id = "RUSTSEC-2026-0370", reason = "zvariant: the desktop's D-Bus, for accesskit on Linux; not in the browser build" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive: the desktop's D-Bus, for accesskit on Linux; not in the browser build" },
+]
+
+[licenses]
+# Permissive licences only. A crate offering a choice ("MIT OR Apache-2.0", or GPL beside another)
+# passes when one of them is here. The fonts egui brings are under their font licences.
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "ISC",
+    "MIT",
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.9
+
+[licenses.private]
+# Caprice Web itself is not published (`publish = false`).
+ignore = true
+
+[bans]
+# egui's tree has several versions of some crates; nothing to do about it here.
+multiple-versions = "allow"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

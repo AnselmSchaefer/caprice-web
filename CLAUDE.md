@@ -27,7 +27,12 @@ behaviour**: its rules (§4) say what depends on what, and which tests guard eac
 ## Done means
 
 - `cargo test` passes, and clippy has no warnings beyond the ones already there (15 today).
-- `web/build.sh` builds, and `web/smoke.mjs` shows no errors on the page.
+- `web/build.sh` builds, and `web/smoke.mjs` passes (it exits 1 on any failed check or page error).
+- CI (`.github/workflows/ci.yml`) runs all of these on every push, plus `cargo deny check`
+  (`deny.toml`: vulnerabilities, licences, sources). A new advisory is looked at, not ignored
+  blindly: fix it, or name it in `deny.toml` with the reason it does not reach Caprice.
+- The browser build uses the nightly named in `web/build.sh`; change the date there only, with
+  `rustup toolchain install <it> -c rust-src -t wasm32-unknown-unknown`.
 - Behaviour you can see in the app has an app-level test (`Harness` in `main.rs`). A bug fix has a
   test that fails without the fix: check that it does.
 - If a change alters a rule in `ARCHITECTURE.md`, or adds one, update the file in the same commit.

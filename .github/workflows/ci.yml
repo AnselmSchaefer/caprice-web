@@ -1,0 +1,118 @@
+# Tests every push and pull request: the desktop half (the tests, clippy, the dependencies) and the
+# browser half (the build, then the smoke test in headless Chromium, with the real headers). The
+# build it tested is kept, for deploy.yml to put live by hand. Nothing here deploys.
+# Third-party actions are pinned to a commit, with the release it is in a comment (Dependabot
+# keeps both up to date).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Clippy warnings there are already; more fails the run (CLAUDE.md, "Done means").
+  CLIPPY_WARNINGS_ALLOWED: 15
+
+jobs:
+  desktop:
+    name: "Desktop: tests, clippy, dependencies"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust, stable
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup default stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: desktop
+      - name: The fonts the tests measure pages with
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-liberation
+      - name: Tests
+        run: cargo test --locked
+      - name: Clippy, with no warnings beyond those already there
+        run: |
+          set +e
+          out=$(cargo clippy --locked --all-targets 2>&1)
+          status=$?
+          set -e
+          echo "$out" | grep -E "^(warning|error)" | sort | uniq -c
+          [ $status -eq 0 ] || { echo "clippy failed"; exit 1; }
+          n=$(echo "$out" | grep -oE 'generated [0-9]+ warnings?' | grep -oE '[0-9]+' | sort -n | tail -1)
+          echo "clippy: ${n:-0} warnings, ${CLIPPY_WARNINGS_ALLOWED} allowed"
+          [ "${n:-0}" -le "$CLIPPY_WARNINGS_ALLOWED" ] || { echo "$out"; exit 1; }
+      - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
+        with:
+          tool: cargo-deny@0.20.2
+      - name: Dependencies (vulnerabilities, licences, sources; deny.toml)
+        run: cargo deny --locked check
+
+  browser:
+    name: "Browser: build, smoke test"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust, the nightly web/build.sh names
+        run: |
+          toolchain=$(grep -oE 'nightly-[0-9]{4}-[0-9]{2}-[0-9]{2}' web/build.sh)
+          rustup toolchain install "$toolchain" --profile minimal --component rust-src --target wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: browser
+      - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
+        with:
+          tool: trunk@0.22.1,wasm-bindgen@0.2.130
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Node tools (Playwright, Wrangler), without running their install scripts
+        working-directory: web
+        run: npm ci --ignore-scripts
+      - name: Chromium for the smoke test
+        working-directory: web
+        run: npx playwright-core install --with-deps chromium
+      - name: Build
+        run: ./web/build.sh
+      - name: The .wasm fits Cloudflare's 25 MiB a file
+        run: |
+          size=$(stat -c %s web/dist/*_bg.wasm)
+          echo "$(( size / 1048576 )) MiB"
+          [ "$size" -lt $(( 25 * 1048576 )) ]
+      - name: Smoke test, served with the headers readers get
+        run: |
+          mkdir -p "$RUNNER_TEMP/smoke"
+          node web/serve.mjs 8080 &
+          sleep 1
+          node web/smoke.mjs "$RUNNER_TEMP/smoke"
+      - name: Screenshots, if it failed
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: smoke-screenshots
+          path: ${{ runner.temp }}/smoke/*.png
+          retention-days: 7
+      - name: Keep the tested build, for deploy.yml
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: web-dist
+          path: web/dist
+          include-hidden-files: true
+          retention-days: 30
