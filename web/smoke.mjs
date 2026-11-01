@@ -88,6 +88,18 @@ const VERSIONS = [100, 303], DOWNLOAD = [120, 417];
 
 await page.goto(url);
 console.log("crossOriginIsolated:", await page.evaluate(() => crossOriginIsolated));
+// The Content-Security-Policy is in force: an inline script that is not one of the page's own is
+// refused, and the browser says so. (Playwright's own evaluate is exempt from the policy.)
+const errorsBefore = errors.length;
+console.log("CSP refuses a stranger's script:", await page.evaluate(() => new Promise(done => {
+  addEventListener("securitypolicyviolation", e => done(e.violatedDirective.startsWith("script-src")), { once: true });
+  const s = document.createElement("script");
+  s.textContent = "window.stranger = true;";
+  document.body.append(s);
+  setTimeout(() => done(false), 1000);
+})));
+await page.waitForTimeout(300);
+errors.splice(errorsBefore); // the refusal, reported as it should be
 await started();
 await page.screenshot({ path: `${out}/1-welcome.png` });
 

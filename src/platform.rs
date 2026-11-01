@@ -12,6 +12,8 @@ use std::time::Duration;
 use eframe::egui;
 
 pub mod fs;
+#[cfg(target_arch = "wasm32")]
+mod worker;
 
 #[cfg(target_arch = "wasm32")]
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -31,11 +33,15 @@ pub fn spawn(work: impl FnOnce() + Send + 'static) {
     #[cfg(target_arch = "wasm32")]
     {
         RUNNING.fetch_add(1, Ordering::SeqCst);
-        wasm_thread::spawn(move || {
+        let started = worker::spawn(Box::new(move || {
             work();
             RUNNING.fetch_sub(1, Ordering::SeqCst);
             WOKEN.store(true, Ordering::SeqCst);
-        });
+        }));
+        if let Err(e) = started {
+            RUNNING.fetch_sub(1, Ordering::SeqCst);
+            web_sys::console::error_1(&e);
+        }
     }
 }
 

@@ -1,4 +1,7 @@
-# Response headers for every file the Worker serves (Cloudflare reads this from web/dist).
+# Response headers for every file the Worker serves (Cloudflare reads this from web/dist, and so
+# does web/serve.mjs, so local tests see what readers get). web/csp.mjs adds the
+# Content-Security-Policy to the /* rule after each build. Rules that match the same file add
+# their headers together, so each header is set by one rule only.
 # Without the first two the page gets no shared memory, and the workers cannot start.
 /*
   Cross-Origin-Opener-Policy: same-origin
@@ -6,3 +9,16 @@
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
+
+# Named by their contents, so a new build gives new names: kept a year, never asked for again.
+# index.html is not, and so is asked for again each time, and names the new ones.
+/caprice-web-*
+  Cache-Control: public, max-age=31536000, immutable
+/icon-*
+  Cache-Control: public, max-age=31536000, immutable
+/snippets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# The fonts keep their names; a day, then asked again.
+/fonts/*
+  Cache-Control: public, max-age=86400

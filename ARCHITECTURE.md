@@ -97,6 +97,7 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `eggs.rs` | What is hidden in the magic themes: in the Magic Garden a plant a chapter growing on the desk and a balloon flying in each new chapter title; in the Magic City a street of houses a chapter, a floor a page, and a dragon flying a new title in held in its feet; in the Magic Sea a ship a chapter, built in a yard a part a page and launched into the bay when the next chapter begins |
 | `platform.rs` | What the desktop and the browser do differently: background work (`spawn`, `Waker`, `keep_awake`), the time and time zone, the run's id, the data folder, file dialogs (`Dialog`), uploads and downloads (R31) |
 | `platform/fs.rs` | Files: the system's on the desktop; in the browser, kept in memory by path and mirrored to IndexedDB (R31) |
+| `platform/worker.rs` | In the browser, a Web Worker for each piece of background work, started from `web/worker.js` with nothing evaluated (R31) |
 | `shelf.rs` | Stories kept in the browser: saving asks for a name, opening lists them (with an upload), each answering the waiting file dialog with a path (R31) |
 
 ---
@@ -1220,7 +1221,9 @@ threads, the system clock, the process id, files, programs. So nothing outside `
 them; it asks `platform` instead, whose desktop half does what Caprice always did.
 
 - **Background work** goes to `platform::spawn`: a thread on the desktop, a Web Worker sharing the
-  app's memory in the browser. The work gets owned data and answers on a channel, which the frame
+  app's memory in the browser (`platform/worker.rs`: a worker a piece of work, from `worker.js`,
+  which starts the app's WebAssembly on the shared memory and runs the boxed work by its
+  pointer; the app's script URL is read from a stack, not evaluated). The work gets owned data and answers on a channel, which the frame
   reads with `try_recv`. It shares no lock with the main thread: in Chromium a page's main thread
   that waits on a lock is stopped dead ("Atomics.wait cannot be called in this context").
 - **It asks for a frame with a `platform::Waker`**, never egui's `Context`: with threads on, egui
@@ -1267,6 +1270,14 @@ them; it asks `platform` instead, whose desktop half does what Caprice always di
   shown greyed ("Comes to the browser version later"), and Ctrl+Shift+P takes up no pen. Scenes
   already in a story still show behind its pages. When step 6 comes, `CLAUDE` turns true there.
   Test: `where_claude_cannot_be_asked_its_menus_and_the_pen_are_off`.
+- **Nothing is evaluated from a string in the browser**, so the Content-Security-Policy forbids
+  it: `script-src 'self' 'wasm-unsafe-eval'` and the hashes of the page's inline scripts and
+  style, which `web/csp.mjs` works out after each build and writes into `dist/_headers` (they
+  change with every build: Trunk's starting script names the hashed files); `worker-src 'self'`.
+  `wasm_thread` evaluated code to start each worker, so it was replaced by `platform/worker.rs`.
+  When touching it: a library that evaluates code, or a new inline script, is refused by the
+  browser; `web/serve.mjs` serves `_headers` as Cloudflare does, so the smoke test sees it.
+  `smoke.mjs` checks that a stranger's inline script is refused, and fails on any refusal of ours.
 - **"Follow my writing" is not offered in the browser** (the Scene menu hides its checkbox), for
   now. It is the only way into `Mode::Writing`, which is never saved.
 
@@ -1501,7 +1512,8 @@ when the writer goes on; nothing moved in the layout, nothing in print or the fi
 - **2026-10-31 — Caprice Web is a copy, not a mode of the desktop app.** The browser version was
   asked for with the desktop Caprice left unchanged, so it is an independent copy of it (at
   `5c87d3d`) that builds both ways, rather than code shared with the desktop app. Its background
-  work runs in Web Workers (`wasm_thread`): tried first in a spike, which found egui's `Context`
+  work runs in Web Workers (first `wasm_thread`, then our own `platform/worker.rs`, as
+  `wasm_thread` evaluates code, which the Content-Security-Policy forbids): tried first in a spike, which found egui's `Context`
   cannot go to a worker and a lock the main thread waits on crashes Chromium (R31). Chromium is
   the target, Firefox nice to have, Safari not supported. "Follow my writing" is left out for now.
 - **No `.docx` import.** Export only.
