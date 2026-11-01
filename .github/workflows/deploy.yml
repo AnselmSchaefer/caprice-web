@@ -1,0 +1,105 @@
+# Puts Caprice Web live, by hand only: Actions › Deploy › Run workflow (on main), or
+# `gh workflow run deploy.yml`. It deploys the build that ci.yml built and tested for this very
+# commit, never a new one, and stops if CI has not passed for it. Then it runs the smoke test
+# against the live site, and if that fails it puts the version that was live before back.
+# The Cloudflare secrets are in the GitHub environment `production`, which only main may use.
+name: Deploy
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # To find ci.yml's run for this commit, and take the build it kept.
+  actions: read
+
+# One deploy at a time; a second waits rather than racing the first.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  LIVE_URL: https://caprice-web.caprice-web-checks.workers.dev/
+
+jobs:
+  deploy:
+    name: Deploy the tested build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: production
+      url: ${{ env.LIVE_URL }}
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: The CI run that tested this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" \
+            --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          if [ -z "$run" ]; then
+            echo "::error::CI has not passed for ${GITHUB_SHA::7}: nothing to deploy. Wait for ci.yml, or fix it."
+            exit 1
+          fi
+          echo "Deploying the build of CI run $run"
+          echo "CI_RUN=$run" >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The build CI tested
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: web-dist
+          path: web/dist
+          run-id: ${{ env.CI_RUN }}
+          github-token: ${{ github.token }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Wrangler and Playwright, as pinned in web/package-lock.json
+        working-directory: web
+        run: npm ci --ignore-scripts
+      - name: The version live now, to go back to
+        working-directory: web
+        run: |
+          previous=$(npx wrangler deployments status --json | node -e \
+            'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).versions[0].version_id))')
+          echo "Live now: $previous"
+          echo "PREVIOUS_VERSION=$previous" >> "$GITHUB_ENV"
+      - name: Deploy
+        working-directory: web
+        run: npx wrangler deploy --message "${GITHUB_SHA::7} (CI run $CI_RUN)"
+      - name: Wait until the live page names this build
+        run: |
+          wasm=$(basename web/dist/*_bg.wasm)
+          for i in $(seq 1 30); do
+            if curl -fsS "$LIVE_URL" | grep -q "$wasm"; then echo "live: $wasm"; exit 0; fi
+            sleep 5
+          done
+          echo "::error::the live page does not name $wasm after 150 s"
+          exit 1
+      - name: Chromium for the smoke test
+        working-directory: web
+        run: npx playwright-core install --with-deps chromium
+      - name: Smoke test against the live site
+        run: |
+          mkdir -p "$RUNNER_TEMP/smoke"
+          CAPRICE_URL="$LIVE_URL" node web/smoke.mjs "$RUNNER_TEMP/smoke"
+      - name: It failed live, so the version before goes back
+        if: failure() && env.PREVIOUS_VERSION != ''
+        working-directory: web
+        run: |
+          npx wrangler rollback "$PREVIOUS_VERSION" -y -m "Deploy of ${GITHUB_SHA::7} failed its live check"
+          echo "::error::rolled back to $PREVIOUS_VERSION"
+      - name: Screenshots, if it failed
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: live-smoke-screenshots
+          path: ${{ runner.temp }}/smoke/*.png
+          retention-days: 7

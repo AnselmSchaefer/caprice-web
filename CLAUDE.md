@@ -15,7 +15,10 @@ behaviour**: its rules (§4) say what depends on what, and which tests guard eac
   `node web/serve.mjs 8080` (it sends the two headers workers need) and open http://localhost:8080/.
   `node web/smoke.mjs <dir>` with the server running: headless Chromium, screenshots, page errors.
   `cd web && npm install` once for it. Trunk and `wasm-bindgen-cli` 0.2.130 come from `cargo install`.
-- Deploy, by hand only: `web/build.sh`, then `cd web && npx wrangler deploy` (Cloudflare Workers,
+- Deploy, by hand only: `gh workflow run deploy.yml` (or Actions › Deploy): it deploys the build
+  `ci.yml` tested for the newest commit on `main`, checks the live site with the smoke test, and
+  rolls back if that fails. From this machine, as a last resort: `web/build.sh`, then
+  `cd web && npx wrangler deploy` (Cloudflare Workers,
   static files from `web/dist`, headers from `web/_headers`; see `DEPLOY_PLAN.md`). Live at
   https://caprice-web.caprice-web-checks.workers.dev; check it with
   `CAPRICE_URL=<that address> node web/smoke.mjs <dir>`. Never deploy without being asked.
