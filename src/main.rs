@@ -5728,6 +5728,54 @@ mod tests {
     }
 
     #[test]
+    fn a_window_made_narrower_and_wider_again_moves_no_floor_from_one_house_to_another() {
+        let mut h = Harness::new();
+        // A story that has had a hundred and twenty pages.
+        h.app.doc.garden = vec![120];
+        in_the_theme(&mut h, theme::Theme::City, 0.0);
+        let floors = |h: &Harness| h.app.eggs.houses.iter().map(|h| h.1).collect::<Vec<_>>();
+        let was = floors(&h);
+        assert_eq!(was.iter().sum::<usize>(), 120);
+        h.width = 860.0;
+        h.frames(30, vec![], Modifiers::NONE);
+        assert_eq!(floors(&h), was, "every house as high as it was, those beyond the window too");
+        // A page written while it is narrow gives a house in sight a floor.
+        h.app.doc.garden = vec![121];
+        h.frames(300, vec![], Modifiers::NONE);
+        let now = h.app.eggs.houses.clone();
+        let grew: Vec<_> = now.iter().zip(&was).filter(|(n, w)| n.1 != **w).map(|(n, _)| n.0).collect();
+        assert!(grew.len() == 1 && grew[0].left() >= 0.0 && grew[0].right() <= 860.0, "{grew:?}");
+        h.width = 1240.0;
+        h.frames(30, vec![], Modifiers::NONE);
+        assert_eq!(floors(&h), now.iter().map(|h| h.1).collect::<Vec<_>>(), "nor when it is wide again");
+    }
+
+    #[test]
+    fn a_window_made_narrower_leaves_every_ship_in_its_place_beside_the_page_and_as_big() {
+        let mut h = Harness::new();
+        // Six chapters, five of them done.
+        h.app.doc.garden = vec![12; 6];
+        in_the_theme(&mut h, theme::Theme::Sea, 0.0);
+        let beside = |h: &Harness| {
+            let page = h.app.last_page_rect;
+            let mut ships: Vec<(usize, egui::Vec2, egui::Vec2)> = h.app.eggs.ships.iter().map(|s| {
+                let edge = if s.1.center().x < page.center().x { page.left() } else { page.right() };
+                (s.0, s.1.center() - egui::pos2(edge, page.bottom()), s.1.size())
+            }).collect();
+            ships.sort_by_key(|s| s.0);
+            ships
+        };
+        let was = beside(&h);
+        assert_eq!(was.len(), 6, "five in the bay and one in the yard");
+        h.width = 900.0;
+        h.frames(30, vec![], Modifiers::NONE);
+        let now = beside(&h);
+        for (a, b) in was.iter().zip(&now) {
+            assert!(a.0 == b.0 && (a.1 - b.1).length() < 4.0 && (a.2 - b.2).length() < 4.0, "rocking, but where it was: {a:?} {b:?}");
+        }
+    }
+
+    #[test]
     fn in_the_magic_sea_a_ship_is_built_a_part_a_page_and_sails_out_whole_when_the_next_chapter_begins() {
         let mut h = Harness::new();
         in_the_theme(&mut h, theme::Theme::Sea, 0.0);

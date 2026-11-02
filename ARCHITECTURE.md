@@ -1091,12 +1091,15 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
 - **The city stands on the desk the same way**, in the Magic City only: `draw_city` is called right
   after `draw_garden`, so it is behind every page too. A floor for each page each chapter has had,
   the sum of the same `Doc::garden`, so the city never comes down either and needs nothing kept of
-  its own. `city` lays it out: as many houses as there is room for on the desk, taking turns on the
-  left and right of the page from its edges outwards, never overlapping; each is built up to its
-  `most`, then the next is begun; once all are, each new floor goes to the next house in turn, so
-  they grow ever higher, past the top of the window if the story is long enough. A floor built
-  stays on its house while the window keeps its size; a window made narrower holds fewer houses,
-  and the floors are dealt again. A new floor is built in sight
+  its own. The street is fixed beside the page, whatever the window (`street`): house `k` stands
+  on the left if `k` is even, from the page's edge outwards on its side, never overlapping, so
+  the window only shows more or fewer of them. Each floor is given a house when it is built
+  (`deal`, kept in `Eggs::order` while the story is shown): the first house in sight not yet at
+  its `most`; once all are, the one in sight furthest below the rest, nearest the page first, so
+  they grow ever higher, past the top of the window if the story is long enough. A floor given
+  stays on its house: a window made narrower cuts the houses beyond it and moves no floor (once
+  they were all dealt again, every house jumping to another height); a story opened, or the
+  theme picked, deals afresh for the window it has (`city`, `placed`). A new floor is built in sight
   (`Eggs::built`, like `grown` below, `BUILD` seconds a floor, quicker when many wait): a light
   flows out of a window of the top floor (a lit one if it has one; for a house's first floor, a
   window of its neighbour nearer the page) for the first `FLOW` of it, then spreads into the floor,
@@ -1105,7 +1108,9 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   test can look at any moment. How a house looks (its roof, a little tower, a statue, balconies,
   arched windows) comes from its seed too, drawn after where it stands and how high it gets, so a
   new look never moves a floor. Whatever is added to a house stays within 4 of its walls: houses
-  stand 8 apart, so nothing reaches the next one. Flickering needs frames: in the
+  stand 8 apart, so nothing reaches the next one. The city and the sea are the size the desk's
+  height gives (`Eggs::unit`), followed over a moment (`toward`), so a window made taller or
+  shorter never resizes them at a stroke. Flickering needs frames: in the
   Magic City the app asks for one every 80 ms even when idle, and in the Magic Sea every 50 ms, for
   the ships rocking and the waves drifting; nothing else in the app does.
 - **The sea lies on the desk the same way**, in the Magic Sea only: `draw_sea` is called right after
@@ -1117,7 +1122,12 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   a little light (`Eggs::rigged`, `BUILD` seconds a part like a floor). Every other chapter's ship
   is whole and lies in the bay (`Bay::places`: on the right of the page and on the left beyond the
   yard, from the page outwards, taking turns; once a row is full, the next lies further out,
-  smaller and nearer the horizon). When the chapter in the yard changes to a later one, its ship is
+  smaller and nearer the horizon). The places reach `REACH` out from the page whatever the
+  window, and a ship is as long whatever its width, so the window only shows more or fewer of
+  them. Each ship is given its place when it first lies in the bay (`Eggs::berths`, by chapter,
+  kept while the story is shown): the first free one in sight (`Bay::in_view`). It keeps it when
+  the window changes; once ships changed size with the room left of the page and moved to other
+  places as rows held more or fewer. When the chapter in the yard changes to a later one, its ship is
   launched (`Eggs::launch`, `Bay::launching`, `LAUNCH` seconds): the parts it lacks come in at
   once, it slides down the slipway into the water and sails out to its place, turning about if it
   lies the other way, and only then is the next keel laid. The dock (`Bay::dock`: the quay, the
@@ -1207,7 +1217,11 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   `a_ship_gets_a_part_for_each_page_until_it_is_whole`,
   `the_ships_lie_in_the_bay_beside_the_page_each_in_a_place_of_its_own`,
   `a_ship_launched_is_finished_at_once_slides_into_the_water_and_sails_to_its_place`,
-  `a_ship_launched_to_the_left_sails_behind_the_dock_and_none_lies_in_front_of_it`; and
+  `a_ship_launched_to_the_left_sails_behind_the_dock_and_none_lies_in_front_of_it`,
+  `a_floor_once_built_stays_on_its_house_whatever_the_window`,
+  `the_size_of_things_follows_a_new_window_height_over_a_moment`; and
+  `a_window_made_narrower_and_wider_again_moves_no_floor_from_one_house_to_another`,
+  `a_window_made_narrower_leaves_every_ship_in_its_place_beside_the_page_and_as_big`,
   `in_the_magic_sea_a_ship_is_built_a_part_a_page_and_sails_out_whole_when_the_next_chapter_begins`,
   `in_the_magic_city_each_new_page_gives_a_house_a_floor_made_of_light_from_a_window`,
   `a_long_story_s_city_fills_the_desk_on_both_sides_and_grows_higher`,

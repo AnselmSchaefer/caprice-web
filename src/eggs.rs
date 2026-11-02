@@ -172,6 +172,8 @@ const SLIDE: f32 = 1.2;
 const SAIL: f32 = 2.6;
 pub const LAUNCH: f32 = FINISH + SLIDE + SAIL;
 const SLOPE: f32 = 0.14;
+/// How far the bay's places reach out from the page, whatever the window, in `unit`s.
+const REACH: f32 = 1800.0;
 
 /// Seconds the dragon or the balloon takes to come in from the side, carry the title over its
 /// place, lower it, settle it, let go and go away; and to go away when the writer goes on
@@ -218,6 +220,11 @@ pub struct Eggs {
     built_for: Option<String>,
     built: f32,
     built_at: f64,
+    /// The house each floor went to, in the order they were built: kept while the story is shown,
+    /// so a floor never moves to another house when the window changes.
+    order: Vec<usize>,
+    /// The size of things shown (`unit`), following the window's height over a moment, and when.
+    scale: Option<(f32, f64)>,
     /// Each house drawn last frame: its floors from the ground to the top of the last one built,
     /// and how many; and the light of a floor being built, if one is; for tests.
     pub houses: Vec<(Rect, usize)>,
@@ -226,6 +233,9 @@ pub struct Eggs {
     /// many of its parts are built, the last perhaps in part; and the ship being launched, if one
     /// is: its chapter, since when, and how many parts it had.
     sailed_for: Option<(String, usize)>,
+    /// The place in the bay each chapter's ship lies in, given when it first lies there: the
+    /// first free one in sight. Kept while the story is shown, like the city's floors.
+    berths: Vec<Option<usize>>,
     rigged: f32,
     rigged_at: f64,
     pub launch: Option<(usize, f64, f32)>,
@@ -249,12 +259,27 @@ impl Default for Eggs {
     fn default() -> Self {
         let seed = crate::platform::since_epoch().as_nanos() as u64;
         Self { grown_for: None, grown: Vec::new(), grown_at: 0.0, measured: None, lift: None, place: None, desk: Rect::NOTHING, odds: None, from_right: false, rng: seed | 1, plants: Vec::new(),
-            built_for: None, built: 0.0, built_at: 0.0, houses: Vec::new(), light: None, sailed_for: None, rigged: 0.0, rigged_at: 0.0,
+            built_for: None, built: 0.0, built_at: 0.0, order: Vec::new(), scale: None, houses: Vec::new(), light: None, sailed_for: None, berths: Vec::new(), rigged: 0.0, rigged_at: 0.0,
             launch: None, ships: Vec::new() }
     }
 }
 
 impl Eggs {
+    /// The size of the city and the sea, 1 on a desk 900 points high: following the desk's
+    /// height over a moment, so a window made taller or shorter never resizes them at a stroke.
+    fn unit(&mut self, ctx: &egui::Context, area: Rect, now: f64) -> f32 {
+        let target = (area.height() / 900.0).clamp(0.6, 1.6);
+        let shown = match self.scale {
+            Some((shown, at)) => toward(shown, target, (now - at).clamp(0.0, 0.1) as f32),
+            None => target,
+        };
+        if shown != target {
+            ctx.request_repaint();
+        }
+        self.scale = Some((shown, now));
+        shown
+    }
+
     /// A number from 0 to 1, at random.
     fn roll(&mut self) -> f64 {
         self.rng ^= self.rng << 13;
@@ -1349,52 +1374,73 @@ fn statue(which: usize, at: Pos2, stone: Color32, u: f32) -> Vec<Shape> {
 }
 
 /// The houses of a city of `built` floors (the last perhaps in part) on the desk `area`, beside
-/// the page lying at `page`: as many as there is room for, taking turns on the left and right of
-/// the page, from its edges outwards, and on whether each stands on the left. Each is built up to
-/// its `most` before the next is begun; once all are, the next floors go to each in turn, so the
-/// houses grow ever higher. A floor once built stays on its house.
+/// the page lying at `page`, dealt afresh (`deal`) and placed (`placed`), and on whether each
+/// stands on the left.
+#[cfg(test)]
 pub fn city(story: &str, area: Rect, page: Rect, unit: f32, built: f32) -> Vec<(bool, House)> {
+    let mut order = Vec::new();
+    deal(&mut order, built.ceil() as usize, story, area, page, unit);
+    placed(story, area, page, unit, built, &order)
+}
+
+/// The street beside the page lying at `page`: house `k` stands on the left if `k` is even, from
+/// the page's edge outwards on its side, so its place never depends on the window; and whether it
+/// has room on the desk `area`. At least the first `n` houses, and on until neither side has room.
+fn street(story: &str, area: Rect, page: Rect, unit: f32, n: usize) -> Vec<(bool, House, bool)> {
     let gap = 8.0 * unit;
     let gutter = [page.left() - area.left(), area.right() - page.right()];
-    // How far out from the page's edge each side is taken.
-    let mut used = [gap, gap];
-    let mut out: Vec<(bool, House)> = Vec::new();
-    let (mut left, mut full) = (true, [false, false]);
-    while !(full[0] && full[1]) {
-        let side = usize::from(!left);
-        let mut h = House::of(story, out.len(), area.bottom(), unit);
-        if full[side] || used[side] + h.width + gap > gutter[side] {
-            full[side] = true;
-        } else {
-            h.left = if left { page.left() - used[side] - h.width } else { page.right() + used[side] };
-            used[side] += h.width + gap;
-            out.push((left, h));
-        }
-        left = !left;
-    }
-    let (whole, part) = (built.floor() as usize, built.fract());
-    let room: usize = out.iter().map(|(_, h)| h.most).sum();
-    let mut next = None;
-    let mut rest = whole;
-    for (k, (_, h)) in out.iter_mut().enumerate() {
-        h.floors = rest.min(h.most);
-        rest -= h.floors;
-        if next.is_none() && h.floors < h.most {
-            next = Some(k);
-        }
-    }
-    if !out.is_empty() && whole >= room {
-        // Every house is as high as it gets while there is room: now each grows in turn.
-        let (n, over) = (out.len(), whole - room);
-        for (k, (_, h)) in out.iter_mut().enumerate() {
-            h.floors = h.most + over / n + usize::from(k < over % n);
-        }
-        next = Some(over % n);
-    }
-    if let Some(k) = next.filter(|_| part > 0.0) {
-        out[k].1.building = part;
+    // How far out from the page's edge each side is taken, and whether it has run out of room.
+    let (mut used, mut full) = ([gap, gap], [false, false]);
+    let mut out = Vec::new();
+    while out.len() < n.max(1) || !(full[0] && full[1]) {
+        let (k, side) = (out.len(), out.len() % 2);
+        let mut h = House::of(story, k, area.bottom(), unit);
+        let fits = used[side] + h.width + gap <= gutter[side];
+        full[side] |= !fits;
+        h.left = if side == 0 { page.left() - used[side] - h.width } else { page.right() + used[side] };
+        used[side] += h.width + gap;
+        out.push((side == 0, h, fits));
     }
     out
+}
+
+/// Give the floors up to `target` each a house, after the ones `order` has given already: the
+/// first house with room on the desk that is not yet as high as it gets while there is room; once
+/// all are, the one with room furthest below the rest, nearest the page first, so they grow in
+/// turn. A floor once given stays on its house, whatever the window does later.
+pub fn deal(order: &mut Vec<usize>, target: usize, story: &str, area: Rect, page: Rect, unit: f32) {
+    if order.len() >= target {
+        return;
+    }
+    let street = street(story, area, page, unit, order.iter().max().map_or(0, |k| k + 1));
+    let mut count = vec![0usize; street.len()];
+    for &k in order.iter() {
+        count[k] += 1;
+    }
+    let open: Vec<usize> = (0..street.len()).filter(|&k| street[k].2).collect();
+    while order.len() < target {
+        let most = |k: usize| street[k].1.most;
+        let k = open.iter().copied().find(|&k| count[k] < most(k))
+            .or_else(|| open.iter().copied().min_by_key(|&k| (count[k] as isize - most(k) as isize, k)))
+            .unwrap_or(0);
+        count[k] += 1;
+        order.push(k);
+    }
+}
+
+/// The houses of the street with `built` of the floors `order` gives them (the last perhaps in
+/// part): those with room on the desk, and those beyond it with floors, which the window cuts.
+pub fn placed(story: &str, area: Rect, page: Rect, unit: f32, built: f32, order: &[usize]) -> Vec<(bool, House)> {
+    let whole = (built.max(0.0).floor() as usize).min(order.len());
+    let part = if whole < order.len() { built.fract() } else { 0.0 };
+    let mut street = street(story, area, page, unit, order.iter().max().map_or(0, |k| k + 1));
+    for &k in &order[..whole] {
+        street[k].1.floors += 1;
+    }
+    if let Some(&k) = order.get(whole).filter(|_| part > 0.0) {
+        street[k].1.building = part;
+    }
+    street.into_iter().filter(|(_, h, fits)| *fits || h.floors > 0 || h.building > 0.0).map(|(left, h, _)| (left, h)).collect()
 }
 
 /// `color`, see-through by `alpha`.
@@ -1427,6 +1473,13 @@ fn balcony(r: Rect, color: Color32, u: f32) -> Vec<Shape> {
         out.push(Shape::line_segment([pos2(x, rail), pos2(x, y)], Stroke::new(0.7 * u, color)));
     }
     out
+}
+
+/// `shown` gone `dt` seconds of the way to `target`: most of it in a third of a second, never past
+/// it, and there once it is within a hair.
+fn toward(shown: f32, target: f32, dt: f32) -> f32 {
+    let next = shown + (target - shown) * (1.0 - (-dt / 0.1).exp());
+    if (next - target).abs() < 1e-3 { target } else { next }
 }
 
 /// `s` from 0 to 1 eased in and out.
@@ -1665,20 +1718,21 @@ pub struct Bay {
     pub yard: Pos2,
     pub launched: Pos2,
     /// Each place in the bay: the middle of a ship's waterline there, its length, and whether its
-    /// bow is to the right, away from the page.
+    /// bow is to the right, away from the page. They reach as far from the page whatever the
+    /// window, so a place never moves when it changes; those beyond the desk are out of sight.
     pub places: Vec<(Pos2, f32, bool)>,
 }
 
 impl Bay {
     pub fn of(area: Rect, page: Rect, unit: f32) -> Bay {
-        // As big as there is room for on the left, for the yard, its slipway and the ship launched.
-        let len = (150.0 * unit).min((page.left() - area.left()) / 2.5).max(60.0 * unit);
+        // The same size whatever the window's width: a narrow one cuts the yard at its edge.
+        let len = 150.0 * unit;
         let deep = 0.15 * area.height();
         let horizon = area.bottom() - deep;
         let (gap, front) = (12.0 * unit, horizon + deep * 0.78);
         // The bowsprit of a ship just launched reaches to near the page; the slipway goes up from
         // there to the yard, a length away.
-        let launched = pos2((page.left() - gap - 0.72 * len).max(area.left() + 1.7 * len), front);
+        let launched = pos2(page.left() - gap - 0.72 * len, front);
         let yard = launched - vec2(len, len * SLOPE);
         let mut places = Vec::new();
         for r in 0..6 {
@@ -1687,13 +1741,13 @@ impl Bay {
             let w = l * 1.45;
             let mut right: Vec<f32> = Vec::new();
             let mut x = page.right() + gap + w / 2.0;
-            while x + w / 2.0 <= area.right() {
+            while x + w / 2.0 <= page.right() + REACH * unit {
                 right.push(x);
                 x += w;
             }
             let mut left: Vec<f32> = Vec::new();
             x = if r == 0 { yard.x - 0.7 * len - gap } else { page.left() - gap } - w / 2.0;
-            while x - w / 2.0 >= area.left() {
+            while x - w / 2.0 >= page.left() - REACH * unit {
                 left.push(x);
                 x -= w;
             }
@@ -1701,9 +1755,6 @@ impl Bay {
                 places.extend(right.get(j).map(|&x| (pos2(x, y), l, true)));
                 places.extend(left.get(j).map(|&x| (pos2(x, y), l, false)));
             }
-        }
-        if places.is_empty() {
-            places.push((pos2(page.right() + gap + len / 2.0, front), len, true));
         }
         Bay { area, horizon, front, len, yard, launched, places }
     }
@@ -1764,6 +1815,12 @@ impl Bay {
         out
     }
 
+    /// Whether place `p` is all on the desk.
+    pub fn in_view(&self, p: usize) -> bool {
+        let (at, len, _) = self.places[p];
+        at.x - 0.7 * len >= self.area.left() && at.x + 0.7 * len <= self.area.right()
+    }
+
     /// Whether `s` is further back than the dock, and drawn before it.
     pub fn behind(&self, s: &Ship) -> bool {
         s.sea < self.front - 0.01 * self.len
@@ -1807,17 +1864,17 @@ impl Bay {
         ]
     }
 
-    /// The ships at `time`: the chapters of `fleet` lying in the bay's places in turn, rocking on
-    /// the water, one of them perhaps being launched (`launch`: which, how many seconds ago, and how
+    /// The ships at `time`: the chapters of `fleet` lying in the bay's places given with them,
+    /// rocking on the water, one of them perhaps being launched (`launch`: which, how many seconds ago, and how
     /// many parts it had); and the one in the yard with how many parts it has. Farther ones first,
     /// so nearer ones are drawn over them.
-    pub fn ships(&self, story: &str, fleet: &[usize], yard: Option<(usize, f32)>, launch: Option<(usize, f32, f32)>, time: f64) -> Vec<Ship> {
+    pub fn ships(&self, story: &str, fleet: &[(usize, usize)], yard: Option<(usize, f32)>, launch: Option<(usize, f32, f32)>, time: f64) -> Vec<Ship> {
         let mut out = Vec::new();
         if let Some((k, parts)) = yard.filter(|y| y.1 > 0.0) {
             out.push(Ship { k, at: self.yard, sea: self.front, len: self.len, face: 1.0, lean: SLOPE.atan(), parts, finish: 0.0, afloat: false });
         }
-        for (j, &k) in fleet.iter().enumerate() {
-            let (place, len, right) = self.places[j.min(self.places.len() - 1)];
+        for &(k, p) in fleet {
+            let (place, len, right) = self.places[p.min(self.places.len() - 1)];
             let mut seeds = Seeds::of(story, (4 << 20) + k);
             let (phase, t) = (seeds.next(0.0, 2.0 * PI), (time % 10_000.0) as f32);
             let (bob, roll) = ((t * 1.1 + phase).sin() * 0.012, (t * 0.8 + phase).sin() * 0.025);
@@ -1987,6 +2044,7 @@ impl App {
         if e.built_for.as_deref() != Some(&self.story_id) {
             // A story just opened, or the theme just picked, comes with its city built.
             (e.built_for, e.built) = (Some(self.story_id.clone()), target);
+            e.order.clear();
         }
         let dt = (now - e.built_at).clamp(0.0, 0.1) as f32;
         e.built_at = now;
@@ -1999,9 +2057,10 @@ impl App {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(80));
         }
 
-        let unit = (area.height() / 900.0).clamp(0.6, 1.6);
+        let unit = e.unit(ui.ctx(), area, now);
         let story = &self.story_id;
-        let houses = city(story, area, page, unit, e.built);
+        deal(&mut e.order, target as usize, story, area, page, unit);
+        let houses = placed(story, area, page, unit, e.built, &e.order);
         let painter = ui.painter();
         for (i, (left, h)) in houses.iter().enumerate() {
             if h.floors == 0 && h.building == 0.0 {
@@ -2034,7 +2093,10 @@ impl App {
         let was = e.sailed_for.as_ref().filter(|(id, _)| *id == self.story_id).map(|f| f.1);
         match was {
             // A story just opened, or the theme just picked, comes with its ships built and in the bay.
-            None => (e.sailed_for, e.rigged, e.launch) = (Some((self.story_id.clone(), yard)), target, None),
+            None => {
+                (e.sailed_for, e.rigged, e.launch) = (Some((self.story_id.clone(), yard)), target, None);
+                e.berths.clear();
+            }
             Some(was) if was != yard => {
                 // A new chapter has begun: the ship of the one before is finished at once and
                 // launched, and the next is begun once it is away.
@@ -2061,9 +2123,18 @@ impl App {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
         }
 
-        let unit = (area.height() / 900.0).clamp(0.6, 1.6);
+        let unit = e.unit(ui.ctx(), area, now);
         let bay = Bay::of(area, page, unit);
-        let fleet: Vec<usize> = (0..ships).filter(|&k| k != yard).collect();
+        e.berths.resize(e.berths.len().max(ships), None);
+        let mut fleet = Vec::new();
+        for k in (0..ships).filter(|&k| k != yard) {
+            if e.berths[k].is_none() {
+                let free = |p: &usize| !e.berths.contains(&Some(*p));
+                let p = (0..bay.places.len()).filter(free).find(|&p| bay.in_view(p)).or_else(|| (0..bay.places.len()).find(free));
+                e.berths[k] = Some(p.unwrap_or(0));
+            }
+            fleet.push((k, e.berths[k].unwrap_or(0)));
+        }
         let launch = e.launch.map(|(k, at, had)| (k, (now - at) as f32, had));
         let building = (yard < ships).then_some((yard, e.rigged));
         let painter = ui.painter();
@@ -2474,6 +2545,44 @@ mod tests {
     }
 
     #[test]
+    fn a_floor_once_built_stays_on_its_house_whatever_the_window() {
+        let page = vec2(600.0, 820.0);
+        let desk = |width: f32| {
+            let area = Rect::from_min_size(Pos2::ZERO, vec2(width, 900.0));
+            (area, Rect::from_min_size(pos2((width - page.x) / 2.0, 40.0), page))
+        };
+        let ((wide, wide_page), (narrow, narrow_page)) = (desk(1240.0), desk(860.0));
+        let floors = |order: &[usize], (area, page): (Rect, Rect)| placed("a", area, page, 1.0, order.len() as f32, order).into_iter().map(|(_, h)| h.floors).collect::<Vec<_>>();
+        let mut order = Vec::new();
+        deal(&mut order, 120, "a", wide, wide_page, 1.0);
+        let was = floors(&order, (wide, wide_page));
+        assert!(city("a", narrow, narrow_page, 1.0, 120.0).len() < was.len(), "fewer houses have room on the narrow desk");
+        let narrowed = floors(&order, (narrow, narrow_page));
+        assert_eq!(narrowed.iter().filter(|&&n| n > 0).collect::<Vec<_>>(), was.iter().filter(|&&n| n > 0).collect::<Vec<_>>(), "no floor moved");
+        // Built while the desk is narrow, a floor goes to a house in sight.
+        deal(&mut order, 130, "a", narrow, narrow_page, 1.0);
+        let street = street("a", narrow, narrow_page, 1.0, 0);
+        assert!(order[120..].iter().all(|&k| street[k].2), "{:?}", &order[120..]);
+        let widened = floors(&order, (wide, wide_page));
+        assert_eq!(widened.iter().sum::<usize>(), 130);
+        assert!(widened.iter().zip(&was).all(|(n, w)| n >= w), "and the rest stay where they were: {was:?} {widened:?}");
+    }
+
+    #[test]
+    fn the_size_of_things_follows_a_new_window_height_over_a_moment() {
+        let (from, to) = (1.0, 1.5);
+        let mut shown = from;
+        let mut seen = vec![shown];
+        for _ in 0..40 {
+            shown = toward(shown, to, 1.0 / 60.0);
+            seen.push(shown);
+        }
+        assert!(seen[1] - from < 0.25 * (to - from), "not at a stroke: {}", seen[1]);
+        assert!(seen.windows(2).all(|w| w[1] >= w[0] && w[1] <= to), "only towards it, never past it");
+        assert_eq!(seen[40], to, "and there within the moment");
+    }
+
+    #[test]
     fn some_windows_are_lit_a_few_flickering_slightly_the_same_ones_for_the_same_story() {
         let (mut steady, mut flickering) = (0, 0);
         for i in 0..6 {
@@ -2531,6 +2640,11 @@ mod tests {
         assert!(height_of(1) < height_of(4) && height_of(40) < 1.0, "taller with more pages, never past its tallest");
     }
 
+    /// The ships of `chapters`, each in the bay's places in turn.
+    fn in_turn(chapters: &[usize]) -> Vec<(usize, usize)> {
+        chapters.iter().copied().enumerate().map(|(p, k)| (k, p)).collect()
+    }
+
     fn bay() -> (Rect, Rect, Bay) {
         let (area, page) = (Rect::from_min_size(Pos2::ZERO, vec2(1500.0, 900.0)), Rect::from_min_size(pos2(450.0, 40.0), vec2(600.0, 820.0)));
         (area, page, Bay::of(area, page, 1.0))
@@ -2559,7 +2673,10 @@ mod tests {
         let (area, page, bay) = (bay().0, bay().1, bay().2);
         assert!(bay.yard.x < page.left() && bay.launched.x < page.left(), "the yard is on the left of the page");
         assert!(bay.places.len() >= 12, "{}", bay.places.len());
-        let ships = bay.ships("a", &(0..bay.places.len()).collect::<Vec<_>>(), None, None, 0.0);
+        // A ship in each place in sight.
+        let seen: Vec<(usize, usize)> = (0..bay.places.len()).filter(|&p| bay.in_view(p)).map(|p| (p, p)).collect();
+        assert!(seen.len() >= 12, "{}", seen.len());
+        let ships = bay.ships("a", &seen, None, None, 0.0);
         for s in &ships {
             let r = s.bounds();
             assert!(r.right() < page.left() || r.left() > page.right(), "{}: beside the page: {r:?}", s.k);
@@ -2580,8 +2697,8 @@ mod tests {
     #[test]
     fn a_ship_launched_is_finished_at_once_slides_into_the_water_and_sails_to_its_place() {
         let (_, _, bay) = bay();
-        let at = |t: f32| bay.ships("a", &[0, 1], Some((2, 0.0)), Some((1, t, 3.0)), 0.0).into_iter().find(|s| s.k == 1).unwrap();
-        let lying = bay.ships("a", &[0, 1], None, None, 0.0)[1];
+        let at = |t: f32| bay.ships("a", &in_turn(&[0, 1]), Some((2, 0.0)), Some((1, t, 3.0)), 0.0).into_iter().find(|s| s.k == 1).unwrap();
+        let lying = bay.ships("a", &in_turn(&[0, 1]), None, None, 0.0)[1];
         let start = at(0.05);
         assert!(start.at == bay.yard && !start.afloat && start.parts == 3.0 && start.finish > 0.0, "in the yard, finishing: {start:?}");
         assert_eq!(at(FINISH).shown(), PARTS, "whole before it moves");
@@ -2592,7 +2709,7 @@ mod tests {
         assert!(mid.at.distance(bay.launched) > 10.0 && mid.at.distance(lying.at) > 10.0, "sailing out");
         assert_eq!(at(LAUNCH), lying, "and lying in its place");
         // No ship in the yard while one is launched, nor before its first page.
-        assert!(bay.ships("a", &[0, 1], Some((2, 0.0)), None, 0.0).iter().all(|s| s.k != 2));
+        assert!(bay.ships("a", &in_turn(&[0, 1]), Some((2, 0.0)), None, 0.0).iter().all(|s| s.k != 2));
     }
 
     #[test]
@@ -2601,7 +2718,7 @@ mod tests {
         let dock = bay.dock().iter().fold(Rect::NOTHING, |r, s| r.union(s.visual_bounding_rect()));
         // The first ship to lie on the left, beyond the yard.
         let k = bay.places.iter().position(|p| !p.2).unwrap();
-        let fleet: Vec<usize> = (0..=k).collect();
+        let fleet = in_turn(&(0..=k).collect::<Vec<_>>());
         let mut passed = false;
         for n in 0..=200 {
             let t = FINISH + SLIDE + SAIL * n as f32 / 200.0;
@@ -2612,7 +2729,7 @@ mod tests {
             }
         }
         assert!(passed, "it goes past the dock");
-        let fleet: Vec<usize> = (0..bay.places.len()).collect();
+        let fleet = in_turn(&(0..bay.places.len()).collect::<Vec<_>>());
         for ship in bay.ships("a", &fleet, None, None, 0.0) {
             assert!(!ship.bounds().intersects(dock) || bay.behind(&ship), "lying in the bay: {ship:?}");
         }
