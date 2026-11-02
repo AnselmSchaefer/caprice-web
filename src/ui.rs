@@ -1,5 +1,6 @@
 //! The two docks: formatting on top, pages at the bottom.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use eframe::egui::{self, Color32, FontId, Id, Rect, Sense, Stroke, UiBuilder, pos2, vec2};
@@ -7,6 +8,7 @@ use eframe::egui::{self, Color32, FontId, Id, Rect, Sense, Stroke, UiBuilder, po
 use crate::{App, Appearance};
 use crate::model::{Align, Band, BandLook, BoxLook, CM, ListKind, Orientation, PAGE_FIELD, Style, TextBox};
 use crate::numbers::{Counting, Figures, Numbering};
+use crate::platform::fs;
 use crate::theme::{Theme, pal};
 
 pub const DOCK_H: f32 = 48.0;
@@ -17,6 +19,42 @@ pub const RESERVED: f32 = DOCK_GAP + DOCK_H + 10.0;
 /// top, and Scratchpad, Fit, the zoom and "+" below.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub const MIN_WINDOW: [f32; 2] = [340.0, 400.0];
+/// Where the page bar is docked: lying under the pages, or standing at the left or right.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub enum BarSide {
+    #[default]
+    Bottom,
+    Left,
+    Right,
+}
+
+/// The page bar's place, and where it is kept.
+pub struct BarPlace {
+    pub side: BarSide,
+    pub file: Option<PathBuf>,
+}
+
+impl BarPlace {
+    /// The place kept in the data folder, beside the theme (`page_bar.json`).
+    pub fn new() -> Self {
+        Self::kept_in(crate::versions::default_dir().and_then(|d| d.parent().map(|p| p.join("page_bar.json"))))
+    }
+
+    pub fn kept_in(file: Option<PathBuf>) -> Self {
+        let side = file.as_ref().and_then(|f| fs::read_to_string(f).ok()).and_then(|j| serde_json::from_str(&j).ok());
+        Self { side: side.unwrap_or_default(), file }
+    }
+
+    /// Dock the bar at `side`, and keep it there for next time.
+    pub fn put(&mut self, side: BarSide) {
+        self.side = side;
+        if let (Some(file), Ok(json)) = (&self.file, serde_json::to_string(&side)) {
+            let _ = file.parent().map(fs::create_dir_all);
+            let _ = fs::write(file, json);
+        }
+    }
+}
+
 /// Widest the docks get.
 pub const DOCK_MAX_W: f32 = 1180.0;
 /// The toolbar's groups of tools, in the order they show; the last ones go into "⋯" first.
@@ -53,6 +91,7 @@ enum Icon {
     Bullets,
     Numbers,
     Brush,
+    Pad,
 }
 
 /// Draw an icon into a 30x30 square.
@@ -91,6 +130,16 @@ fn paint_icon(p: &egui::Painter, rect: Rect, icon: Icon, ink: Color32) {
             p.rect_stroke(Rect::from_min_max(pos2(l + 1.0, b - 8.5), pos2(r - 1.0, b - 6.0)), 1.0, stroke, egui::StrokeKind::Inside);
             let x = area.center().x;
             p.line_segment([pos2(x, t), pos2(x, b - 8.5)], Stroke::new(3.0, ink));
+        }
+        Icon::Pad => {
+            // A pad of paper: the sheet, its binding along the top, and lines written on it.
+            let sheet = area.shrink2(vec2(1.0, 0.0));
+            p.rect_stroke(sheet, 2.0, stroke, egui::StrokeKind::Inside);
+            p.line_segment([sheet.left_top() + vec2(0.0, 3.5), sheet.right_top() + vec2(0.0, 3.5)], stroke);
+            for k in 0..3 {
+                let y = sheet.top() + 6.5 + k as f32 * 2.6;
+                p.line_segment([pos2(sheet.left() + 3.0, y), pos2(sheet.right() - 3.0, y)], Stroke::new(1.0, ink));
+            }
         }
     }
 }
@@ -481,10 +530,78 @@ impl App {
         }
     }
 
+    /// The page bar's dock with the bar at `side`: under the pages, or standing at a side, from
+    /// under the toolbar (and its second row, when that is open) to the foot of the window.
+    pub fn bar_rect(&self, area: Rect, side: BarSide) -> Rect {
+        let x = match side {
+            BarSide::Bottom => return Self::dock_rect(area, false),
+            BarSide::Left => area.left() + DOCK_GAP,
+            BarSide::Right => area.right() - DOCK_GAP - DOCK_H,
+        };
+        let top = (area.top() + RESERVED).max(self.tools_bottom + 10.0);
+        Rect::from_min_max(pos2(x, top), pos2(x + DOCK_H, (area.bottom() - DOCK_GAP).max(top)))
+    }
+
     pub fn page_bar(&mut self, ui: &mut egui::Ui, area: Rect) {
-        let rect = Self::dock_rect(area, false);
+        let rect = self.bar_rect(area, self.bar.side);
         Self::paint_dock(ui, rect);
-        self.scrollbar(ui, rect.shrink2(vec2(18.0, 0.0)));
+        self.bar_grip(ui, area, rect);
+        if self.bar.side == BarSide::Bottom {
+            self.scrollbar(ui, rect.shrink2(vec2(18.0, 0.0)));
+        } else {
+            self.standing_scrollbar(ui, rect.shrink2(vec2(0.0, 18.0)));
+        }
+    }
+
+    /// The grip at the start of the page bar. Dragged into the left or right quarter of the window,
+    /// it docks the bar standing at that side; let go in between, the bar lies under the pages.
+    /// While it is dragged, the place the bar would go is outlined.
+    fn bar_grip(&mut self, ui: &mut egui::Ui, area: Rect, rect: Rect) {
+        let lying = self.bar.side == BarSide::Bottom;
+        if rect.width() < 40.0 || rect.height() < 40.0 {
+            return;
+        }
+        let grip = if lying {
+            Rect::from_center_size(pos2(rect.left() + 10.5, rect.center().y), vec2(12.0, 30.0))
+        } else {
+            Rect::from_center_size(pos2(rect.center().x, rect.top() + 10.5), vec2(30.0, 12.0))
+        };
+        let resp = ui.interact(grip, Id::new("bar_grip"), Sense::drag());
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Move the page bar"));
+        let hot = resp.hovered() || resp.dragged();
+        if hot {
+            ui.output_mut(|o| o.cursor_icon = if resp.dragged() { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab });
+        }
+        let ink = if hot { pal().text_hot } else { pal().text_dim };
+        for i in 0..2 {
+            for j in 0..3 {
+                let (a, b) = ((i as f32 - 0.5) * 5.0, (j as f32 - 1.0) * 5.0);
+                ui.painter().circle_filled(grip.center() + if lying { vec2(a, b) } else { vec2(b, a) }, 1.3, ink);
+            }
+        }
+        let side_at = |p: egui::Pos2| {
+            if p.x < area.left() + area.width() / 4.0 {
+                BarSide::Left
+            } else if p.x > area.right() - area.width() / 4.0 {
+                BarSide::Right
+            } else {
+                BarSide::Bottom
+            }
+        };
+        let pointer = ui.input(|i| i.pointer.latest_pos());
+        if resp.dragged() && let Some(p) = pointer {
+            let ghost = self.bar_rect(area, side_at(p));
+            ui.painter().rect_stroke(ghost.expand(3.0), 18.0, Stroke::new(2.0, pal().accent), egui::StrokeKind::Outside);
+        }
+        if resp.drag_stopped() && let Some(p) = pointer {
+            let side = side_at(p);
+            if side != self.bar.side {
+                self.bar.put(side);
+                // The pages make room for the bar, gliding there as for Fit.
+                self.fit_settling = self.fit;
+            }
+        }
+        resp.on_hover_text("Drag to the left or right to stand the page bar there, to the middle to lay it under the pages");
     }
 
     /// Draw tool group `g` (see `GROUPS`), noting what was clicked in `out`, and measure it.
@@ -1093,35 +1210,105 @@ impl App {
             );
         }
 
-        let track_left = if show_label { r.left() + label_w + 8.0 } else { r.left() };
+        // Its reach for the pointer stays clear of the grip.
+        let track_left = if show_label { r.left() + label_w + 8.0 } else { r.left() + 6.0 };
         let track = Rect::from_min_max(pos2(track_left, cy - 4.0), pos2(btn.left() - 20.0, cy + 4.0));
-        if !show_track {
-            return;
+        if show_track {
+            self.page_track(ui, track, false);
         }
+    }
+
+    /// The page bar standing at a side of the window. From the foot up: the scratchpad (as a pad,
+    /// not its name), Fit, the zoom, New page (as "+"), then the track, the page number at the top.
+    /// When the bar is short the number goes first, then the track, the zoom, the scratchpad and
+    /// "+", as in the bar lying down.
+    fn standing_scrollbar(&mut self, ui: &mut egui::Ui, r: Rect) {
+        let n = self.doc.pages();
+        let cx = r.center().x;
+        let label_h = 34.0;
+        let zoom_h = 30.0;
+        let track_min = 60.0 + 20.0;
+        let tools_h = |zoom: bool| 30.0 + 8.0 + 30.0 + if zoom { zoom_h } else { 8.0 } + 30.0;
+        let show_label = r.height() >= label_h + track_min + tools_h(true);
+        let show_track = r.height() >= track_min + tools_h(true);
+        let show_zoom = r.height() >= tools_h(true);
+        let show_scratch = r.height() >= tools_h(false);
+        let show_new = r.height() >= 30.0 + 8.0 + 30.0;
+        let show_fit = r.height() >= 30.0;
+        // A button `w` wide whose foot is at `bottom`.
+        let at = |bottom: f32, w: f32| Rect::from_min_max(pos2(cx - w / 2.0, bottom - 30.0), pos2(cx + w / 2.0, bottom));
+        let scratch_btn = at(r.bottom(), 30.0);
+        let fit_btn = at(if show_scratch { scratch_btn.top() - 8.0 } else { r.bottom() }, 40.0);
+        let btn = at(fit_btn.top() - if show_zoom { zoom_h } else { 8.0 }, 30.0);
+
+        if show_label {
+            let page = self.scrub_page().filter(|_| self.appearance == Appearance::Paperstack).unwrap_or(self.pos.round() as usize) + 1;
+            let p = ui.painter();
+            p.text(pos2(cx, r.top() + 7.0), egui::Align2::CENTER_CENTER, page.to_string(), FontId::proportional(13.0), pal().text_dim);
+            p.text(pos2(cx, r.top() + 22.0), egui::Align2::CENTER_CENTER, format!("of {n}"), FontId::proportional(11.0), pal().text_dim);
+        }
+        if show_new && ui.put(btn, egui::Button::new("+")).on_hover_text("New page").clicked() {
+            let cur = self.target;
+            let ctx = ui.ctx().clone();
+            self.insert_page_after(&ctx, cur);
+        }
+        if show_scratch {
+            let tip = "Scratchpad: plain notes beside the pages, saved with the document";
+            let open = self.scratchpad_open;
+            let resp = ui.scope_builder(UiBuilder::new().max_rect(scratch_btn), |ui| icon_button(ui, Icon::Pad, open, tip)).inner;
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Scratchpad"));
+            if resp.clicked() {
+                self.toggle_scratchpad();
+            }
+        }
+        let fit_tip = "Show the full page (Ctrl+0). Ctrl+drag moves the page.";
+        if show_fit && ui.put(fit_btn, egui::Button::new("Fit").selected(self.fit)).on_hover_text(fit_tip).clicked() {
+            self.fit = true;
+            self.fit_settling = true;
+        }
+        if show_zoom {
+            let zoom = format!("{:.0}%", self.zoom * 100.0);
+            ui.painter().text(pos2(cx, fit_btn.top() - zoom_h / 2.0), egui::Align2::CENTER_CENTER, zoom, FontId::proportional(13.0), pal().text_dim);
+        }
+        let track_top = if show_label { r.top() + label_h } else { r.top() + 6.0 };
+        let track = Rect::from_min_max(pos2(cx - 4.0, track_top), pos2(cx + 4.0, btn.top() - 20.0));
+        if show_track {
+            self.page_track(ui, track, true);
+        }
+    }
+
+    /// The scrollbar's track and thumb, lying (left to right) or `standing` (top to bottom).
+    fn page_track(&mut self, ui: &mut egui::Ui, track: Rect, standing: bool) {
+        let n = self.doc.pages();
+        let (start, len) = if standing { (track.top(), track.height()) } else { (track.left(), track.width()) };
+        // The point `s` along the track, on its middle line.
+        let along = |s: f32| if standing { pos2(track.center().x, s) } else { pos2(s, track.center().y) };
         ui.painter().rect_filled(track, 4.0, pal().field);
         // Pages sliding in count only as they arrive, and a page sliding out until it is gone, so
         // the thumb glides instead of jumping when pages come and go.
         let arriving = if self.slide_in.is_some() { (self.target as f32 - self.pos).max(0.0) } else { 0.0 };
         let going = self.slide_out.map_or(0.0, |s| 1.0 - s);
         let last = (n - 1) as f32 - arriving + going;
-        let thumb_w = (track.width() / (last + 1.0)).clamp(40.0, track.width());
-        let travel = track.width() - thumb_w;
+        let thumb_w = (len / (last + 1.0)).clamp(40.0, len);
+        let travel = len - thumb_w;
         if last > 0.0 && n <= 80 {
             for k in 0..=last.floor() as usize {
-                let x = track.left() + thumb_w / 2.0 + travel * k as f32 / last;
-                ui.painter().circle_filled(pos2(x, cy), 1.3, pal().text.gamma_multiply(0.18));
+                let s = start + thumb_w / 2.0 + travel * k as f32 / last;
+                ui.painter().circle_filled(along(s), 1.3, pal().text.gamma_multiply(0.18));
             }
         }
 
         // Dragging (or pressing) slides the pages half out one by one, following the thumb: right,
         // off the page; left, out of the pile behind. Letting go moves them all there together.
         // A book turns its pages along with the thumb instead.
-        let resp = ui.interact(track.expand2(vec2(6.0, 12.0)), Id::new("scroll"), Sense::click_and_drag());
-        self.last_track = (cy, track.left() + thumb_w / 2.0, track.right() - thumb_w / 2.0);
+        let reach = if standing { vec2(12.0, 6.0) } else { vec2(6.0, 12.0) };
+        let resp = ui.interact(track.expand2(reach), Id::new("scroll"), Sense::click_and_drag());
+        self.last_track = (along(start + thumb_w / 2.0), along(start + len - thumb_w / 2.0));
         let mut f = if last > 0.0 { (self.pos + going) / last } else { 0.0 };
         if n > 1 && (resp.dragged() || resp.drag_started() || resp.is_pointer_button_down_on()) {
             if let Some(p) = resp.interact_pointer_pos() {
-                f = ((p.x - track.left() - thumb_w / 2.0) / travel).clamp(0.0, 1.0);
+                let p = if standing { p.y } else { p.x };
+                f = ((p - start - thumb_w / 2.0) / travel).clamp(0.0, 1.0);
                 self.scrub_to = Some(f * (n - 1) as f32);
                 if self.appearance == Appearance::Book {
                     // In a book the pages turn along with the thumb.
@@ -1138,7 +1325,12 @@ impl App {
             }
         }
 
-        let thumb = Rect::from_min_size(pos2(track.left() + travel * f, cy - 8.0), vec2(thumb_w, 16.0));
+        let from = along(start + travel * f);
+        let thumb = if standing {
+            Rect::from_min_size(from - vec2(8.0, 0.0), vec2(16.0, thumb_w))
+        } else {
+            Rect::from_min_size(from - vec2(0.0, 8.0), vec2(thumb_w, 16.0))
+        };
         let hot = resp.hovered() || self.scrub_to.is_some();
         ui.painter().rect_filled(thumb, 8.0, if hot { pal().accent } else { pal().thumb });
     }

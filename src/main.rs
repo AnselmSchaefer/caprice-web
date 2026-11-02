@@ -199,8 +199,8 @@ pub struct App {
     pub note_focus: Option<u64>,
     pub pads: HashMap<u64, notes::Pad>,
     pub last_page_rect: Rect,
-    /// Where the scrollbar's track was drawn last, and the stretch its thumb's centre travels.
-    pub last_track: (f32, f32, f32),
+    /// The stretch the scrollbar's thumb's centre travels, from the first page to the last, as last drawn.
+    pub last_track: (Pos2, Pos2),
     /// Textures of the document's pictures, by picture id.
     pub textures: HashMap<u32, egui::TextureHandle>,
     pub startup_file: Option<PathBuf>,
@@ -276,6 +276,8 @@ pub struct App {
     pub peeks: peek::Peeks,
     /// The colours around the pages, and where the choice is kept.
     pub themes: theme::Themes,
+    /// Where the page bar is docked, and where that is kept.
+    pub bar: ui::BarPlace,
     /// What grows and flies in the Magic Garden theme, and what builds in the Magic City.
     pub eggs: eggs::Eggs,
 }
@@ -326,7 +328,7 @@ impl App {
             pads: HashMap::new(),
             last_page_rect: Rect::NOTHING,
             clip: None,
-            last_track: (0.0, 0.0, 0.0),
+            last_track: (Pos2::ZERO, Pos2::ZERO),
             textures: HashMap::new(),
             startup_file: None,
             shown_status: String::new(),
@@ -367,6 +369,7 @@ impl App {
             start: start::Start::new(),
             peeks: peek::Peeks::default(),
             themes: theme::Themes::new(),
+            bar: ui::BarPlace::new(),
             eggs: eggs::Eggs::default(),
         };
         app.saved_hash = app.content_hash();
@@ -401,7 +404,8 @@ impl App {
             let fade = (((SHOW_FOR - age) / 0.6) as f32).clamp(0.0, 1.0);
             let galley = ui.painter().layout_no_wrap(text, egui::FontId::proportional(13.0), theme::pal().text.gamma_multiply(fade));
             let size = galley.size() + egui::vec2(28.0, 14.0);
-            let center = egui::pos2(area.center().x, area.bottom() - ui::DOCK_GAP - ui::DOCK_H - 26.0);
+            let above = if self.bar.side == ui::BarSide::Bottom { ui::DOCK_H } else { 0.0 };
+            let center = egui::pos2(area.center().x, area.bottom() - ui::DOCK_GAP - above - 26.0);
             let pill = Rect::from_center_size(center, size);
             ui.painter().rect_filled(pill, 12.0, theme::pal().dock.gamma_multiply(fade));
             ui.painter().rect_stroke(pill, 12.0, egui::Stroke::new(1.0, theme::pal().dock_edge.gamma_multiply(fade)), egui::StrokeKind::Inside);
@@ -785,6 +789,7 @@ mod tests {
             app.start.recent.clear();
             app.words.progress = Default::default();
             app.themes = theme::Themes::kept_in(None);
+            app.bar = ui::BarPlace::kept_in(None);
             Self { ctx, app, time: 0.0, mods: Modifiers::NONE, access: None, painted: Vec::new(), width: 1240.0 }
         }
 
@@ -1260,8 +1265,8 @@ mod tests {
 
         // Dragging the thumb right slides the pages half out one by one, following it. The page
         // and the caret stay put meanwhile.
-        let (y, x0, x1) = h.app.last_track;
-        let at = |page: f32| egui::pos2(x0 + (x1 - x0) * page / 6.0, y);
+        let (a, b) = h.app.last_track;
+        let at = |page: f32| a + (b - a) * page / 6.0;
         let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
         let near = |a: f32, b: f32| (a - b).abs() < 0.01;
         h.frames(1, vec![egui::Event::PointerMoved(at(1.0)), button(at(1.0), true)], Modifiers::NONE);
@@ -1322,8 +1327,8 @@ mod tests {
         assert_eq!(h.app.pos, 1.0);
 
         // The pages turn with the thumb, nothing is held out, and the caret goes along.
-        let (y, x0, x1) = h.app.last_track;
-        let at = |page: f32| egui::pos2(x0 + (x1 - x0) * page / 6.0, y);
+        let (a, b) = h.app.last_track;
+        let at = |page: f32| a + (b - a) * page / 6.0;
         let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
         h.frames(1, vec![egui::Event::PointerMoved(at(1.0)), button(at(1.0), true)], Modifiers::NONE);
         h.frames(1, vec![egui::Event::PointerMoved(at(3.4))], Modifiers::NONE);
@@ -1809,6 +1814,64 @@ mod tests {
     }
 
     #[test]
+    fn the_page_bar_stands_at_the_side_its_grip_is_dragged_to_and_stays_there() {
+        let dir = std::env::temp_dir().join(format!("caprice-bar-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut h = Harness::new();
+        h.app.bar = ui::BarPlace::kept_in(Some(dir.join("page_bar.json")));
+        for _ in 0..4 {
+            h.type_text("page");
+            h.key(Key::Enter, Modifiers::COMMAND);
+        }
+        h.frames(120, vec![], Modifiers::NONE);
+        let window = Rect::from_min_size(Pos2::ZERO, egui::vec2(h.width, 900.0));
+        let lying = h.app.last_page_rect.center().x;
+        let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+        let drag = |h: &mut Harness, to: Pos2| {
+            let from = h.widget_rect("Move the page bar").expect("the grip").center();
+            h.frames(1, vec![egui::Event::PointerMoved(from), button(from, true)], Modifiers::NONE);
+            for k in 1..=10 {
+                h.frames(1, vec![egui::Event::PointerMoved(from + (to - from) * k as f32 / 10.0)], Modifiers::NONE);
+            }
+            h.frames(1, vec![button(to, false)], Modifiers::NONE);
+            h.frames(60, vec![], Modifiers::NONE);
+        };
+
+        // Dragged to the right, the bar stands there: the scratchpad is a pad and New page a "+".
+        drag(&mut h, egui::pos2(window.right() - 30.0, 500.0));
+        assert_eq!(h.app.bar.side, ui::BarSide::Right);
+        let dock = h.app.bar_rect(window, ui::BarSide::Right);
+        assert!(h.widget_rect("+ New page").is_none());
+        for name in ["Scratchpad", "+", "Fit", "Move the page bar"] {
+            let at = h.widget_rect(name).unwrap_or_else(|| panic!("{name} in the bar"));
+            assert!(dock.contains_rect(at), "{name} {at:?} is in its dock {dock:?}");
+        }
+        assert!(h.widget_rect("Scratchpad").unwrap().width() <= 30.0, "an icon, not the name");
+        assert!(h.app.last_page_rect.center().x < lying, "the page makes room for the bar");
+        assert!(h.app.last_page_rect.right() < dock.left(), "and is clear of it");
+        h.click_widget("Scratchpad");
+        assert!(h.app.scratchpad_open);
+
+        // Its track runs down: dragging the thumb down goes to a later page.
+        assert_eq!(h.app.last_track.0.x, h.app.last_track.1.x);
+        h.scrub_to(3, 5);
+        assert_eq!(h.shown(), 3);
+
+        // It is kept for next time.
+        assert_eq!(ui::BarPlace::kept_in(Some(dir.join("page_bar.json"))).side, ui::BarSide::Right);
+
+        // To the left, then back to the middle, where it lies under the pages again.
+        drag(&mut h, egui::pos2(30.0, 500.0));
+        assert_eq!(h.app.bar.side, ui::BarSide::Left);
+        assert!(h.app.last_page_rect.left() > h.app.bar_rect(window, ui::BarSide::Left).right());
+        drag(&mut h, egui::pos2(window.center().x, 850.0));
+        assert_eq!(h.app.bar.side, ui::BarSide::Bottom);
+        assert!(h.widget_rect("+ New page").is_some() && h.widget_rect("Scratchpad").unwrap().width() > 30.0);
+        assert!((h.app.last_page_rect.center().x - lying).abs() < 1.0, "the page back in the middle");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_note_on_a_line_stays_put_while_typing_next_to_it() {
         let mut h = Harness::new();
         h.frames(3, vec![], Modifiers::NONE);
@@ -2014,8 +2077,8 @@ mod tests {
 
         /// Drag the scrollbar's thumb to page `to` of `of` and let go.
         fn scrub_to(&mut self, to: usize, of: usize) {
-            let (y, x0, x1) = self.app.last_track;
-            let at = |page: usize| egui::pos2(x0 + (x1 - x0) * page as f32 / (of - 1) as f32, y);
+            let (a, b) = self.app.last_track;
+            let at = |page: usize| a + (b - a) * page as f32 / (of - 1) as f32;
             let from = at(self.app.target);
             let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
             self.frames(1, vec![egui::Event::PointerMoved(from), button(from, true)], Modifiers::NONE);

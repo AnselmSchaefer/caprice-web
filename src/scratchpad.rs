@@ -20,7 +20,9 @@ impl App {
         }
         let screen = ctx.content_rect();
         let size = vec2(320.0, (screen.height() - 160.0).clamp(200.0, 680.0));
-        let at = pos2(screen.right() - size.x - 24.0, screen.top() + 70.0);
+        // Beside the page bar, when it stands on the right.
+        let bar = if self.bar.side == crate::ui::BarSide::Right { crate::ui::DOCK_H + crate::ui::DOCK_GAP } else { 0.0 };
+        let at = pos2(screen.right() - size.x - 24.0 - bar, screen.top() + 70.0);
         let mut open = true;
         egui::Window::new("Scratchpad")
             .id(Id::new("scratchpad"))

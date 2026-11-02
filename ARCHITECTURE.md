@@ -571,6 +571,18 @@ scratchpad's text is the document's (`Doc::scratchpad`, saved, R9); whether it s
   1300 with a short and a long name, `at_any_width_the_docks_settle_and_hold_their_tools_apart`
   (in place, inside its dock, clear of the others, the same from one frame to the next). A new
   tool is covered by it without a change.
+- **The page bar lies under the pages or stands at the left or right (`ui::BarSide`), and the
+  pages keep clear of it.** Its grip, at the bar's start, docks it where it is let go: the left or
+  right quarter of the window, or the middle. `App::bar_rect` is its dock for each side (standing,
+  it starts under the toolbar's second row when that is open), and `view_area` leaves its room, so
+  Fit, panning and swiping never reach under it; anything else placed by the bottom dock (the status
+  pill, the scratchpad's first place) asks `bar.side`. Standing, it holds from the foot up the
+  scratchpad as a drawn pad, Fit, the zoom, New page as "+", the track running down and the page
+  number at the top (`standing_scrollbar`, its own sums); the track and thumb are one piece for
+  both (`page_track`), and `App::last_track` is the thumb's stretch as two points, whichever way it
+  runs. A new tool in the page bar needs a place in both. The side is kept in the data folder
+  (`page_bar.json`, like the theme), and `Harness` keeps it nowhere (`BarPlace::kept_in(None)`).
+  Guarded by `the_page_bar_stands_at_the_side_its_grip_is_dragged_to_and_stays_there`.
 - **An item marked as chosen in a menu is `Button::selectable` (or `selectable_label`), never
   `.selected(true)` with `.frame(false)`**: the theme gives chosen items dark text meant for the
   accent highlight, and without a frame there is none, so it was dark on the dark menu (the text
@@ -1371,8 +1383,8 @@ on the contents pages with `Harness::long_contents`.
 either row. The order of `GROUPS` is the order they go into "⋯", the last first.
 
 **A new tool in a dock:** in the toolbar, inside a group in `tool_group`, nothing in it depending on
-where the group is (R: the toolbar's groups); in the page bar, room in the sums in `scrollbar` and a
-place in the order things go. `at_any_width_the_docks_settle_and_hold_their_tools_apart` then checks
+where the group is (R: the toolbar's groups); in the page bar, room in the sums in `scrollbar` and
+`standing_scrollbar` and a place in the order things go. `at_any_width_the_docks_settle_and_hold_their_tools_apart` then checks
 it at every width.
 
 **A new window over the pages:** a toggle in the page bar or a menu, not the toolbar (R16); its

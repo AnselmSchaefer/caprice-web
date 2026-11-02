@@ -3,7 +3,7 @@
 use eframe::egui::{self, Id, Key, Modifiers, Rect, Sense, pos2, vec2};
 
 use crate::App;
-use crate::ui::RESERVED;
+use crate::ui::{BarSide, DOCK_GAP, RESERVED};
 
 pub const MIN_ZOOM: f32 = 0.3;
 pub const MAX_ZOOM: f32 = 4.0;
@@ -11,9 +11,18 @@ pub const MAX_ZOOM: f32 = 4.0;
 const SWIPE_PAGE: f32 = 50.0;
 
 impl App {
-    /// The area between the two docks.
-    fn view_area(area: Rect) -> Rect {
-        Rect::from_min_max(pos2(area.left(), area.top() + RESERVED), pos2(area.right(), area.bottom() - RESERVED))
+    /// The area between the docks: under the toolbar, and above the page bar or beside it.
+    fn view_area(&self, area: Rect) -> Rect {
+        let mut view = Rect::from_min_max(pos2(area.left(), area.top() + RESERVED), pos2(area.right(), area.bottom() - RESERVED));
+        match self.bar.side {
+            BarSide::Bottom => {}
+            BarSide::Left => view.min.x += RESERVED,
+            BarSide::Right => view.max.x -= RESERVED,
+        }
+        if self.bar.side != BarSide::Bottom {
+            view.max.y = area.bottom() - DOCK_GAP;
+        }
+        view
     }
 
     /// Hold Ctrl and drag to move the page around.
@@ -47,7 +56,7 @@ impl App {
         if !self.ctrl_down {
             return;
         }
-        let view = Self::view_area(area);
+        let view = self.view_area(area);
         // Registered after the text editor, so it wins the drag.
         let resp = ui.interact(view, Id::new("pan"), Sense::drag());
         // Don't rely on `resp.hovered()`: it can be false for a frame right after a drag ends.
@@ -68,7 +77,7 @@ impl App {
     pub fn swipe_pages(&mut self, ctx: &egui::Context, area: Rect) {
         let (d, hover, now) = ctx.input(|i| (i.smooth_scroll_delta, i.pointer.hover_pos(), i.time));
         let over = hover.is_some_and(|p| {
-            Self::view_area(area).contains(p) && ctx.layer_id_at(p).is_none_or(|l| l.order == egui::Order::Background)
+            self.view_area(area).contains(p) && ctx.layer_id_at(p).is_none_or(|l| l.order == egui::Order::Background)
         });
         if !over || d.x.abs() <= d.y.abs() {
             return;
@@ -93,7 +102,7 @@ impl App {
 
     /// Pinch / Ctrl+scroll to zoom around the pointer, two-finger scroll up and down to pan. Returns the page rectangle.
     pub fn page_rect(&mut self, ctx: &egui::Context, area: Rect) -> Rect {
-        let view = Self::view_area(area);
+        let view = self.view_area(area);
         let size = self.doc.setup.size();
         // Leave room on both sides for post-its sticking out of the page and the stacks.
         let fit = ((view.height() - 16.0) / size.y).min((view.width() - 48.0) / (size.x + 2.0 * crate::notes::NOTE_OUT)).clamp(MIN_ZOOM, 3.0);

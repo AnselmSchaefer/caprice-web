@@ -99,7 +99,7 @@ Full list with reasons and tests in `ARCHITECTURE.md` §4.
 12. **A story with a file saves itself; every story keeps versions by its id.** Anything that
     starts another story sets `story_id` and calls `Keeper::opened`. Leaving still offers to drop
     the changes since saving by hand (`as_saved`). `Harness` turns autosave, versions, the
-    word goal's file, the list of stories last opened and the theme's file off: tests write
+    word goal's file, the list of stories last opened, the theme's file and the page bar's off: tests write
     nothing outside their own folders.
 13. **Colours around the page come from `theme::pal()`**, never literals; the page itself (`PAPER`, `INK`)
     is the same in every theme.
