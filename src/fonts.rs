@@ -76,9 +76,9 @@ pub struct FontBook {
     /// In the browser: fonts wanted whose family is still on its way (stored name, and the family).
     #[cfg(target_arch = "wasm32")]
     waiting: Vec<(String, String)>,
-    /// Font files fetched, not yet given to `db`.
+    /// Families fetched, with the files that came (none if none could be), not yet given to `db`.
     #[cfg(target_arch = "wasm32")]
-    fetched: std::rc::Rc<std::cell::RefCell<Vec<Vec<u8>>>>,
+    fetched: std::rc::Rc<std::cell::RefCell<Vec<(String, Vec<Vec<u8>>)>>>,
     #[cfg(target_arch = "wasm32")]
     fetching: BTreeSet<String>,
 }
@@ -203,6 +203,17 @@ impl FontBook {
         &self.defs
     }
 
+    /// Whether every font asked for is usable, or will never be (neither it nor a twin installed,
+    /// or its files could not be fetched). Until then pages are measured with egui's own font, and
+    /// break in other places than they will.
+    pub fn settled(&self) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        if !self.waiting.is_empty() {
+            return false;
+        }
+        self.pending.is_empty()
+    }
+
     /// Make the fonts loaded last frame usable (egui has them from this frame on). In the browser,
     /// also load the fonts whose files have come since. Whether any font became usable: then the
     /// pages are worked out again, as they were measured without it.
@@ -225,7 +236,7 @@ impl FontBook {
             return;
         }
         let (fetched, ctx) = (self.fetched.clone(), ctx.clone());
-        let file = (*file).to_owned();
+        let (family, file) = (family.to_owned(), (*file).to_owned());
         wasm_bindgen_futures::spawn_local(async move {
             // The faces come in together, so a family is never loaded with some of them only.
             let mut faces = Vec::new();
@@ -235,7 +246,7 @@ impl FontBook {
                     Err(e) => web_sys::console::error_1(&format!("Caprice could not fetch a font: {e}").into()),
                 }
             }
-            fetched.borrow_mut().extend(faces);
+            fetched.borrow_mut().push((family, faces));
             ctx.request_repaint();
         });
     }
@@ -243,18 +254,22 @@ impl FontBook {
     /// Give `db` the font files that have come, and load the fonts that waited for them.
     #[cfg(target_arch = "wasm32")]
     fn take_fetched(&mut self, ctx: &egui::Context) {
-        let files = std::mem::take(&mut *self.fetched.borrow_mut());
-        if files.is_empty() {
+        let came = std::mem::take(&mut *self.fetched.borrow_mut());
+        if came.is_empty() {
             return;
         }
-        for bytes in files {
-            self.db.load_font_data(bytes);
+        let mut families = BTreeSet::new();
+        for (family, files) in came {
+            for bytes in files {
+                self.db.load_font_data(bytes);
+            }
+            families.insert(family);
         }
-        let has = |db: &fontdb::Database, family: &str| db.faces().any(|f| f.families.iter().any(|(n, _)| n == family));
+        // A family that could not be fetched waits no longer: it is drawn with egui's own font.
         let waiting = std::mem::take(&mut self.waiting);
-        let (ready, waiting): (Vec<_>, Vec<_>) = waiting.into_iter().partition(|(_, a)| has(&self.db, a));
+        let (came, waiting): (Vec<_>, Vec<_>) = waiting.into_iter().partition(|(_, a)| families.contains(a));
         self.waiting = waiting;
-        for (font, actual) in ready {
+        for (font, actual) in came {
             self.load(ctx, &font, &actual, false);
         }
     }

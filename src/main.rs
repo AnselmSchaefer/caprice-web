@@ -5988,6 +5988,73 @@ mod tests {
     }
 
     #[test]
+    fn a_magic_theme_picked_again_shows_at_once_what_the_story_grew_meanwhile() {
+        let mut h = Harness::new();
+        in_the_theme(&mut h, theme::Theme::City, 0.0);
+        in_the_garden(&mut h, 0.0);
+        let sentence = "It was nearly midnight and the Prime Minister sat alone in his office. ";
+        h.type_text(&sentence.repeat(220));
+        let pages = h.app.doc.pages();
+        assert!(pages >= 4, "pages: {pages}");
+        let floors = |h: &Harness| h.app.eggs.houses.iter().map(|h| h.1).sum::<usize>();
+
+        // Picked again, each shows the story as it stands, not how it got there.
+        let ctx = h.ctx.clone();
+        h.app.themes.choose(&ctx, theme::Theme::City);
+        h.frames(2, vec![], Modifiers::NONE);
+        assert_eq!(floors(&h), pages, "every floor at once");
+        assert!(h.app.eggs.light.is_none(), "none of them being built");
+        h.app.themes.choose(&ctx, theme::Theme::Sea);
+        h.frames(2, vec![], Modifiers::NONE);
+        h.type_text(&sentence.repeat(220));
+        h.app.themes.choose(&ctx, theme::Theme::City);
+        h.frames(2, vec![], Modifiers::NONE);
+        assert_eq!(floors(&h), h.app.doc.pages(), "and the floors added meanwhile");
+        h.app.themes.choose(&ctx, theme::Theme::Garden);
+        h.frames(2, vec![], Modifiers::NONE);
+        let grown = h.app.eggs.plants[0].0.height();
+        h.frames(200, vec![], Modifiers::NONE);
+        assert_eq!(h.app.eggs.plants[0].0.height(), grown, "the plant grown at once");
+        h.app.themes.choose(&ctx, theme::Theme::Sea);
+        h.frames(2, vec![], Modifiers::NONE);
+        let parts = (h.app.doc.pages()).min(eggs::PARTS);
+        assert_eq!(h.app.eggs.ships.iter().map(|s| s.2).collect::<Vec<_>>(), [parts], "the ship built at once");
+    }
+
+    #[test]
+    fn a_story_opened_before_its_font_has_come_grows_its_garden_with_every_page_added() {
+        // A twin no other test asks for, so it is not loaded yet when the story is opened.
+        let font = "Tinos";
+        if !Harness::new().app.fonts.is_installed("Liberation Serif") {
+            eprintln!("no twin of {font} is installed here");
+            return;
+        }
+        let mut h = Harness::new();
+        h.frames(3, vec![], Modifiers::NONE);
+        h.type_text(&"It was nearly midnight and the Prime Minister sat alone in his office. ".repeat(1500));
+        for st in &mut h.app.doc.flow.styles {
+            st.font = font.into();
+        }
+        h.app.typing.font = font.into();
+        let mut o = h.reopened("font-garden");
+        // In the browser frames go by before the font's files have come: its pages are measured
+        // with egui's own font meanwhile.
+        o.app.themes.theme = theme::Theme::City;
+        o.app.eggs.odds = Some(0.0);
+        o.app.grow_garden();
+        o.frames(200, vec![], Modifiers::NONE);
+        let floors = |h: &Harness| h.app.eggs.houses.iter().map(|h| h.1).sum::<usize>();
+        let pages = o.app.doc.pages();
+        assert_eq!(o.app.doc.garden, [pages as u32], "measured with its own font, not with the one standing in for it");
+        assert_eq!(floors(&o), pages);
+        while o.app.doc.pages() == pages {
+            o.type_text(&" It was nearly midnight and the Prime Minister sat alone in his office.".repeat(5));
+        }
+        o.frames(200, vec![], Modifiers::NONE);
+        assert_eq!(floors(&o), pages + 1, "a page added is a floor more");
+    }
+
+    #[test]
     fn dropping_the_changes_since_saving_keeps_the_garden_grown_since() {
         let dir = test_dir("garden-drop");
         let mut h = Harness::new();

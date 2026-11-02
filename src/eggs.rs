@@ -1843,8 +1843,12 @@ impl App {
     /// The garden kept with the story (`Doc::garden`) grown to the pages each chapter has now, if
     /// it has more: in every theme, so the Magic Garden shows all the story's growth. It never
     /// shrinks, and keeps a plant for a chapter taken out. Measured again only when the text or the
-    /// pages have changed.
+    /// pages have changed, and never while a font of the story is still to come: the pages egui's
+    /// own font gives are more, and the garden would keep them for good.
     pub fn grow_garden(&mut self) {
+        if !self.fonts.settled() {
+            return;
+        }
         let now = (self.doc.version, self.doc.spans.len());
         if self.eggs.measured.as_ref().is_some_and(|(id, v, n)| *id == self.story_id && (*v, *n) == now) {
             return;
@@ -1884,6 +1888,8 @@ impl App {
     pub fn draw_garden(&mut self, ui: &egui::Ui, area: Rect, page: Rect) {
         self.eggs.plants.clear();
         if self.themes.theme != Theme::Garden {
+            // What grew meanwhile is there at once when the Magic Garden is picked again.
+            self.eggs.grown_for = None;
             return;
         }
         let now = ui.ctx().input(|i| i.time);
@@ -1892,7 +1898,7 @@ impl App {
         let chapters = self.doc.chapters(false).len().max(1);
         let e = &mut self.eggs;
         if e.grown_for.as_deref() != Some(&self.story_id) {
-            // A story just opened comes with its garden grown.
+            // A story just opened, or the theme just picked, comes with its garden grown.
             (e.grown_for, e.grown) = (Some(self.story_id.clone()), targets.clone());
         }
         e.grown.resize(targets.len(), 0.0);
@@ -1935,13 +1941,14 @@ impl App {
     pub fn draw_city(&mut self, ui: &egui::Ui, area: Rect, page: Rect) {
         (self.eggs.houses, self.eggs.light) = (Vec::new(), None);
         if self.themes.theme != Theme::City {
+            self.eggs.built_for = None;
             return;
         }
         let now = ui.ctx().input(|i| i.time);
         let target = self.doc.garden.iter().sum::<u32>() as f32;
         let e = &mut self.eggs;
         if e.built_for.as_deref() != Some(&self.story_id) {
-            // A story just opened comes with its city built.
+            // A story just opened, or the theme just picked, comes with its city built.
             (e.built_for, e.built) = (Some(self.story_id.clone()), target);
         }
         let dt = (now - e.built_at).clamp(0.0, 0.1) as f32;
@@ -1979,6 +1986,7 @@ impl App {
     pub fn draw_sea(&mut self, ui: &egui::Ui, area: Rect, page: Rect) {
         self.eggs.ships.clear();
         if self.themes.theme != Theme::Sea {
+            (self.eggs.sailed_for, self.eggs.launch) = (None, None);
             return;
         }
         let now = ui.ctx().input(|i| i.time);
@@ -1988,7 +1996,7 @@ impl App {
         let e = &mut self.eggs;
         let was = e.sailed_for.as_ref().filter(|(id, _)| *id == self.story_id).map(|f| f.1);
         match was {
-            // A story just opened comes with its ships built and lying in the bay.
+            // A story just opened, or the theme just picked, comes with its ships built and in the bay.
             None => (e.sailed_for, e.rigged, e.launch) = (Some((self.story_id.clone(), yard)), target, None),
             Some(was) if was != yard => {
                 // A new chapter has begun: the ship of the one before is finished at once and

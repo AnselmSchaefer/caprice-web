@@ -740,7 +740,9 @@ Liberation Serif, and prints the same (R20 embeds the twin, as drawn).
   egui's own font. The frame in which fonts become usable (`FontBook::activate_pending` says so)
   works the pages out again (`full_paginate`). Opening a story in a font not loaded yet used to
   keep the wrong pages (a third more text on each) until something else laid them out. In the
-  browser a font's files come later still, fetched; the same frame takes them.
+  browser a font's files come later still, fetched; the same frame takes them. Until then
+  `FontBook::settled` is false, and nothing kept may be measured from the pages (the garden, R30).
+  A family whose files could not be fetched waits no more, and is drawn with egui's font.
 - **In the browser no font is installed.** Liberation Serif, Sans and Mono (the twins of Times New
   Roman, Arial and Courier New) and Noto Serif come with the app (`web/fonts`, with their
   licences) and count as installed (`SHIPPED`); a family's four faces are fetched together the
@@ -748,6 +750,7 @@ Liberation Serif, and prints the same (R20 embeds the twin, as drawn).
   the frame before are made usable, never in the same frame: egui panics on a family it has not
   got yet).
 - Tests: `a_story_opened_in_a_font_not_yet_loaded_has_the_pages_that_font_gives`,
+  `a_story_opened_before_its_font_has_come_grows_its_garden_with_every_page_added`,
   `a_story_in_a_font_not_installed_takes_the_pages_it_takes_in_its_twin_and_keeps_its_name`
   (it finds a pair with only the twin installed, and passes quietly on a machine that has none),
   and in `fonts.rs` `a_missing_font_is_drawn_with_an_installed_twin_of_the_same_widths`.
@@ -1075,8 +1078,11 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
 - **It never shrinks, and is kept with the story** (`Doc::garden`, saved as `DocFile::garden`): the
   most pages each plant has had, a plant a chapter in order. `grow_garden` raises it, in every
   theme, whenever the story's version or its number of pages changed, so the Magic Garden shows
-  all the story's growth. Taking text away, a chapter out, undo, opening the file again smaller:
-  none of it lowers a plant, and a chapter taken out keeps its plant, which flowers. Whatever puts
+  all the story's growth. Never while a font of the story is still to come (`FontBook::settled`,
+  R21): egui's own font gives more pages, and a story opened in the browser, where a font's files
+  take a while, kept that count for good, so the pages written next added nothing to see.
+  Taking text away, a chapter out, undo, opening the file again smaller: none of it lowers a
+  plant, and a chapter taken out keeps its plant, which flowers. Whatever puts
   another `Doc` in place of the open one goes through `adopt`, which keeps the bigger garden when
   it is the same story (`keep_garden`: a version, its file again, dropping the changes since
   saving); anything else that replaces `doc` must do the same. Plants are matched to chapters by
@@ -1122,6 +1128,8 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   brings a title there.
 - **It grows in sight.** How far each plant is drawn grown (`Eggs::grown`, by `story_id`) only goes
   up, a tenth of a second's growth a frame at most; a story opened comes with its garden grown.
+  So does a theme picked: each forgets how far it had shown things (`grown_for`, `built_for`,
+  `sailed_for`) while another theme is shown, or it caught up in sight with all that grew meanwhile.
   Its shapes come from a seed of `story_id` (saved, R22) and the plant's number, and the stem's
   course at a height does not depend on how tall it is, so growing only adds at the top.
 - **A new chapter title is brought in**, every time (`Eggs::odds` keeps it away for tests), when
@@ -1211,7 +1219,9 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   `now_and_then_in_the_magic_garden_a_balloon_flies_in_a_new_chapter_title_from_either_side`,
   `the_title_hangs_from_the_balloon_by_ropes_tied_to_its_ends`,
   `going_on_writing_while_a_title_is_brought_sets_it_down_at_once`,
-  `print_shows_neither_the_garden_the_houses_the_ships_nor_what_brings_a_title`.
+  `print_shows_neither_the_garden_the_houses_the_ships_nor_what_brings_a_title`,
+  `a_magic_theme_picked_again_shows_at_once_what_the_story_grew_meanwhile`,
+  `a_story_opened_before_its_font_has_come_grows_its_garden_with_every_page_added`.
 
 ### R31 — The desktop and the browser differ only in `platform.rs`
 
