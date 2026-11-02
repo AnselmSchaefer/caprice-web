@@ -1120,7 +1120,12 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   smaller and nearer the horizon). When the chapter in the yard changes to a later one, its ship is
   launched (`Eggs::launch`, `Bay::launching`, `LAUNCH` seconds): the parts it lacks come in at
   once, it slides down the slipway into the water and sails out to its place, turning about if it
-  lies the other way, and only then is the next keel laid. Ships are matched to chapters by order,
+  lies the other way, and only then is the next keel laid. The dock (`Bay::dock`: the quay, the
+  slipway and its posts) stands at the front: ships further back (`Bay::behind`) are drawn before
+  it, the rest after, so a ship lying beside the yard is behind it. A ship bound for the left
+  would cross it: it backs out first, turning about, sails past behind it, and comes forward to
+  its place if that is at the front, growing and shrinking with how far back it is
+  (`Bay::len_at`, as the rows of the bay do). Once it sailed straight there, in front of the dock. Ships are matched to chapters by order,
   like plants. A story opened comes with its fleet in the bay and its ship built. What each ship
   looks like (its stripe, sails and flags) and how it rocks come from `story_id` and its chapter.
   The water in front of a hull below its waterline is drawn over it (`Bay::cover`), farther ships
@@ -1201,7 +1206,8 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   `some_houses_have_a_little_tower_or_a_statue_and_none_reaches_the_next_house`,
   `a_ship_gets_a_part_for_each_page_until_it_is_whole`,
   `the_ships_lie_in_the_bay_beside_the_page_each_in_a_place_of_its_own`,
-  `a_ship_launched_is_finished_at_once_slides_into_the_water_and_sails_to_its_place`; and
+  `a_ship_launched_is_finished_at_once_slides_into_the_water_and_sails_to_its_place`,
+  `a_ship_launched_to_the_left_sails_behind_the_dock_and_none_lies_in_front_of_it`; and
   `in_the_magic_sea_a_ship_is_built_a_part_a_page_and_sails_out_whole_when_the_next_chapter_begins`,
   `in_the_magic_city_each_new_page_gives_a_house_a_floor_made_of_light_from_a_window`,
   `a_long_story_s_city_fills_the_desk_on_both_sides_and_grows_higher`,

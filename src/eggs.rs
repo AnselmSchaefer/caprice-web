@@ -1724,7 +1724,7 @@ impl Bay {
         Shape::mesh(mesh)
     }
 
-    /// The sea, its waves drifting at `time`, and the slipway in the yard.
+    /// The sea, its waves drifting at `time`.
     pub fn sea(&self, story: &str, time: f64) -> Vec<Shape> {
         let (a, u) = (self.area, self.len / 110.0);
         let mut out = vec![self.water(a.left(), a.right(), self.horizon, a.bottom())];
@@ -1741,8 +1741,13 @@ impl Bay {
                 out.push(Shape::line_segment([pos2(x - half, y), pos2(x + half, y)], Stroke::new(1.2 * u, glow(CREST, 0.35))));
             }
         }
-        // The yard's quay of stone under the ship, and the slipway from it down into the water, on
-        // posts.
+        out
+    }
+
+    /// The yard's quay of stone under the ship, and the slipway from it down into the water, on
+    /// posts. It stands at the front: ships lying further back are behind it (`behind`).
+    pub fn dock(&self) -> Vec<Shape> {
+        let mut out = Vec::new();
         let way = self.way();
         let (a, b) = (way.p(-0.7, -0.1), way.p(0.3, -0.1));
         let bottom = self.area.bottom();
@@ -1757,6 +1762,18 @@ impl Bay {
         }
         out.push(way.line(&[(-0.7, -0.1), (1.35, -0.1)], 0.03, WOOD_DARK));
         out
+    }
+
+    /// Whether `s` is further back than the dock, and drawn before it.
+    pub fn behind(&self, s: &Ship) -> bool {
+        s.sea < self.front - 0.01 * self.len
+    }
+
+    /// How long a ship looks with its waterline at the level `sea`: smaller further back, as the
+    /// rows of the bay are.
+    fn len_at(&self, sea: f32) -> f32 {
+        let rows = ((self.front - self.horizon) / (sea - self.horizon).max(1e-3)).log2();
+        self.len * 0.72f32.powf(rows)
     }
 
     /// The slipway's lie: a ship on it.
@@ -1832,10 +1849,30 @@ impl Bay {
         }
         let s = ((since - FINISH - SLIDE) / SAIL).clamp(0.0, 1.0);
         let e = ease(s);
-        let face = if lying.face > 0.0 { 1.0 } else { (PI * (s / 0.35).min(1.0)).cos() };
-        let sea = self.front + (lying.sea - self.front) * e;
-        let at = self.launched.lerp(lying.at, e);
-        Ship { at, sea, len: self.len + (lying.len - self.len) * e, face, lean: lying.lean * e, afloat: true, ..whole }
+        if lying.face > 0.0 || s >= 1.0 {
+            let sea = self.front + (lying.sea - self.front) * e;
+            let at = self.launched.lerp(lying.at, e);
+            return Ship { at, sea, len: self.len + (lying.len - self.len) * e, face: lying.face, lean: lying.lean * e, afloat: true, ..whole };
+        }
+        // Bound for the left, it would cross the dock: it backs out, turning about, sails past
+        // behind it, and comes forward to its place if that lies at the front.
+        let lane = (self.horizon + (self.front - self.horizon) * 0.5).min(lying.sea);
+        let x = self.launched.x;
+        let course = [pos2(x, self.front), pos2(x, lane), pos2(lying.at.x, lane), pos2(lying.at.x, lying.sea)];
+        let legs: Vec<f32> = course.windows(2).map(|w| w[0].distance(w[1])).collect();
+        let mut left = e * legs.iter().sum::<f32>();
+        let (mut p, mut face) = (course[3], -1.0);
+        for (k, &l) in legs.iter().enumerate() {
+            if left <= l || k == 2 {
+                let t = if l > 0.0 { (left / l).min(1.0) } else { 1.0 };
+                p = course[k].lerp(course[k + 1], t);
+                face = if k == 0 { (PI * t).cos() } else { -1.0 };
+                break;
+            }
+            left -= l;
+        }
+        let rocking = lying.at - pos2(lying.at.x, lying.sea);
+        Ship { at: p + rocking * e, sea: p.y, len: self.len_at(p.y), face, lean: lying.lean * e, afloat: true, ..whole }
     }
 }
 
@@ -2031,14 +2068,19 @@ impl App {
         let building = (yard < ships).then_some((yard, e.rigged));
         let painter = ui.painter();
         painter.extend(bay.sea(&self.story_id, now));
-        if launch.is_none() && building.is_some_and(|(_, parts)| parts > 0.0 && parts < PARTS as f32) {
-            painter.extend(bay.scaffold());
-        }
-        for s in bay.ships(&self.story_id, &fleet, building, launch, now) {
+        // The ships further back than the dock first, then the dock, then those at the front.
+        let (back, front): (Vec<Ship>, Vec<Ship>) = bay.ships(&self.story_id, &fleet, building, launch, now).into_iter().partition(|s| bay.behind(s));
+        let mut draw = |s: Ship| {
             painter.extend(s.draw(&self.story_id, now));
             painter.extend(bay.cover(&s));
             e.ships.push((s.k, s.bounds(), s.shown(), s.afloat));
+        };
+        back.into_iter().for_each(&mut draw);
+        painter.extend(bay.dock());
+        if launch.is_none() && building.is_some_and(|(_, parts)| parts > 0.0 && parts < PARTS as f32) {
+            painter.extend(bay.scaffold());
         }
+        front.into_iter().for_each(&mut draw);
     }
 
     /// The paragraph at the caret was just made a chapter title: in the Magic City the dragon comes
@@ -2551,5 +2593,28 @@ mod tests {
         assert_eq!(at(LAUNCH), lying, "and lying in its place");
         // No ship in the yard while one is launched, nor before its first page.
         assert!(bay.ships("a", &[0, 1], Some((2, 0.0)), None, 0.0).iter().all(|s| s.k != 2));
+    }
+
+    #[test]
+    fn a_ship_launched_to_the_left_sails_behind_the_dock_and_none_lies_in_front_of_it() {
+        let (_, _, bay) = bay();
+        let dock = bay.dock().iter().fold(Rect::NOTHING, |r, s| r.union(s.visual_bounding_rect()));
+        // The first ship to lie on the left, beyond the yard.
+        let k = bay.places.iter().position(|p| !p.2).unwrap();
+        let fleet: Vec<usize> = (0..=k).collect();
+        let mut passed = false;
+        for n in 0..=200 {
+            let t = FINISH + SLIDE + SAIL * n as f32 / 200.0;
+            let ship = bay.ships("a", &fleet, None, Some((k, t, 3.0)), 0.0).into_iter().find(|s| s.k == k).unwrap();
+            if ship.face < 0.0 && ship.bounds().x_range().intersects(dock.x_range()) {
+                assert!(bay.behind(&ship), "turned about, it passes behind the dock: {ship:?} at {t}");
+                passed = true;
+            }
+        }
+        assert!(passed, "it goes past the dock");
+        let fleet: Vec<usize> = (0..bay.places.len()).collect();
+        for ship in bay.ships("a", &fleet, None, None, 0.0) {
+            assert!(!ship.bounds().intersects(dock) || bay.behind(&ship), "lying in the bay: {ship:?}");
+        }
     }
 }
