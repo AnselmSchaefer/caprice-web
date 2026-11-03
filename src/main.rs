@@ -2480,6 +2480,32 @@ mod tests {
     }
 
     #[test]
+    fn in_the_paperstack_pages_held_out_by_the_scrollbar_cast_no_shadow_dark_together() {
+        let mut h = Harness::new();
+        h.app.appearance = Appearance::Paperstack;
+        h.frames(3, vec![], Modifiers::NONE);
+        for _ in 0..40 {
+            h.key(Key::Enter, Modifiers::COMMAND);
+        }
+        let ctx = h.ctx.clone();
+        h.app.go_to_page(&ctx, 0);
+        h.frames(200, vec![], Modifiers::NONE);
+        // Held far out, not let go: forty sheets out over the page, a sheet apart.
+        let (a, b) = h.app.last_track;
+        let to = a + (b - a) * 0.9;
+        let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+        h.frames(1, vec![egui::Event::PointerMoved(a), button(a, true)], Modifiers::NONE);
+        h.frames(1, vec![egui::Event::PointerMoved(to)], Modifiers::NONE);
+        h.frames(30, vec![], Modifiers::NONE);
+        assert!(h.app.held > 20.0, "held out: {}", h.app.held);
+        // A sheet's shadow is six soft layers; only the sheets clear of the one above cast one.
+        let shadow = egui::Color32::from_black_alpha(14);
+        let layers = h.painted.iter().filter(|cs| matches!(&cs.shape, egui::Shape::Rect(r) if r.fill == shadow)).count();
+        assert!(layers <= 6 * 4, "{layers} layers of shadow");
+        h.frames(1, vec![button(to, false)], Modifiers::NONE);
+    }
+
+    #[test]
     fn page_keys_go_through_every_page_of_long_contents() {
         let mut h = Harness::new();
         let n = h.long_contents(120);

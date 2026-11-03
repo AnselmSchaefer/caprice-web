@@ -497,6 +497,11 @@ many as fit the text area above the counter), and two drawings must agree with i
   through `slide_page`), and is likewise editable only once flat. Both looks take the same
   unhurried pace for a page coming or going (`book::NEW_PAGE_PACE`). Anything
   new that moves pages must carry the post-its with them, or they jump sides.
+- **Only a sheet clear of the one above casts a shadow** (`sheet_at` without `text` draws its paper
+  bare). A sheet's shadow (`App::paper`) is six soft layers around and below it; sheets held out
+  by the dragged scrollbar lie a sheet apart, and forty of them laid theirs over one another beside
+  them, black. Anything new that draws many sheets close together draws one shadow for them.
+  Guarded by `in_the_paperstack_pages_held_out_by_the_scrollbar_cast_no_shadow_dark_together`.
 - Tests: `a_post_it_shows_whole_rows_and_the_rest_on_its_next_sheet` (checks what is painted,
   through `Harness::painted`), `a_post_its_sheets_turn_back_as_well_as_forward`,
   `in_a_book_a_new_page_slides_in_as_the_old_one_turns_over_with_its_post_it` (follows the

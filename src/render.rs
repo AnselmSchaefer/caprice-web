@@ -329,12 +329,19 @@ impl App {
 
     /// Draw page `i` lying at `offset` from `rect`, its edge drawn in by `edge` (0 to 1), and its
     /// post-its moved over from its right edge to its left by `left` (0 to 1). Without `text`
-    /// (covered anyway) just the paper and the post-its.
+    /// (covered anyway) just the paper, without its shadow, and the post-its.
     #[allow(clippy::too_many_arguments)]
     fn sheet_at(&self, ui: &egui::Ui, rect: Rect, i: usize, offset: egui::Vec2, edge: f32, left: f32, text: bool) {
         let ctx = ui.ctx();
         let sheet = rect.translate(offset);
-        Self::paper(ui.painter(), sheet);
+        // A sheet lying almost under the one above casts no shadow of its own: that one's falls in
+        // the same place, and many sheets held out by the scrollbar laid theirs over one another,
+        // black beside them.
+        if text {
+            Self::paper(ui.painter(), sheet);
+        } else {
+            ui.painter().rect_filled(sheet, 1.0, PAPER);
+        }
         let sc = self.scale_of(sheet);
         if text {
             ui.painter().extend(self.backdrop_shapes(ctx, i, sheet, &|p| p, 1.0, 1.0));
