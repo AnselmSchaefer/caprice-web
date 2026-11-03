@@ -815,6 +815,10 @@ impl App {
         if caret_here {
             let local = self.caret - start;
             let r = layout.caret_rect(local, self.prefer_next).translate(content.min.to_vec2());
+            if interactive {
+                let on_page = Rect::from_min_size(((r.min - page_rect.min) / sc).to_pos2(), r.size() / sc);
+                self.caret_seen = Some((self.caret, self.doc.version, on_page));
+            }
             let now = ctx.input(|inp| inp.time);
             let phase = (now - self.blink_epoch) % 1.06;
             if phase < 0.53 && !ctx.egui_wants_keyboard_input() {

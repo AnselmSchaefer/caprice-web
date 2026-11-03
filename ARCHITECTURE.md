@@ -4,7 +4,7 @@ How Caprice is put together, and the rules that hold it together. The rules (§4
 read before changing anything: each says what depends on what, what to check when touching it, and
 which tests guard it. Keep this file true: a change that alters a rule updates it in the same commit.
 
-*Last brought up to date: 2026-10-31 (Caprice Web: `platform.rs`, the browser build, R31).*
+*Last brought up to date: 2026-11-03 (on a phone: fitting the width, following the caret, R32).*
 
 ---
 
@@ -67,7 +67,7 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `contents.rs` | `Doc::chapters`, splitting the contents over pages, laying out one page of them, migrating the old contents char |
 | `editor.rs` | Caret, selection, typing, deleting, clipboard, keys, mouse, formatting commands, `set_setup`, `turn_to`, the editable page surface |
 | `main.rs` | `App` state, `main()`, the frame loop, page position animation, `go_to_page`, the app-level tests and their `Harness` |
-| `view.rs` | Camera: fit, zoom, panning, two-finger swipe through pages |
+| `view.rs` | Camera: fit (to the width on a phone), zoom, panning, two-finger swipe through pages, following the caret (R32) |
 | `render.rs` | Paperstack look: paper, piles, static pages, sliding pages |
 | `book.rs` | Book look: pages turning on their left edge |
 | `notes.rs` | Post-its: placement, pads, drawing, editing |
@@ -1346,6 +1346,35 @@ uploaded back, a story with a scene drawn behind the page in a worker, Ctrl+R an
 from the browser, leaving asking only with changes not saved, saving when the page is hidden, and
 the stories listed on the welcome; it reports any error on the page). The native tests cover the desktop half.
 
+### R32 — On a phone the page fills the width, scrolls, and keeps the caret in sight
+
+`page_rect` is the camera. In a view narrower than `view::NARROW` (a phone held upright), the whole
+page would be too small to read (about half size), so fitting fills the width with it, without
+the room for post-its, and the page scrolls up and down while it stays fitted; `centered` keeps its
+top no lower than the view's top and its foot no higher than the view's foot. Wider views fit the
+whole page, centred, as always.
+
+- **Narrow is the width alone**, never "taller than wide": a phone's keyboard takes half the height,
+  and the page shrank to the whole-page fit when it came up.
+- **The view follows the caret** (`follow_caret`) when the caret or the text changed, or the view
+  got shorter, moving the page up or down as little as keeps the caret `CARET_ROOM` inside the
+  view, and leaving it wherever it was scrolled to otherwise. The caret is where the editor drew
+  it the frame before (`App::caret_seen`, in page points, written only for the page that is
+  editable). What it was drawn for (caret, `Doc::version`, view height) is compared, never its
+  rectangle: that wobbles by a rounding as the page moves, and a page moved by hand snapped back.
+- **Two fingers on a touch screen pan as they pinch** (`multi_touch().translation_delta`, only over
+  the pages as in R16); fitted on a phone, only up and down. egui starts such a gesture only with a
+  pointer position, which the browser gives with the first finger: a test sends one too.
+- **The keyboard shrinks the page in the browser**: `interactive-widget=resizes-content` in
+  `web/index.html`'s viewport, so Android gives the canvas the height above the keyboard (Safari
+  is not supported, §7), and the caret is followed up into it.
+- `App::origin` starts far down, so a page taller than the view first rests with its top in sight.
+- Headless Chromium cannot show this at a phone's pixel ratio: its emulation leaves
+  `devicePixelContentBoxSize` in CSS pixels, so eframe draws everything 2.6 times too big. Look at
+  phone layouts at ratio 1 (412×839): egui lays out by points, so that is what a phone shows.
+- Tests: `on_a_phone_the_page_fills_the_width_scrolls_and_keeps_the_caret_in_sight` (fitted width,
+  the top first, the caret followed down the page and above a keyboard, two fingers panning).
+
 ---
 
 ## 5. Checklists for common changes
@@ -1564,5 +1593,9 @@ when the writer goes on; nothing moved in the layout, nothing in print or the fi
   `wasm_thread` evaluates code, which the Content-Security-Policy forbids): tried first in a spike, which found egui's `Context`
   cannot go to a worker and a lock the main thread waits on crashes Chromium (R31). Chromium is
   the target, Firefox nice to have, Safari not supported. "Follow my writing" is left out for now.
+- **2026-11-03 — On a phone the page keeps its pages.** Asked for: Caprice friendly on a phone.
+  Fitting the page to the width, scrolling it, following the caret and panning with two fingers
+  was chosen over a mode that reflows the text to the screen without pages, which would be a new
+  way of drawing the story (R32).
 - **No `.docx` import.** Export only.
 - **Contents heading is "Contents"** (English), in the app and in Word.

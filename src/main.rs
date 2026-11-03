@@ -199,6 +199,10 @@ pub struct App {
     pub note_focus: Option<u64>,
     pub pads: HashMap<u64, notes::Pad>,
     pub last_page_rect: Rect,
+    /// The caret drawn last frame, the document's version then, and its rectangle on its page in page points.
+    pub caret_seen: Option<(usize, u64, Rect)>,
+    /// The caret and version the view last kept in sight, and the view's height then (`follow_caret`).
+    pub followed: Option<(usize, u64, f32)>,
     /// The stretch the scrollbar's thumb's centre travels, from the first page to the last, as last drawn.
     pub last_track: (Pos2, Pos2),
     /// Textures of the document's pictures, by picture id.
@@ -301,7 +305,8 @@ impl App {
             typing,
             fonts,
             zoom: 1.0,
-            origin: Pos2::ZERO,
+            // Far down: fitted, a page taller than the view (on a phone) comes to rest with its top in sight.
+            origin: Pos2::new(0.0, 1e6),
             fit: true,
             fit_settling: false,
             ctrl_down: false,
@@ -329,6 +334,8 @@ impl App {
             last_page_rect: Rect::NOTHING,
             clip: None,
             last_track: (Pos2::ZERO, Pos2::ZERO),
+            caret_seen: None,
+            followed: None,
             textures: HashMap::new(),
             startup_file: None,
             shown_status: String::new(),
@@ -775,8 +782,9 @@ mod tests {
         access: Option<egui::accesskit::TreeUpdate>,
         /// What the last frame painted.
         painted: Vec<egui::epaint::ClippedShape>,
-        /// The window's width.
+        /// The window's width, and its height.
         width: f32,
+        height: f32,
     }
 
     impl Harness {
@@ -790,7 +798,7 @@ mod tests {
             app.words.progress = Default::default();
             app.themes = theme::Themes::kept_in(None);
             app.bar = ui::BarPlace::kept_in(None);
-            Self { ctx, app, time: 0.0, mods: Modifiers::NONE, access: None, painted: Vec::new(), width: 1240.0 }
+            Self { ctx, app, time: 0.0, mods: Modifiers::NONE, access: None, painted: Vec::new(), width: 1240.0, height: 900.0 }
         }
 
         fn frames(&mut self, n: usize, events: Vec<egui::Event>, modifiers: Modifiers) {
@@ -800,7 +808,7 @@ mod tests {
                 // click without sliding it.
                 let mut input = egui::RawInput {
                     time: Some(self.time),
-                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(self.width, 900.0))),
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(self.width, self.height))),
                     ..Default::default()
                 };
                 if modifiers != self.mods {
@@ -1869,6 +1877,52 @@ mod tests {
         assert!(h.widget_rect("+ New page").is_some() && h.widget_rect("Scratchpad").unwrap().width() > 30.0);
         assert!((h.app.last_page_rect.center().x - lying).abs() < 1.0, "the page back in the middle");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn on_a_phone_the_page_fills_the_width_scrolls_and_keeps_the_caret_in_sight() {
+        let mut h = Harness::new();
+        (h.width, h.height) = (412.0, 600.0);
+        h.frames(60, vec![], Modifiers::NONE);
+        let page = h.app.last_page_rect;
+        assert!(page.width() > 412.0 - 24.0 && page.left() >= 0.0 && page.right() <= 412.0, "the width filled: {page:?}");
+        assert!((page.top() - (ui::RESERVED + 8.0)).abs() < 1.0, "from its top: {page:?}");
+        assert!(h.app.fit, "still fitted");
+
+        // Writing on down the page, the caret stays in sight above the page bar.
+        let view_bottom = h.height - ui::RESERVED;
+        let caret = |h: &Harness| {
+            let page = h.app.last_page_rect;
+            let (_, _, r) = h.app.caret_seen.expect("the caret was drawn");
+            page.top() + r.bottom() * page.width() / h.app.doc.setup.size().x
+        };
+        for _ in 0..46 {
+            h.type_text("A line.\n");
+            h.frames(2, vec![], Modifiers::NONE);
+        }
+        assert_eq!(h.app.doc.pages(), 1);
+        assert!(h.app.last_page_rect.top() < page.top() - 40.0, "the page went up: {:?}", h.app.last_page_rect);
+        assert!(caret(&h) <= view_bottom - 20.0, "caret at {} above {view_bottom}", caret(&h));
+        assert!(h.app.fit, "and is still as wide");
+
+        // A keyboard coming up makes the window shorter: the caret goes up with it.
+        h.height = 420.0;
+        h.frames(3, vec![], Modifiers::NONE);
+        assert!(caret(&h) <= h.height - ui::RESERVED - 20.0, "caret at {}, the view ends at {}", caret(&h), h.height - ui::RESERVED);
+
+        // Two fingers drag the page down, back towards its top; it stays as wide.
+        let was = h.app.last_page_rect;
+        let touch = |id: u64, phase, pos| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(id), phase, pos, force: None };
+        let (a, b) = (egui::pos2(150.0, 200.0), egui::pos2(260.0, 200.0));
+        // As in a browser, the first finger is the pointer too.
+        h.frames(1, vec![egui::Event::PointerMoved(a), touch(1, egui::TouchPhase::Start, a), touch(2, egui::TouchPhase::Start, b)], Modifiers::NONE);
+        for k in 1..=10 {
+            let d = egui::vec2(0.0, 6.0 * k as f32);
+            h.frames(1, vec![touch(1, egui::TouchPhase::Move, a + d), touch(2, egui::TouchPhase::Move, b + d)], Modifiers::NONE);
+        }
+        h.frames(1, vec![touch(1, egui::TouchPhase::End, a), touch(2, egui::TouchPhase::End, b)], Modifiers::NONE);
+        let now = h.app.last_page_rect;
+        assert!(now.top() > was.top() + 40.0 && (now.width() - was.width()).abs() < 1.0, "{was:?} → {now:?}");
     }
 
     #[test]
@@ -4650,7 +4704,7 @@ mod tests {
             self.time += 1.0 / 60.0;
             let mut input = egui::RawInput {
                 time: Some(self.time),
-                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(self.width, 900.0))),
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(self.width, self.height))),
                 ..Default::default()
             };
             let closing = egui::ViewportInfo { events: vec![egui::ViewportEvent::Close], ..Default::default() };
@@ -5872,6 +5926,64 @@ mod tests {
         let at = |k: usize| h.app.eggs.ships.iter().find(|s| s.0 == k).unwrap().1;
         assert!(at(0).center().distance(yard.center()) > 100.0 && beside_the_page(&h, at(0)), "lying in the bay: {:?}", at(0));
         assert_eq!(at(1), yard);
+    }
+
+    /// Three chapters of a line each, written in `theme`, each settled before the next.
+    fn three_chapters(h: &mut Harness, theme: theme::Theme) {
+        in_the_theme(h, theme, 0.0);
+        for (k, title) in ["Chapter One", "Chapter Two", "Chapter Three"].into_iter().enumerate() {
+            if k > 0 {
+                h.key(Key::Enter, Modifiers::NONE);
+            }
+            h.type_text(title);
+            h.click_widget("Chapter");
+            h.key(Key::Enter, Modifiers::NONE);
+            h.type_text("It was nearly midnight.");
+            h.frames((eggs::LAUNCH * 60.0) as usize + 300, vec![], Modifiers::NONE);
+        }
+    }
+
+    /// Make the second chapter's title a paragraph again, and let it settle.
+    fn take_away_the_second_title(h: &mut Harness) {
+        let at = h.app.doc.chapters(false)[1].at;
+        let ctx = h.ctx.clone();
+        h.app.set_caret(&ctx, at, false);
+        h.click_widget("Chapter");
+        assert_eq!(h.app.doc.chapters(false).len(), 2);
+        h.frames((eggs::LAUNCH * 60.0) as usize + 300, vec![], Modifiers::NONE);
+    }
+
+    #[test]
+    fn a_chapter_title_taken_away_leaves_every_plant_as_it_was_in_flower_or_not() {
+        let mut h = Harness::new();
+        three_chapters(&mut h, theme::Theme::Garden);
+        let plants = |h: &Harness| h.app.eggs.plants.iter().map(|p| (p.0.center().x.round(), p.1)).collect::<Vec<_>>();
+        let was = plants(&h);
+        assert_eq!(was.iter().map(|p| p.1).collect::<Vec<_>>(), [true, true, false], "the chapter being written grows");
+        take_away_the_second_title(&mut h);
+        assert_eq!(plants(&h), was);
+    }
+
+    #[test]
+    fn a_chapter_title_taken_away_leaves_every_ship_where_it_was() {
+        let mut h = Harness::new();
+        // Three chapters: two ships in the bay, the third being built.
+        three_chapters(&mut h, theme::Theme::Sea);
+        let ships = |h: &Harness| {
+            let mut ships: Vec<_> = h.app.eggs.ships.iter().map(|s| (s.0, s.1.center(), s.2, s.3)).collect();
+            ships.sort_by_key(|s| s.0);
+            ships
+        };
+        let was = ships(&h);
+        assert_eq!(was.iter().map(|s| (s.0, s.3)).collect::<Vec<_>>(), [(0, true), (1, true), (2, false)]);
+
+        // The second title made a paragraph again: no ship goes back to the yard, none leaves it.
+        take_away_the_second_title(&mut h);
+        let now = ships(&h);
+        assert_eq!(now.len(), 3, "{now:?}");
+        for (a, b) in was.iter().zip(&now) {
+            assert!(a.0 == b.0 && a.2 == b.2 && a.3 == b.3 && a.1.distance(b.1) < 4.0, "as it was: {a:?} {b:?}");
+        }
     }
 
     /// The title "Chapter One" as painted: as it is brought, over its place, and at rest.

@@ -9,6 +9,12 @@ pub const MIN_ZOOM: f32 = 0.3;
 pub const MAX_ZOOM: f32 = 4.0;
 /// How far two fingers swipe sideways to flip one page, in points.
 const SWIPE_PAGE: f32 = 50.0;
+/// Narrower than this (a phone held upright), the whole page is too small to read: fitting fills
+/// the width with it instead, and it scrolls up and down. Not "taller than wide": a phone's
+/// keyboard takes half the height, and the page must not shrink when it comes up.
+const NARROW: f32 = 600.0;
+/// Room kept between the caret and the top or bottom of the view, when the view follows it.
+const CARET_ROOM: f32 = 24.0;
 
 impl App {
     /// The area between the docks: under the toolbar, and above the page bar or beside it.
@@ -100,13 +106,52 @@ impl App {
         }
     }
 
+    /// Keep the caret in sight: when it moves or the text changes, and when the view gets shorter (a
+    /// phone's keyboard coming up). The page moves up or down as little as it takes, and stays
+    /// wherever it was scrolled to otherwise. The caret is where the page drew it last frame. What
+    /// it was drawn for is compared, not where: that wobbles by a rounding as the page moves, and
+    /// a page moved by hand went back to the caret.
+    fn follow_caret(&mut self, view: Rect) {
+        let Some((caret, version, r)) = self.caret_seen.take() else { return };
+        let now = (caret, version, view.height());
+        if self.followed == Some(now) {
+            return;
+        }
+        self.followed = Some(now);
+        let (top, bottom) = (self.origin.y + r.top() * self.zoom, self.origin.y + r.bottom() * self.zoom);
+        let room = view.shrink2(vec2(0.0, CARET_ROOM));
+        if top < room.top() {
+            self.origin.y += room.top() - top;
+        } else if bottom > room.bottom() {
+            self.origin.y -= (bottom - room.bottom()).min(top - room.top());
+        }
+    }
+
     /// Pinch / Ctrl+scroll to zoom around the pointer, two-finger scroll up and down to pan. Returns the page rectangle.
     pub fn page_rect(&mut self, ctx: &egui::Context, area: Rect) -> Rect {
         let view = self.view_area(area);
         let size = self.doc.setup.size();
-        // Leave room on both sides for post-its sticking out of the page and the stacks.
-        let fit = ((view.height() - 16.0) / size.y).min((view.width() - 48.0) / (size.x + 2.0 * crate::notes::NOTE_OUT)).clamp(MIN_ZOOM, 3.0);
+        let narrow = view.width() < NARROW;
+        // Leave room on both sides for post-its sticking out of the page and the stacks; on a phone,
+        // the page's width is all there is room for.
+        let fit = if narrow {
+            ((view.width() - 16.0) / size.x).clamp(MIN_ZOOM, 3.0)
+        } else {
+            ((view.height() - 16.0) / size.y).min((view.width() - 48.0) / (size.x + 2.0 * crate::notes::NOTE_OUT)).clamp(MIN_ZOOM, 3.0)
+        };
+        // Fitted, the page is in the middle; on a phone, only across: up and down it stays where it
+        // was scrolled to, its top no lower than the view's and its foot no higher.
+        let centered = |origin: egui::Pos2, zoom: f32| {
+            let h = size.y * zoom;
+            let y = if narrow && h > view.height() - 16.0 {
+                origin.y.clamp(view.bottom() - 8.0 - h, view.top() + 8.0)
+            } else {
+                view.center().y - h / 2.0
+            };
+            pos2(view.center().x - size.x * zoom / 2.0, y)
+        };
         let (pinch, scroll, hover) = ctx.input(|i| (i.zoom_delta(), i.smooth_scroll_delta, i.pointer.hover_pos()));
+        let touch = ctx.input(|i| i.multi_touch().map(|t| (t.translation_delta, t.start_pos)));
         let keys = ctx.input_mut(|i| {
             let mut z = 1.0;
             if i.consume_key(Modifiers::COMMAND, Key::Equals) || i.consume_key(Modifiers::COMMAND, Key::Plus) {
@@ -122,7 +167,7 @@ impl App {
             self.fit_settling = true;
         }
         if self.fit {
-            let centered = pos2(view.center().x - size.x * fit / 2.0, view.center().y - size.y * fit / 2.0);
+            let centered = centered(self.origin, fit);
             if self.fit_settling {
                 // Asking for "fit" glides the page to the middle instead of jumping there.
                 let dt = ctx.input(|i| i.stable_dt).min(0.05);
@@ -151,16 +196,24 @@ impl App {
             self.zoom = new;
             // Zooming never moves the page to the middle by itself: only a page that is already
             // centred at the fitting size counts as fitted (and then follows the window size).
-            let centered = pos2(view.center().x - size.x * fit / 2.0, view.center().y - size.y * fit / 2.0);
-            self.fit = new == fit && (self.origin - centered).length() < 1.0;
+            self.fit = new == fit && (self.origin - centered(self.origin, fit)).length() < 1.0;
             self.fit_settling = false;
         }
         // Sideways swipes flip pages instead (see `swipe_pages`); Ctrl+drag still pans sideways.
         // Scrolling over a window (the scratchpad, Claude's answer) scrolls that, not the pages.
         let over_pages = hover.is_some_and(|p| ctx.layer_id_at(p).is_none_or(|l| l.order == egui::Order::Background));
-        if !self.fit && over_pages && scroll.y.abs() >= scroll.x.abs() {
+        if (!self.fit || narrow) && over_pages && scroll.y.abs() >= scroll.x.abs() {
             self.origin.y += scroll.y;
         }
+        // Two fingers on a touch screen move the page as they pinch; fitted on a phone, only up and down.
+        if let Some((d, _)) = touch.filter(|(_, at)| view.contains(*at) && ctx.layer_id_at(*at).is_none_or(|l| l.order == egui::Order::Background)) {
+            if !self.fit {
+                self.origin += d;
+            } else if narrow {
+                self.origin.y += d.y;
+            }
+        }
+        self.follow_caret(view);
 
         // The page can be moved anywhere as long as a good part of it stays in view.
         let (w, h) = (size.x * self.zoom, size.y * self.zoom);
