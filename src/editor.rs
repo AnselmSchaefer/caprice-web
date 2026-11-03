@@ -875,6 +875,10 @@ impl App {
         let ctx = ui.ctx().clone();
         let sc = layout.scale;
         let resp = ui.interact(content.expand(6.0), Id::new("editor"), Sense::click_and_drag());
+        // A tap on the page is to write there: on a touch screen that brings the keyboard (`hold_keyboard`).
+        if resp.clicked() && self.writing.is_none() {
+            self.writing = Some(ctx.content_rect().height());
+        }
         // Drawn later on the same layer, the boxes do not hide the page from `contains_pointer` (R16).
         let over_box = ctx.input(|inp| inp.pointer.latest_pos()).is_some_and(|p| boxes.iter().any(|r| r.contains(p)));
 

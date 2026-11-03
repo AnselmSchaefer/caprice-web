@@ -1386,13 +1386,21 @@ whole page, centred, as always.
   brought it back. The story's last ask is repeated in frames without one; never while a field in
   a window has the keys (`egui_wants_keyboard_input`), whose own ask is not kept. Anything new that
   draws the pages without the editable one is covered by it.
+- **On a touch screen the keyboard comes with a tap on the page and stays away once put away.** The
+  story asks only while `App::writing`: from a tap on the page (the editor's `clicked`) or letters
+  typed, until the window is taller again by much at the same width (the keyboard put away, seen
+  through `interactive-widget`; a phone turned round changes the width and keeps it). Asked all the
+  time, eframe gave its text field the focus again at the end of every touch (for iOS), so a
+  button or a pinch brought the keyboard back however often it was put away. Without a touch
+  screen nothing changes. A new way to begin writing on the page sets `writing` too.
 - `App::origin` starts far down, so a page taller than the view first rests with its top in sight.
 - Headless Chromium cannot show this at a phone's pixel ratio: its emulation leaves
   `devicePixelContentBoxSize` in CSS pixels, so eframe draws everything 2.6 times too big. Look at
   phone layouts at ratio 1 (412×839): egui lays out by points, so that is what a phone shows.
 - Tests: `on_a_phone_the_page_fills_the_width_scrolls_and_keeps_the_caret_in_sight` (fitted width,
   the top first, the caret followed down the page and above a keyboard, two fingers panning),
-  `on_a_phone_the_keyboard_stays_up_while_a_new_page_comes_in_and_a_menu_is_open`.
+  `on_a_phone_the_keyboard_stays_up_while_a_new_page_comes_in_and_a_menu_is_open`,
+  `on_a_touch_screen_the_keyboard_comes_with_a_tap_on_the_page_and_stays_away_once_put_away`.
 
 ---
 

@@ -211,6 +211,11 @@ pub struct App {
     pub last_page_rect: Rect,
     /// The story's last ask for text input, held through frames that make none (`hold_keyboard`).
     pub ime: Option<egui::output::IMEOutput>,
+    /// On a touch screen, whether the writer is writing (tapped the page, the keyboard up), with the
+    /// window's least height since: taller again by much, the keyboard was put away.
+    pub writing: Option<f32>,
+    /// The window's size last frame, to tell a keyboard put away from a phone turned round.
+    pub screen: egui::Vec2,
     /// The caret drawn last frame, the document's version then, and its rectangle on its page in page points.
     pub caret_seen: Option<(usize, u64, Rect)>,
     /// The caret and version the view last kept in sight, and the view's height then (`follow_caret`).
@@ -349,6 +354,8 @@ impl App {
             caret_seen: None,
             followed: None,
             ime: None,
+            writing: None,
+            screen: egui::Vec2::ZERO,
             textures: HashMap::new(),
             startup_file: None,
             shown_status: String::new(),
@@ -785,10 +792,35 @@ impl App {
     /// the scrollbar) dropped the keyboard, to bring it straight back once the page lay still.
     /// Asked for again where the caret last was, it stays up, until a field in a window takes the
     /// keys, which asks for its own.
+    ///
+    /// On a touch screen the story asks only while the writer writes: from a tap on the page (or
+    /// letters typed) until they put the keyboard away, which with `interactive-widget` in the
+    /// page's viewport makes the window taller again at the same width. Asked all the time, the
+    /// keyboard came back on every touch that ended (eframe gives its text field the focus again
+    /// then, for iOS), a button or a pinch, however often it was put away.
     fn hold_keyboard(&mut self, ctx: &egui::Context) {
+        let screen = ctx.content_rect().size();
+        let typed = ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Text(_) | egui::Event::Ime(_))));
+        if typed && self.writing.is_none() {
+            self.writing = Some(screen.y);
+        }
+        if let Some(least) = &mut self.writing {
+            if screen.x != self.screen.x {
+                *least = screen.y; // turned round: the keyboard is as it was
+            } else if screen.y > *least + 120.0 {
+                self.writing = None;
+            } else {
+                *least = least.min(screen.y);
+            }
+        }
+        self.screen = screen;
+
         let asked = ctx.output(|o| o.ime);
         if ctx.egui_wants_keyboard_input() {
             self.ime = None;
+        } else if self.writing.is_none() && ctx.input(|i| i.has_touch_screen()) {
+            self.ime = None;
+            ctx.output_mut(|o| o.ime = None);
         } else if asked.is_some() {
             self.ime = asked;
         } else if let Some(ime) = self.ime {
@@ -1988,6 +2020,46 @@ mod tests {
         h.type_text("a note");
         assert_eq!(h.app.doc.scratchpad, "a note", "typed into the scratchpad, not the story");
         assert!(h.app.ime.is_none() && h.ime.last() == Some(&true), "the field's own keyboard, not the story's");
+    }
+
+    #[test]
+    fn on_a_touch_screen_the_keyboard_comes_with_a_tap_on_the_page_and_stays_away_once_put_away() {
+        let mut h = Harness::new();
+        (h.width, h.height) = (412.0, 700.0);
+        let touch = |id: u64, phase, pos| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(id), phase, pos, force: None };
+        // A finger on the desk: a touch screen, and no keyboard yet.
+        let desk = egui::pos2(4.0, 300.0);
+        h.frames(1, vec![touch(1, egui::TouchPhase::Start, desk)], Modifiers::NONE);
+        h.frames(30, vec![touch(1, egui::TouchPhase::End, desk)], Modifiers::NONE);
+        assert!(h.ime.last() == Some(&false), "no keyboard until the page is tapped");
+
+        // A tap on the page brings it, and it comes up (the window gets shorter).
+        h.click_in_page(egui::vec2(100.0, 100.0));
+        assert!(h.ime.last() == Some(&true), "a tap on the page asks for the keyboard");
+        h.height = 420.0;
+        h.frames(5, vec![], Modifiers::NONE);
+        h.type_text("A line.");
+        assert!(h.ime.last() == Some(&true));
+
+        // Put away, the window is tall again: New page and a pinch no longer bring it back.
+        h.height = 700.0;
+        h.frames(5, vec![], Modifiers::NONE);
+        h.ime.clear();
+        h.click_widget("+");
+        h.frames(90, vec![], Modifiers::NONE);
+        let (a, b) = (egui::pos2(150.0, 300.0), egui::pos2(260.0, 300.0));
+        h.frames(1, vec![egui::Event::PointerMoved(a), touch(1, egui::TouchPhase::Start, a), touch(2, egui::TouchPhase::Start, b)], Modifiers::NONE);
+        for k in 1..=10 {
+            let d = egui::vec2(-3.0 * k as f32, 0.0);
+            h.frames(1, vec![touch(1, egui::TouchPhase::Move, a + d), touch(2, egui::TouchPhase::Move, b - d)], Modifiers::NONE);
+        }
+        h.frames(5, vec![touch(1, egui::TouchPhase::End, a), touch(2, egui::TouchPhase::End, b)], Modifiers::NONE);
+        assert_eq!(h.app.doc.pages(), 2);
+        assert!(h.ime.iter().all(|&up| !up), "it came back for {} frames of {}", h.ime.iter().filter(|&&up| up).count(), h.ime.len());
+
+        // Until the page is tapped again.
+        h.click_in_page(egui::vec2(100.0, 100.0));
+        assert!(h.ime.last() == Some(&true));
     }
 
     /// The scrollbar's thumb as the last frame painted it.
