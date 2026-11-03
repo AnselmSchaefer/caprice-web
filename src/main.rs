@@ -116,6 +116,7 @@ fn main() {
                     let mut app = start_app(cc);
                     app.start.open = true;
                     platform::frame_on_visibility_change(&cc.egui_ctx);
+                    platform::note_what_presses();
                     Ok(Box::new(app))
                 }),
             )
@@ -234,6 +235,9 @@ pub struct App {
     pub pic_drag: Option<images::PicDrag>,
     /// A selection being dragged out with the mouse, which can carry on over other pages.
     pub sel_drag: Option<editor::SelDrag>,
+    /// A finger on the page's text, on a touch screen, and how far it moved the page this frame.
+    pub finger: Option<editor::Finger>,
+    pub finger_pan: egui::Vec2,
     /// Formatting taken up to copy (the look of the letters, and the paragraph's format in `para`),
     /// put down on the next text selected with the mouse.
     pub brush: Option<Style>,
@@ -363,6 +367,8 @@ impl App {
             pic_menu_fresh: false,
             pic_drag: None,
             sel_drag: None,
+            finger: None,
+            finger_pan: egui::Vec2::ZERO,
             brush: None,
             resize: None,
             status_at: f64::NEG_INFINITY,
@@ -2062,6 +2068,55 @@ mod tests {
         assert!(h.ime.last() == Some(&true));
     }
 
+    /// A finger put on the screen at `at`, as eframe tells it in a browser: the press first, in a frame
+    /// of its own, then the touch with the press again.
+    fn finger_down(h: &mut Harness, at: egui::Pos2) {
+        let touch = egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(1), phase: egui::TouchPhase::Start, pos: at, force: None };
+        let press = egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE };
+        platform::set_pressed_by_finger(true);
+        h.frames(1, vec![egui::Event::PointerMoved(at), press.clone()], Modifiers::NONE);
+        h.frames(1, vec![press, touch], Modifiers::NONE);
+    }
+
+    /// The finger moved to `at`, then lifted there.
+    fn finger_to(h: &mut Harness, at: egui::Pos2) {
+        let touch = egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(1), phase: egui::TouchPhase::Move, pos: at, force: None };
+        h.frames(1, vec![touch, egui::Event::PointerMoved(at)], Modifiers::NONE);
+    }
+
+    fn finger_up(h: &mut Harness, at: egui::Pos2) {
+        let touch = egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(1), phase: egui::TouchPhase::End, pos: at, force: None };
+        let release = egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE };
+        h.frames(1, vec![touch, release, egui::Event::PointerGone], Modifiers::NONE);
+    }
+
+    /// One finger dragged from `from` by `by`, in ten steps.
+    fn swipe(h: &mut Harness, from: egui::Pos2, by: egui::Vec2) {
+        finger_down(h, from);
+        for k in 1..=10 {
+            finger_to(h, from + by * (k as f32 / 10.0));
+        }
+        finger_up(h, from + by);
+        h.frames(60, vec![], Modifiers::NONE);
+    }
+
+    /// A story of three pages on a phone, showing the first, with the caret on it.
+    fn three_pages_on_a_phone() -> Harness {
+        let mut h = Harness::new();
+        (h.width, h.height) = (412.0, 700.0);
+        h.frames(30, vec![], Modifiers::NONE);
+        for _ in 0..2 {
+            h.type_text("A line on a page.");
+            h.click_widget("+");
+            h.frames(90, vec![], Modifiers::NONE);
+        }
+        h.key(Key::Home, Modifiers::COMMAND);
+        h.frames(90, vec![], Modifiers::NONE);
+        assert_eq!((h.app.doc.pages(), h.app.target, h.app.caret), (3, 0, 0));
+        h.app.writing = None; // the keyboard put away
+        h
+    }
+
     /// The scrollbar's thumb as the last frame painted it.
     fn thumb(h: &Harness) -> Option<egui::Rect> {
         h.painted.iter().find_map(|cs| match &cs.shape {
@@ -2073,6 +2128,112 @@ mod tests {
             }
             _ => None,
         })
+    }
+
+    #[test]
+    fn on_a_touch_screen_a_pinch_zooms_without_turning_a_page_or_selecting_whichever_way_it_goes() {
+        let p = egui::pos2;
+        // In and out, up and down, sideways, and drifting to one side as far as a swipe that turns a page.
+        let ways = [
+            ("in, up and down", p(200.0, 300.0), p(210.0, 400.0), p(200.0, 150.0), p(210.0, 560.0)),
+            ("out, up and down", p(200.0, 560.0), p(210.0, 150.0), p(200.0, 380.0), p(210.0, 330.0)),
+            ("in, sideways", p(150.0, 300.0), p(260.0, 300.0), p(40.0, 300.0), p(370.0, 300.0)),
+            ("out, sideways", p(40.0, 300.0), p(370.0, 300.0), p(180.0, 300.0), p(230.0, 300.0)),
+            ("in, drifting left", p(200.0, 300.0), p(280.0, 300.0), p(60.0, 300.0), p(240.0, 300.0)),
+            // The second finger's press, seen as the first dragging a selection past the text's foot
+            // or top, turned the page forward or back.
+            ("in, the second finger in the foot margin", p(200.0, 400.0), p(210.0, 632.0), p(200.0, 300.0), p(210.0, 640.0)),
+            ("in, the second finger in the top margin", p(200.0, 400.0), p(210.0, 90.0), p(200.0, 500.0), p(210.0, 85.0)),
+        ];
+        for (way, a, b, a2, b2) in ways {
+            let mut h = three_pages_on_a_phone();
+            let ctx = h.ctx.clone();
+            h.app.go_to_page(&ctx, 1);
+            h.frames(90, vec![], Modifiers::NONE);
+            let (zoom, caret) = (h.app.zoom, h.app.caret);
+            pinch(&mut h, a, b, a2, b2);
+            assert!((h.app.zoom - zoom).abs() > 0.2, "{way}: zoomed, {zoom} → {}", h.app.zoom);
+            assert_eq!(h.app.target, 1, "{way}: no page turned");
+            assert!(!h.app.has_selection() && h.app.writing.is_none(), "{way}: nothing selected, no keyboard");
+            assert_eq!(h.app.caret, caret, "{way}: the caret where it was");
+        }
+    }
+
+    #[test]
+    fn on_a_touch_screen_one_finger_swiped_sideways_turns_one_page_and_leaves_the_caret_and_keyboard() {
+        let mut h = three_pages_on_a_phone();
+        let mid = h.app.last_page_rect.center();
+        // To the left goes forward, however far: one page a swipe.
+        swipe(&mut h, mid + egui::vec2(100.0, 0.0), egui::vec2(-80.0, 6.0));
+        assert_eq!(h.app.target, 1);
+        swipe(&mut h, mid + egui::vec2(150.0, 0.0), egui::vec2(-300.0, -10.0));
+        assert_eq!(h.app.target, 2);
+        // Not past the last page.
+        swipe(&mut h, mid + egui::vec2(100.0, 0.0), egui::vec2(-80.0, 0.0));
+        assert_eq!(h.app.target, 2);
+        // To the right goes back.
+        swipe(&mut h, mid - egui::vec2(100.0, 0.0), egui::vec2(80.0, 0.0));
+        assert_eq!(h.app.target, 1);
+        assert!(!h.app.has_selection() && h.app.caret == 0, "nothing selected, the caret left where it was");
+        assert!(h.app.writing.is_none(), "a swipe is no tap: the keyboard stays away");
+        // A short one is not a swipe.
+        swipe(&mut h, mid, egui::vec2(-30.0, 0.0));
+        assert_eq!(h.app.target, 1);
+    }
+
+    #[test]
+    fn on_a_touch_screen_one_finger_taps_the_caret_in_held_selects_and_moves_the_page_up_and_down() {
+        let mut h = three_pages_on_a_phone();
+        h.height = 500.0;
+        h.frames(30, vec![], Modifiers::NONE);
+        let page = h.app.last_page_rect;
+        let sc = h.app.scale_of(page);
+        let line = page.min + h.app.doc.setup.margin_origin() * sc + egui::vec2(0.0, 6.0 * sc);
+        // A tap in the line puts the caret there, and asks for the keyboard.
+        finger_down(&mut h, line + egui::vec2(40.0, 0.0));
+        finger_up(&mut h, line + egui::vec2(40.0, 0.0));
+        h.frames(5, vec![], Modifiers::NONE);
+        let tapped = h.app.caret;
+        assert!(tapped > 0 && tapped < 17 && !h.app.has_selection(), "caret at {tapped}");
+        assert!(h.app.writing.is_some());
+
+        // Held still, then drawn along the line, it selects.
+        finger_down(&mut h, line + egui::vec2(2.0, 0.0));
+        h.frames(40, vec![], Modifiers::NONE);
+        for k in 1..=10 {
+            finger_to(&mut h, line + egui::vec2(2.0 + 8.0 * k as f32, 0.0));
+        }
+        finger_up(&mut h, line + egui::vec2(82.0, 0.0));
+        assert!(h.app.has_selection(), "selected from {} to {}", h.app.anchor, h.app.caret);
+        assert_eq!(h.app.target, 0);
+
+        // Up and down, the page goes with the finger (on a phone it is taller than the view).
+        let was = h.app.last_page_rect;
+        swipe(&mut h, page.center() + egui::vec2(0.0, 60.0), egui::vec2(4.0, -150.0));
+        let now = h.app.last_page_rect;
+        assert!(now.top() < was.top() - 100.0 && (now.left() - was.left()).abs() < 1.0, "{was:?} → {now:?}");
+        assert_eq!(h.app.target, 0);
+    }
+
+    /// Two fingers from `a` and `b` to `a2` and `b2`, as eframe tells it in a browser (seen there): the
+    /// first finger's press, then its touch with the press again; the second's press where it is,
+    /// then its touch with a press where the first is. Moving, the pointer follows the first;
+    /// either lifting lets the pointer go.
+    fn pinch(h: &mut Harness, a: egui::Pos2, b: egui::Pos2, a2: egui::Pos2, b2: egui::Pos2) {
+        let touch = |id: u64, phase, pos| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(id), phase, pos, force: None };
+        let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+        finger_down(h, a);
+        h.frames(1, vec![button(b, true)], Modifiers::NONE);
+        h.frames(1, vec![button(a, true), touch(2, egui::TouchPhase::Start, b)], Modifiers::NONE);
+        for k in 1..=20 {
+            let t = k as f32 / 20.0;
+            let (p, q) = (a + (a2 - a) * t, b + (b2 - b) * t);
+            h.frames(1, vec![egui::Event::PointerMoved(p), touch(1, egui::TouchPhase::Move, p), touch(2, egui::TouchPhase::Move, q)], Modifiers::NONE);
+        }
+        h.frames(1, vec![button(a2, false), egui::Event::PointerGone, touch(2, egui::TouchPhase::End, b2)], Modifiers::NONE);
+        h.frames(2, vec![], Modifiers::NONE);
+        h.frames(1, vec![button(a2, false), egui::Event::PointerGone, touch(1, egui::TouchPhase::End, a2)], Modifiers::NONE);
+        h.frames(60, vec![], Modifiers::NONE);
     }
 
     #[test]

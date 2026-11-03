@@ -30,6 +30,30 @@ const EDGE_REPEAT: f64 = 0.6;
 /// that dragging to the last line does not turn it by overshooting a little.
 const EDGE_PAST: f32 = 48.0;
 
+/// A finger that has moved this far (in points) is swiping, not tapping.
+const FINGER_STILL: f32 = 12.0;
+/// Held still this long (in seconds), a finger starts a selection instead.
+const FINGER_HOLD: f64 = 0.45;
+/// How far a finger swipes sideways to turn a page, in points.
+const FINGER_TURN: f32 = 50.0;
+
+/// A finger on the text of the page, on a touch screen, until it shows what it is for: a tap puts
+/// the caret there, held still it selects as a mouse drags, swiped sideways it turns one page,
+/// and up or down it moves the page. Phones work this way, and a swipe must not select text.
+pub struct Finger {
+    from: egui::Pos2,
+    last: egui::Pos2,
+    since: f64,
+    way: Option<FingerWay>,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum FingerWay {
+    /// Sideways: whether it has turned its page yet.
+    Turn(bool),
+    Scroll,
+}
+
 /// A selection being dragged out with the mouse. Taken past the top or bottom of the writing
 /// area, it turns to the page before or after: at once the first time, then again each time it
 /// has been held there a while on the new page.
@@ -961,7 +985,17 @@ impl App {
             }
         }
 
-        if pressed && resp.contains_pointer() && !over_box {
+        // A press by a finger, though its touch may not have come yet (`platform::pressed_by_finger`).
+        let by_finger = pressed && (crate::platform::pressed_by_finger() || ctx.input(|inp| inp.any_touches()));
+        let two = ctx.input(|inp| inp.multi_touch().is_some());
+        if by_finger && (self.finger.is_some() || two) {
+            // eframe presses again as the finger's touch comes, where it is, and for every other
+            // finger: only another finger counts, and then this one is a pinch, not a tap or a swipe.
+            let here = pos.zip(self.finger.as_ref()).is_some_and(|(p, f)| (p - f.last).length() <= FINGER_STILL);
+            if two || !here {
+                self.finger = None;
+            }
+        } else if pressed && resp.contains_pointer() && !over_box {
             if let Some(p) = resp.interact_pointer_pos().or(pos) {
                 self.pic_drag = None;
                 self.sel_drag = None;
@@ -976,6 +1010,10 @@ impl App {
                     self.anchor = s;
                     self.set_caret(&ctx, e, true);
                     self.pic_drag = Some(PicDrag { from: s, press: p, drop: None });
+                } else if by_finger {
+                    // A finger shows what it is for before the caret moves (see `Finger`).
+                    self.finger = Some(Finger { from: p, last: p, since: ctx.input(|inp| inp.time), way: None });
+                    ctx.request_repaint_after(std::time::Duration::from_secs_f64(FINGER_HOLD));
                 } else {
                     if let Some(c) = at(&self.doc, p) {
                         self.set_caret(&ctx, c, shift);
@@ -997,6 +1035,54 @@ impl App {
                         self.set_caret(&ctx, c, true);
                     }
                 }
+            }
+        }
+        if let Some(mut f) = self.finger.take() {
+            let p = pos.unwrap_or(f.last);
+            let moved = p - f.from;
+            let since = ctx.input(|inp| inp.time) - f.since;
+            let mut keep = down;
+            if ctx.input(|inp| inp.multi_touch().is_some()) {
+                keep = false; // a second finger: a pinch, or two fingers moving the page
+            } else if !down {
+                // Lifted without moving: a tap.
+                if let Some(c) = at(&self.doc, f.from).filter(|_| f.way.is_none()) {
+                    self.set_caret(&ctx, c, shift);
+                    self.want_x = None;
+                }
+            } else {
+                match f.way {
+                    None if moved.length() > FINGER_STILL => {
+                        f.way = Some(if moved.x.abs() > moved.y.abs() { FingerWay::Turn(false) } else { FingerWay::Scroll });
+                    }
+                    None if since >= FINGER_HOLD => {
+                        // From here on it is a mouse dragging out a selection.
+                        keep = false;
+                        if let Some(c) = at(&self.doc, f.from) {
+                            self.set_caret(&ctx, c, false);
+                        }
+                        self.sel_drag = Some(SelDrag::default());
+                    }
+                    None => ctx.request_repaint_after(std::time::Duration::from_secs_f64(FINGER_HOLD - since)),
+                    _ => {}
+                }
+                match f.way {
+                    // Fingers moving left go forward, like turning a page; one page a swipe.
+                    Some(FingerWay::Turn(false)) if moved.x.abs() >= FINGER_TURN => {
+                        f.way = Some(FingerWay::Turn(true));
+                        let to = if moved.x < 0.0 { (self.target + 1).min(self.last()) } else { self.target.saturating_sub(1) };
+                        if to != self.target {
+                            self.turn_to(&ctx, to, false);
+                            self.swiped = true;
+                        }
+                    }
+                    Some(FingerWay::Scroll) => self.finger_pan += p - f.last,
+                    _ => {}
+                }
+            }
+            f.last = p;
+            if keep {
+                self.finger = Some(f);
             }
         }
         // With formatting taken up, letting go of a selection (or a click) puts it down there.

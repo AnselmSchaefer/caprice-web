@@ -4,7 +4,7 @@ How Caprice is put together, and the rules that hold it together. The rules (§4
 read before changing anything: each says what depends on what, what to check when touching it, and
 which tests guard it. Keep this file true: a change that alters a rule updates it in the same commit.
 
-*Last brought up to date: 2026-11-03 (on a phone: fitting the width, following the caret, R32).*
+*Last brought up to date: 2026-11-03 (on a phone: fitting the width, following the caret, one finger, R32).*
 
 ---
 
@@ -67,7 +67,7 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `contents.rs` | `Doc::chapters`, splitting the contents over pages, laying out one page of them, migrating the old contents char |
 | `editor.rs` | Caret, selection, typing, deleting, clipboard, keys, mouse, formatting commands, `set_setup`, `turn_to`, the editable page surface |
 | `main.rs` | `App` state, `main()`, the frame loop, page position animation, `go_to_page`, the app-level tests and their `Harness` |
-| `view.rs` | Camera: fit (to the width on a phone), zoom, panning, two-finger swipe through pages, following the caret (R32) |
+| `view.rs` | Camera: fit (to the width on a phone), zoom, panning, two-finger swipe through pages, following the caret (R32); one finger is the editor's `Finger` |
 | `render.rs` | Paperstack look: paper, piles, static pages, sliding pages |
 | `book.rs` | Book look: pages turning on their left edge |
 | `notes.rs` | Post-its: placement, pads, drawing, editing |
@@ -1377,6 +1377,22 @@ whole page, centred, as always.
 - **Two fingers on a touch screen pan as they pinch** (`multi_touch().translation_delta`, only over
   the pages as in R16); fitted on a phone, only up and down. egui starts such a gesture only with a
   pointer position, which the browser gives with the first finger: a test sends one too.
+- **One finger on the text shows what it is for before the caret moves** (`editor::Finger`): lifted
+  still, a tap puts the caret there; held still `FINGER_HOLD`, it selects as a mouse drags; moved
+  sideways past `FINGER_STILL`, it turns one page a swipe (`FINGER_TURN`, left goes forward, like
+  the trackpad's `swipe_pages`), leaving the caret; up or down, it moves the page as two fingers do
+  (`App::finger_pan`, read by `page_rect`). A second finger ends it: a pinch moves no caret.
+- **A press by a finger is known by the press itself** (`platform::pressed_by_finger`, noted by a
+  capturing `pointerdown` listener on the window, before eframe's). eframe runs a frame on the
+  `pointerdown` alone, before the `touchstart`, so that frame has no touches; it presses again with
+  the touch, where the finger is, and for every other finger, the second where it lands. Taken for
+  a mouse, a pinch put the caret under a finger and dragged a selection to the second finger: in a
+  margin, past the text's foot or top, that turned the page forward or back. An echo where the
+  finger is is ignored; a press elsewhere, or with two touches, is a second finger. The test
+  helpers `finger_down` and `pinch` send exactly what eframe sends (seen in Chromium with touch
+  events); a new touch test uses them.
+- **Zooming stops at the fitting size only on the way through it**, never whenever near it: a slow
+  pinch changes the zoom by a hair each frame, and stayed fitted.
 - **The keyboard shrinks the page in the browser**: `interactive-widget=resizes-content` in
   `web/index.html`'s viewport, so Android gives the canvas the height above the keyboard (Safari
   is not supported, §7), and the caret is followed up into it.
@@ -1400,7 +1416,10 @@ whole page, centred, as always.
 - Tests: `on_a_phone_the_page_fills_the_width_scrolls_and_keeps_the_caret_in_sight` (fitted width,
   the top first, the caret followed down the page and above a keyboard, two fingers panning),
   `on_a_phone_the_keyboard_stays_up_while_a_new_page_comes_in_and_a_menu_is_open`,
-  `on_a_touch_screen_the_keyboard_comes_with_a_tap_on_the_page_and_stays_away_once_put_away`.
+  `on_a_touch_screen_the_keyboard_comes_with_a_tap_on_the_page_and_stays_away_once_put_away`,
+  `on_a_touch_screen_a_pinch_zooms_without_turning_a_page_or_selecting_whichever_way_it_goes`,
+  `on_a_touch_screen_one_finger_swiped_sideways_turns_one_page_and_leaves_the_caret_and_keyboard`,
+  `on_a_touch_screen_one_finger_taps_the_caret_in_held_selects_and_moves_the_page_up_and_down`.
 
 ---
 
@@ -1624,5 +1643,9 @@ when the writer goes on; nothing moved in the layout, nothing in print or the fi
   Fitting the page to the width, scrolling it, following the caret and panning with two fingers
   was chosen over a mode that reflows the text to the screen without pages, which would be a new
   way of drawing the story (R32).
+- **2026-11-03 — On a touch screen one finger swipes, a long press selects.** Asked for: a one-finger
+  swipe to the page before or after. A finger dragged over the text used to select, as a mouse
+  does; now a swipe turns a page or moves the page, and a selection begins with the finger held
+  still, as on phones. A mouse still selects by dragging (R32).
 - **No `.docx` import.** Export only.
 - **Contents heading is "Contents"** (English), in the app and in Word.

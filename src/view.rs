@@ -1,6 +1,6 @@
 //! The camera: fit-to-window, pinch/keyboard zoom, scroll and Ctrl+drag panning, and swiping through pages.
 
-use eframe::egui::{self, Id, Key, Modifiers, Rect, Sense, pos2, vec2};
+use eframe::egui::{self, Id, Key, Modifiers, Rect, Sense, Vec2, pos2, vec2};
 
 use crate::App;
 use crate::ui::{BarSide, DOCK_GAP, RESERVED};
@@ -189,8 +189,10 @@ impl App {
         if (z - 1.0).abs() > 1e-4 {
             let anchor = hover.filter(|p| view.contains(*p)).unwrap_or(view.center());
             let mut new = (self.zoom * z).clamp(MIN_ZOOM, MAX_ZOOM);
-            if (new - fit).abs() < 0.02 {
-                new = fit; // stop at the fitting size on the way through
+            // Stop at the fitting size on the way through. Not whenever near it: a slow pinch moves
+            // by a hair each frame, and would never get away from it.
+            if (self.zoom < fit) != (new < fit) && self.zoom != fit {
+                new = fit;
             }
             self.origin = anchor + (self.origin - anchor) * (new / self.zoom);
             self.zoom = new;
@@ -205,13 +207,14 @@ impl App {
         if (!self.fit || narrow) && over_pages && scroll.y.abs() >= scroll.x.abs() {
             self.origin.y += scroll.y;
         }
-        // Two fingers on a touch screen move the page as they pinch; fitted on a phone, only up and down.
-        if let Some((d, _)) = touch.filter(|(_, at)| view.contains(*at) && ctx.layer_id_at(*at).is_none_or(|l| l.order == egui::Order::Background)) {
-            if !self.fit {
-                self.origin += d;
-            } else if narrow {
-                self.origin.y += d.y;
-            }
+        // Two fingers on a touch screen move the page as they pinch, and so does one moved up or down
+        // over the text (`Finger`); fitted on a phone, only up and down.
+        let two = touch.filter(|(_, at)| view.contains(*at) && ctx.layer_id_at(*at).is_none_or(|l| l.order == egui::Order::Background));
+        let d = two.map_or(Vec2::ZERO, |(d, _)| d) + std::mem::take(&mut self.finger_pan);
+        if !self.fit {
+            self.origin += d;
+        } else if narrow {
+            self.origin.y += d.y;
         }
         self.follow_caret(view);
 

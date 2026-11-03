@@ -156,6 +156,38 @@ pub fn frame_on_visibility_change(ctx: &egui::Context) {
     wake.forget();
 }
 
+thread_local! {
+    static BY_FINGER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether the pointer was last pressed by a finger rather than a mouse or a pen. The frame cannot
+/// always tell by its touches: in the browser eframe tells a press before the touch that made it,
+/// and runs a frame on that press alone (and presses again, where the first finger is, for every
+/// other finger). Never on the desktop, where egui has no touches but a touch screen's.
+pub fn pressed_by_finger() -> bool {
+    BY_FINGER.with(|f| f.get())
+}
+
+/// What `pressed_by_finger` says from now on: the browser's own press tells it; tests say it.
+#[cfg_attr(not(any(test, target_arch = "wasm32")), allow(dead_code))]
+pub fn set_pressed_by_finger(by: bool) {
+    BY_FINGER.with(|f| f.set(by));
+}
+
+/// In the browser: note what each press was made with (`pressed_by_finger`), before eframe hears of it.
+#[cfg(target_arch = "wasm32")]
+pub fn note_what_presses() {
+    use wasm_bindgen::JsCast;
+    let note = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::PointerEvent)>::new(|e: web_sys::PointerEvent| {
+        set_pressed_by_finger(e.pointer_type() == "touch");
+    });
+    // On the window and capturing: before the canvas's own listeners.
+    if let Some(window) = web_sys::window() {
+        let _ = window.add_event_listener_with_callback_and_bool("pointerdown", note.as_ref().unchecked_ref(), true);
+    }
+    note.forget();
+}
+
 /// In the browser: whether leaving the page now would lose changes, so that the browser asks
 /// first ("Leave site?"). It cannot ask Caprice's own question: the page is going.
 pub fn warn_on_leaving(on: bool) {
