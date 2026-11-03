@@ -555,7 +555,7 @@ impl App {
     /// The story notes, kept with the document and sent with every question about the story.
     pub fn story_notes_window(&mut self, ctx: &egui::Context) {
         let mut open = self.story_notes_open;
-        egui::Window::new("Story notes").id(Id::new("story_notes")).open(&mut open).default_width(420.0).show(ctx, |ui| {
+        egui::Window::new("Story notes").id(Id::new("story_notes")).open(&mut open).default_width(crate::ui::window_width(ctx, 420.0)).show(ctx, |ui| {
             let about = "Claude reads these whenever it reviews, answers about or connects parts of the story.";
             ui.label(egui::RichText::new(about).size(12.0).color(pal().text_dim));
             let hint = "Who is who, what has happened so far, what the reader must not learn yet…";
@@ -796,7 +796,7 @@ impl App {
             .id(Id::new("claude_answer"))
             .open(&mut open)
             .default_pos(ans.at + vec2(16.0, 16.0))
-            .default_width(400.0)
+            .default_width(crate::ui::window_width(ctx, 400.0))
             .resizable(true)
             .collapsible(false)
             .show(ctx, |ui| {

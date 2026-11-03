@@ -1210,8 +1210,10 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   slow wave runs down it from the neck to the tail (`wave`, `GLIDE`), the head riding it a
   little behind. Its jaw opens with its breath of fire. Looking back over itself, its fire is only
   a puff, so it does not cross its own back. The beat, the fire, the smoke and the tail come from
-  `Pose::t`, so a test can look at any moment. Typing, clicking or scrolling sets the title down at once
-  and the carrier hurries away (`update_lift`); a page turned ends it. A new carrier is a `Carrier`
+  `Pose::t`, so a test can look at any moment. Typing, a press or scrolling sets the title down at once
+  and the carrier hurries away (`update_lift`); a page turned ends it. A press, never a letting go:
+  on a touch screen eframe lets go twice, the second a frame after the tap on Chapter that called
+  it, and on a phone it was gone before it was seen. A new carrier is a `Carrier`
   variant, its way in `rig` and its drawing in `draw_carrier`.
 - **The title being brought is only drawn elsewhere.** `editor_surface` moves the title's pieces of
   the page's layout by `eggs::offset` while painting them and puts them back after. Its place is
@@ -1259,6 +1261,7 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   `the_dragon_holds_the_title_in_its_claws_breathing_fire`,
   `the_dragon_flies_right_out_of_the_window_before_it_is_gone`,
   `the_dragon_and_the_balloon_bring_every_new_chapter_title`,
+  `on_a_touch_screen_the_dragon_and_the_balloon_bring_a_title_made_with_a_tap`,
   `now_and_then_in_the_magic_garden_a_balloon_flies_in_a_new_chapter_title_from_either_side`,
   `the_title_hangs_from_the_balloon_by_ropes_tied_to_its_ends`,
   `going_on_writing_while_a_title_is_brought_sets_it_down_at_once`,
@@ -1391,6 +1394,12 @@ whole page, centred, as always.
   finger is is ignored; a press elsewhere, or with two touches, is a second finger. The test
   helpers `finger_down` and `pinch` send exactly what eframe sends (seen in Chromium with touch
   events); a new touch test uses them.
+- **Windows and dialogs show whole on a phone.** Their widths go through `ui::window_width` (an
+  `egui::Window`'s `default_width`) or `ui::fit_width` (a fixed width inside a frame of its own, as
+  the question before leaving): no wider than the screen less a gutter either side. egui keeps a
+  window's place on the screen, not its width; the question before leaving, 440 wide, lost its
+  buttons off both sides. A new window or dialog with a width of its own uses them. The test helper
+  `tap_widget` taps as eframe tells a finger's tap.
 - **Zooming stops at the fitting size only on the way through it**, never whenever near it: a slow
   pinch changes the zoom by a hair each frame, and stayed fitted.
 - **The keyboard shrinks the page in the browser**: `interactive-widget=resizes-content` in
@@ -1419,7 +1428,8 @@ whole page, centred, as always.
   `on_a_touch_screen_the_keyboard_comes_with_a_tap_on_the_page_and_stays_away_once_put_away`,
   `on_a_touch_screen_a_pinch_zooms_without_turning_a_page_or_selecting_whichever_way_it_goes`,
   `on_a_touch_screen_one_finger_swiped_sideways_turns_one_page_and_leaves_the_caret_and_keyboard`,
-  `on_a_touch_screen_one_finger_taps_the_caret_in_held_selects_and_moves_the_page_up_and_down`.
+  `on_a_touch_screen_one_finger_taps_the_caret_in_held_selects_and_moves_the_page_up_and_down`,
+  `on_a_phone_the_question_before_leaving_and_the_windows_show_whole`.
 
 ---
 

@@ -166,7 +166,7 @@ impl App {
         let frame = egui::Frame::new().fill(pal().dock).stroke(Stroke::new(1.0, pal().dock_edge)).corner_radius(CornerRadius::same(16)).inner_margin(24);
         let mut answer = None;
         let modal = egui::Modal::new(Id::new(id)).frame(frame).backdrop_color(Color32::from_black_alpha(150)).show(ctx, |ui| {
-            ui.set_width(440.0);
+            ui.set_width(crate::ui::fit_width(ui.ctx(), 440.0, 24.0));
             ui.horizontal_top(|ui| {
                 // The story's first page, as on the welcome page.
                 let (r, _) = ui.allocate_exact_size(vec2(64.0, 88.0), Sense::hover());

@@ -962,7 +962,7 @@ impl App {
         egui::Window::new("Describe the scene")
             .id(Id::new("scene_panel"))
             .open(&mut open)
-            .default_width(340.0)
+            .default_width(crate::ui::window_width(ctx, 340.0))
             .resizable(true)
             .collapsible(false)
             .show(ctx, |ui| {
@@ -1016,7 +1016,7 @@ impl App {
         egui::Window::new("Scenes")
             .id(Id::new("scene_list"))
             .open(&mut open)
-            .default_width(380.0)
+            .default_width(crate::ui::window_width(ctx, 380.0))
             .default_height(480.0)
             .collapsible(false)
             .show(ctx, |ui| {

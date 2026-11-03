@@ -85,7 +85,7 @@ impl App {
             .id(Id::new("shelf"))
             .open(&mut open)
             .default_pos(pos2(screen.center().x - 160.0, screen.top() + 90.0))
-            .default_width(320.0)
+            .default_width(crate::ui::window_width(ctx, 320.0))
             .resizable(false)
             .collapsible(false)
             .show(ctx, |ui| match asking {

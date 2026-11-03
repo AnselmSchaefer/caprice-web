@@ -19,6 +19,21 @@ pub const RESERVED: f32 = DOCK_GAP + DOCK_H + 10.0;
 /// top, and Scratchpad, Fit, the zoom and "+" below.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub const MIN_WINDOW: [f32; 2] = [340.0, 400.0];
+
+/// Room left on either side of a window or a dialog on a phone, whose screen is narrower than they are.
+const WINDOW_GUTTER: f32 = 8.0;
+
+/// The width for the contents of a window `w` wide, no more than the screen has for them inside a
+/// frame with `margin` on either side: on a phone the window shows whole.
+pub fn fit_width(ctx: &egui::Context, w: f32, margin: f32) -> f32 {
+    w.min(ctx.content_rect().width() - 2.0 * (WINDOW_GUTTER + margin)).max(120.0)
+}
+
+/// `fit_width` for an `egui::Window`, in its own frame.
+pub fn window_width(ctx: &egui::Context, w: f32) -> f32 {
+    let m = ctx.global_style().spacing.window_margin;
+    fit_width(ctx, w, (m.leftf() + m.rightf()) / 2.0 + 1.0)
+}
 /// Where the page bar is docked: lying under the pages, or standing at the left or right.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub enum BarSide {

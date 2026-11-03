@@ -2706,6 +2706,24 @@ mod tests {
         }
     }
 
+    impl Harness {
+        /// A finger's tap on the button labelled `label`, as eframe tells it in a browser: the
+        /// pointer's press, the touch with the press again, the pointer let go, and the touch's end
+        /// letting it go again.
+        fn tap_widget(&mut self, label: &str) {
+            let r = self.widget_rect(label).unwrap_or_else(|| panic!("no button {label:?}"));
+            let at = r.center();
+            let touch = |phase| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(1), phase, pos: at, force: None };
+            let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+            platform::set_pressed_by_finger(true);
+            self.frames(1, vec![egui::Event::PointerMoved(at), button(true)], Modifiers::NONE);
+            self.frames(1, vec![button(true), touch(egui::TouchPhase::Start)], Modifiers::NONE);
+            self.frames(1, vec![button(false)], Modifiers::NONE);
+            self.frames(1, vec![button(false), egui::Event::PointerGone, touch(egui::TouchPhase::End)], Modifiers::NONE);
+            self.frames(2, vec![], Modifiers::NONE);
+        }
+    }
+
     /// Where the button labelled `label`, or the field with that hint, is. A window titled the same
     /// is not it.
     fn find_widget(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)], label: &str) -> Option<egui::accesskit::Rect> {
@@ -4241,6 +4259,28 @@ mod tests {
         assert_eq!(again.app.doc.scenes.len(), 1);
         assert_eq!(again.app.backdrop.to_file().map(|f| (f.svg, f.description)), Some((None, "A ship in a storm".into())));
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn on_a_phone_the_question_before_leaving_and_the_windows_show_whole() {
+        let mut h = Harness::new();
+        (h.width, h.height) = (412.0, 800.0);
+        h.frames(3, vec![], Modifiers::NONE);
+        h.type_text("Draft");
+        h.key(Key::O, Modifiers::COMMAND);
+        assert_eq!(h.app.leaving, Some(fileio::Leaving::Open));
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(h.width, h.height));
+        for button in ["Save\u{2026}", "Don\u{2019}t save", "Cancel"] {
+            let r = h.widget_rect(button).unwrap_or_else(|| panic!("no {button:?}"));
+            assert!(screen.contains_rect(r), "{button:?} at {r:?}");
+        }
+        h.key(Key::Escape, Modifiers::NONE);
+
+        // A window wider than a phone, as Story notes were: inside the screen, a gutter either side.
+        h.app.story_notes_open = true;
+        h.frames(5, vec![], Modifiers::NONE);
+        let r = h.ctx.memory(|m| m.area_rect(egui::Id::new("story_notes"))).expect("the window is up");
+        assert!(r.left() >= 4.0 && r.right() <= h.width - 4.0, "the window at {r:?}");
     }
 
     #[test]
@@ -6369,6 +6409,23 @@ mod tests {
                 assert!(h.app.eggs.lift.is_none(), "and went");
                 h.key(Key::Enter, Modifiers::NONE);
             }
+        }
+    }
+
+    #[test]
+    fn on_a_touch_screen_the_dragon_and_the_balloon_bring_a_title_made_with_a_tap() {
+        for theme in [theme::Theme::City, theme::Theme::Garden] {
+            let mut h = Harness::new();
+            in_the_theme(&mut h, theme, 1.0);
+            h.type_text("Chapter One");
+            h.tap_widget("Chapter");
+            let lift = h.app.eggs.lift.expect("it came");
+            h.frames((eggs::OVER * lift.by.pace() * 60.0) as usize, vec![], Modifiers::NONE);
+            let lift = h.app.eggs.lift.expect("still there over the title's place");
+            assert!(lift.duck.is_none(), "{theme:?}: the tap's letting go did not send it away");
+            // A tap on the page later does.
+            h.click_in_page(egui::vec2(10.0, 10.0));
+            assert!(h.app.eggs.lift.is_some_and(|l| l.duck.is_some()), "{theme:?}: the writer went on");
         }
     }
 

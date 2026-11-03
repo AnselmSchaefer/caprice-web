@@ -2178,9 +2178,18 @@ impl App {
     pub fn update_lift(&mut self, ctx: &egui::Context) {
         let Some(lift) = &mut self.eggs.lift else { return };
         let now = ctx.input(|i| i.time);
+        // A press, not a letting go: on a touch screen eframe lets go twice, the second time after the
+        // tap on Chapter that called it, which sent it away at once.
         let busy = ctx.input(|i| {
             i.events.iter().any(|e| {
-                matches!(e, egui::Event::Key { .. } | egui::Event::Text(_) | egui::Event::PointerButton { .. } | egui::Event::Paste(_) | egui::Event::MouseWheel { .. })
+                matches!(
+                    e,
+                    egui::Event::Key { .. }
+                        | egui::Event::Text(_)
+                        | egui::Event::PointerButton { pressed: true, .. }
+                        | egui::Event::Paste(_)
+                        | egui::Event::MouseWheel { .. }
+                )
             })
         });
         if busy && lift.duck.is_none() {

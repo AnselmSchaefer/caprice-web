@@ -429,7 +429,7 @@ impl App {
         egui::Window::new("Cast")
             .id(Id::new("cast"))
             .open(&mut open)
-            .default_width(400.0)
+            .default_width(crate::ui::window_width(ctx, 400.0))
             // Room for someone with a model sheet and all its buttons, without scrolling.
             .default_height(620.0)
             .collapsible(false)
@@ -631,7 +631,7 @@ impl App {
         egui::Window::new("The cast at work")
             .id(Id::new("cast_example"))
             .open(&mut open)
-            .default_width(560.0)
+            .default_width(crate::ui::window_width(ctx, 560.0))
             .default_height(640.0)
             .collapsible(false)
             .show(ctx, |ui| {
