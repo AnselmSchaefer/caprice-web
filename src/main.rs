@@ -5928,6 +5928,64 @@ mod tests {
         let mut h = Harness::new();
         in_the_theme(&mut h, theme::Theme::City, 1.0);
         chapter_one(&mut h);
+    /// Three chapters of a line each, written in `theme`, each settled before the next.
+    fn three_chapters(h: &mut Harness, theme: theme::Theme) {
+        in_the_theme(h, theme, 0.0);
+        for (k, title) in ["Chapter One", "Chapter Two", "Chapter Three"].into_iter().enumerate() {
+            if k > 0 {
+                h.key(Key::Enter, Modifiers::NONE);
+            }
+            h.type_text(title);
+            h.click_widget("Chapter");
+            h.key(Key::Enter, Modifiers::NONE);
+            h.type_text("It was nearly midnight.");
+            h.frames((eggs::LAUNCH * 60.0) as usize + 300, vec![], Modifiers::NONE);
+        }
+    }
+
+    /// Make the second chapter's title a paragraph again, and let it settle.
+    fn take_away_the_second_title(h: &mut Harness) {
+        let at = h.app.doc.chapters(false)[1].at;
+        let ctx = h.ctx.clone();
+        h.app.set_caret(&ctx, at, false);
+        h.click_widget("Chapter");
+        assert_eq!(h.app.doc.chapters(false).len(), 2);
+        h.frames((eggs::LAUNCH * 60.0) as usize + 300, vec![], Modifiers::NONE);
+    }
+
+    #[test]
+    fn a_chapter_title_taken_away_leaves_every_plant_as_it_was_in_flower_or_not() {
+        let mut h = Harness::new();
+        three_chapters(&mut h, theme::Theme::Garden);
+        let plants = |h: &Harness| h.app.eggs.plants.iter().map(|p| (p.0.center().x.round(), p.1)).collect::<Vec<_>>();
+        let was = plants(&h);
+        assert_eq!(was.iter().map(|p| p.1).collect::<Vec<_>>(), [true, true, false], "the chapter being written grows");
+        take_away_the_second_title(&mut h);
+        assert_eq!(plants(&h), was);
+    }
+
+    #[test]
+    fn a_chapter_title_taken_away_leaves_every_ship_where_it_was() {
+        let mut h = Harness::new();
+        // Three chapters: two ships in the bay, the third being built.
+        three_chapters(&mut h, theme::Theme::Sea);
+        let ships = |h: &Harness| {
+            let mut ships: Vec<_> = h.app.eggs.ships.iter().map(|s| (s.0, s.1.center(), s.2, s.3)).collect();
+            ships.sort_by_key(|s| s.0);
+            ships
+        };
+        let was = ships(&h);
+        assert_eq!(was.iter().map(|s| (s.0, s.3)).collect::<Vec<_>>(), [(0, true), (1, true), (2, false)]);
+
+        // The second title made a paragraph again: no ship goes back to the yard, none leaves it.
+        take_away_the_second_title(&mut h);
+        let now = ships(&h);
+        assert_eq!(now.len(), 3, "{now:?}");
+        for (a, b) in was.iter().zip(&now) {
+            assert!(a.0 == b.0 && a.2 == b.2 && a.3 == b.3 && a.1.distance(b.1) < 4.0, "as it was: {a:?} {b:?}");
+        }
+    }
+
         let claws = |h: &Harness| -> Vec<egui::Pos2> {
             h.painted.iter().filter_map(|cs| match &cs.shape {
                 egui::Shape::LineSegment { points, stroke } if stroke.color == eggs::CLAW => Some(points[0]),
@@ -6046,7 +6104,7 @@ mod tests {
     }
 
     #[test]
-    fn a_chapter_taken_out_keeps_its_plant_and_it_flowers() {
+    fn a_chapter_taken_out_keeps_its_plant_and_every_plant_stays_as_it_was() {
         let mut h = Harness::new();
         in_the_garden(&mut h, 0.0);
         chapter_one(&mut h);
@@ -6065,7 +6123,8 @@ mod tests {
         h.app.replace_range(&ctx, two, end, "");
         h.frames(10, vec![], Modifiers::NONE);
         assert_eq!(h.app.doc.chapters(false).len(), 1);
-        assert_eq!(h.app.eggs.plants.iter().map(|p| p.1).collect::<Vec<_>>(), [false, true], "still two plants; the second flowered");
+        // Still two plants: the first keeps its flower, the second grows on for the next chapter.
+        assert_eq!(h.app.eggs.plants.iter().map(|p| p.1).collect::<Vec<_>>(), [true, false]);
     }
 
     #[test]

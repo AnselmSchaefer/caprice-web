@@ -1989,7 +1989,6 @@ impl App {
         let now = ui.ctx().input(|i| i.time);
         // As tall as the most pages each has had (`grow_garden`).
         let targets: Vec<f32> = self.doc.garden.iter().map(|&n| height_of(n as usize)).collect();
-        let chapters = self.doc.chapters(false).len().max(1);
         let e = &mut self.eggs;
         if e.grown_for.as_deref() != Some(&self.story_id) {
             // A story just opened, or the theme just picked, comes with its garden grown.
@@ -2023,8 +2022,9 @@ impl App {
             let x = if left { page.left() - gap * (j as f32 + 0.6) } else { page.right() + gap * (j as f32 + 0.6) };
             let height = (g * TALLEST * area.height()).max(4.0 * unit);
             let root = pos2(x, area.bottom());
-            // A chapter flowers once the next one has begun; the plant of one taken out has too.
-            let flower = k + 1 != chapters;
+            // A chapter flowers once the next one has begun. The newest plant grows on, not the last
+            // chapter's: a title taken away would take the flower off a plant that had it.
+            let flower = k + 1 != n;
             painter.extend(plant(&self.story_id, k, root, height, flower, unit));
             e.plants.push((Rect::from_min_max(pos2(x, root.y - height), root), flower));
         }
@@ -2086,8 +2086,10 @@ impl App {
             return;
         }
         let now = ui.ctx().input(|i| i.time);
-        let yard = self.doc.chapters(false).len().max(1) - 1;
+        // The newest ship, not the last chapter's: a title taken away would bring a ship back from
+        // the bay to be built again, and send the one half built out finished.
         let ships = self.doc.garden.len();
+        let yard = ships.max(1) - 1;
         let target = self.doc.garden.get(yard).map_or(0, |&n| (n as usize).min(PARTS)) as f32;
         let e = &mut self.eggs;
         let was = e.sailed_for.as_ref().filter(|(id, _)| *id == self.story_id).map(|f| f.1);

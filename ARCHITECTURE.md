@@ -1085,7 +1085,8 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   called in `frame` right after `page_rect` and before any page is drawn, so the pages hide what is
   behind them, in either look and while turning. A plant a chapter (one for a story without
   chapters), taking turns on the left and right of the page, as tall as its chapter's pages
-  (`height_of`), flowering once the next chapter has begun. The chapters come from `Doc::chapters`
+  (`height_of`), flowering once the next chapter has begun: every plant flowers but the newest
+  (the last of `Doc::garden`, not of `Doc::chapters`). The chapters come from `Doc::chapters`
   and `page_of`, so the garden follows whatever changes them, with nothing to keep in step.
 - **It never shrinks, and is kept with the story** (`Doc::garden`, saved as `DocFile::garden`): the
   most pages each plant has had, a plant a chapter in order. `grow_garden` raises it, in every
@@ -1094,7 +1095,12 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   R21): egui's own font gives more pages, and a story opened in the browser, where a font's files
   take a while, kept that count for good, so the pages written next added nothing to see.
   Taking text away, a chapter out, undo, opening the file again smaller: none of it lowers a
-  plant, and a chapter taken out keeps its plant, which flowers. Whatever puts
+  plant, and a chapter taken out keeps its plant. Nothing that counts "the chapter being written"
+  for a plant or a ship asks `Doc::chapters`, which shrinks, but the length of `Doc::garden`,
+  which does not: a title taken away took the flower off a plant, and brought a ship back from the
+  bay to be built again while the half-built one sailed out finished. Guarded by
+  `a_chapter_title_taken_away_leaves_every_plant_as_it_was_in_flower_or_not` and
+  `a_chapter_title_taken_away_leaves_every_ship_where_it_was`. Whatever puts
   another `Doc` in place of the open one goes through `adopt`, which keeps the bigger garden when
   it is the same story (`keep_garden`: a version, its file again, dropping the changes since
   saving); anything else that replaces `doc` must do the same. Plants are matched to chapters by
@@ -1127,7 +1133,7 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   the ships rocking and the waves drifting; nothing else in the app does.
 - **The sea lies on the desk the same way**, in the Magic Sea only: `draw_sea` is called right after
   `draw_city`. A ship for each chapter, from the same `Doc::garden`, so it needs nothing kept of its
-  own either. The chapter being written (the last of `Doc::chapters`, or the only one) has its ship
+  own either. The newest chapter (the last of `Doc::garden`, so a ship once launched never comes back) has its ship
   in the yard on the left of the page, a part for each page its chapter has had, up to `PARTS`
   (keel and ribs, planks below, planks above, rail and castle, stripe and portholes, main mast,
   its sail, foremast, its sail, bowsprit and jib, topsails, flags); each part comes in sight out of
@@ -1239,7 +1245,7 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   `a_long_story_s_city_fills_the_desk_on_both_sides_and_grows_higher`,
   `in_the_magic_garden_a_plant_grows_beside_the_pages_as_the_story_grows`,
   `each_chapter_grows_its_own_plant_and_flowers_once_the_next_begins`,
-  `a_chapter_taken_out_keeps_its_plant_and_it_flowers`,
+  `a_chapter_taken_out_keeps_its_plant_and_every_plant_stays_as_it_was`,
   `the_garden_is_kept_with_the_story_and_does_not_shrink_when_it_is_opened_again_smaller`,
   `dropping_the_changes_since_saving_keeps_the_garden_grown_since`,
   `a_story_begun_is_not_unsaved_for_its_garden`,
