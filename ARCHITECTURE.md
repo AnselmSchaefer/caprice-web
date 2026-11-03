@@ -583,6 +583,11 @@ scratchpad's text is the document's (`Doc::scratchpad`, saved, R9); whether it s
   runs. A new tool in the page bar needs a place in both. The side is kept in the data folder
   (`page_bar.json`, like the theme), and `Harness` keeps it nowhere (`BarPlace::kept_in(None)`).
   Guarded by `the_page_bar_stands_at_the_side_its_grip_is_dragged_to_and_stays_there`.
+- **The thumb counts a page sliding in only as it arrives** (`page_track`: `slide_in`, and a page
+  added in this very frame). New page is in the bar, drawn after `frame` starts the slide, so the
+  page was there before its slide was, and the thumb jumped back for a frame, then on. Anything
+  in the bar that adds or takes away pages must keep the thumb in step the same way. Guarded by
+  `a_new_page_slides_the_thumb_on_without_a_jump_back_lying_or_standing` (frame by frame).
 - **An item marked as chosen in a menu is `Button::selectable` (or `selectable_label`), never
   `.selected(true)` with `.frame(false)`**: the theme gives chosen items dark text meant for the
   accent highlight, and without a frame there is none, so it was dark on the dark menu (the text
@@ -1344,7 +1349,14 @@ blank story, typing, a picture uploaded, the PDF downloaded and opened to print,
 and listed again after a reload, a story saved by name, downloaded as `.caprice` and Word,
 uploaded back, a story with a scene drawn behind the page in a worker, Ctrl+R and Ctrl+F kept
 from the browser, leaving asking only with changes not saved, saving when the page is hidden, and
-the stories listed on the welcome; it reports any error on the page). The native tests cover the desktop half.
+the stories listed on the welcome, and a page that cannot open saying why; it reports any error on the page).
+The native tests cover the desktop half.
+
+- **A page that cannot open says why.** `web/index.html` shows "Caprice is opening…" until the
+  WebAssembly has started; an error before then (the download, compiling, instantiating), or
+  eframe failing to start (`main`), takes its place in words, and after 20 s with nothing said it
+  names what it may be (a slow connection, or a browser without shared memory: another app's own
+  browser). A phone has no console to look in, and "opening" stayed for good.
 
 ### R32 — On a phone the page fills the width, scrolls, and keeps the caret in sight
 
@@ -1368,12 +1380,19 @@ whole page, centred, as always.
 - **The keyboard shrinks the page in the browser**: `interactive-widget=resizes-content` in
   `web/index.html`'s viewport, so Android gives the canvas the height above the keyboard (Safari
   is not supported, §7), and the caret is followed up into it.
+- **The keyboard stays up while the writer writes** (`hold_keyboard`, at the end of `frame`). The
+  story asks for text input only while the editable page draws its caret, and eframe hides a
+  phone's keyboard in any frame without that ask, so a page sliding in or turning dropped it and
+  brought it back. The story's last ask is repeated in frames without one; never while a field in
+  a window has the keys (`egui_wants_keyboard_input`), whose own ask is not kept. Anything new that
+  draws the pages without the editable one is covered by it.
 - `App::origin` starts far down, so a page taller than the view first rests with its top in sight.
 - Headless Chromium cannot show this at a phone's pixel ratio: its emulation leaves
   `devicePixelContentBoxSize` in CSS pixels, so eframe draws everything 2.6 times too big. Look at
   phone layouts at ratio 1 (412×839): egui lays out by points, so that is what a phone shows.
 - Tests: `on_a_phone_the_page_fills_the_width_scrolls_and_keeps_the_caret_in_sight` (fitted width,
-  the top first, the caret followed down the page and above a keyboard, two fingers panning).
+  the top first, the caret followed down the page and above a keyboard, two fingers panning),
+  `on_a_phone_the_keyboard_stays_up_while_a_new_page_comes_in_and_a_menu_is_open`.
 
 ---
 

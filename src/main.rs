@@ -122,6 +122,16 @@ fn main() {
             .await;
         if let Err(e) = started {
             web_sys::console::error_1(&e);
+            // Said on the page too, as the loading text says it (a phone has no console to look in).
+            let doc = web_sys::window().and_then(|w| w.document());
+            if let (Some(doc), Some(body)) = (&doc, doc.as_ref().and_then(|d| d.body()))
+                && let Ok(note) = doc.create_element("div")
+            {
+                note.set_id("loading");
+                note.set_class_name("failed");
+                note.set_text_content(Some(&format!("Caprice could not open. {}", e.as_string().unwrap_or_else(|| format!("{e:?}")))));
+                let _ = body.append_child(&note);
+            }
         }
     });
 }
@@ -199,6 +209,8 @@ pub struct App {
     pub note_focus: Option<u64>,
     pub pads: HashMap<u64, notes::Pad>,
     pub last_page_rect: Rect,
+    /// The story's last ask for text input, held through frames that make none (`hold_keyboard`).
+    pub ime: Option<egui::output::IMEOutput>,
     /// The caret drawn last frame, the document's version then, and its rectangle on its page in page points.
     pub caret_seen: Option<(usize, u64, Rect)>,
     /// The caret and version the view last kept in sight, and the view's height then (`follow_caret`).
@@ -336,6 +348,7 @@ impl App {
             last_track: (Pos2::ZERO, Pos2::ZERO),
             caret_seen: None,
             followed: None,
+            ime: None,
             textures: HashMap::new(),
             startup_file: None,
             shown_status: String::new(),
@@ -764,6 +777,23 @@ impl App {
         self.cast_window(&ctx);
         self.unsaved_prompt(&ctx);
         self.welcome_leaving(ui);
+        self.hold_keyboard(&ctx);
+    }
+
+    /// The story asks for text input (in the browser, the phone's keyboard) only while the editable
+    /// page draws its caret, so a frame without it (a page sliding in or turning, pages moved by
+    /// the scrollbar) dropped the keyboard, to bring it straight back once the page lay still.
+    /// Asked for again where the caret last was, it stays up, until a field in a window takes the
+    /// keys, which asks for its own.
+    fn hold_keyboard(&mut self, ctx: &egui::Context) {
+        let asked = ctx.output(|o| o.ime);
+        if ctx.egui_wants_keyboard_input() {
+            self.ime = None;
+        } else if asked.is_some() {
+            self.ime = asked;
+        } else if let Some(ime) = self.ime {
+            ctx.output_mut(|o| o.ime = Some(ime));
+        }
     }
 }
 
@@ -785,6 +815,8 @@ mod tests {
         /// The window's width, and its height.
         width: f32,
         height: f32,
+        /// Whether each frame asked for text input (a phone's keyboard), the last frame last.
+        ime: Vec<bool>,
     }
 
     impl Harness {
@@ -798,7 +830,7 @@ mod tests {
             app.words.progress = Default::default();
             app.themes = theme::Themes::kept_in(None);
             app.bar = ui::BarPlace::kept_in(None);
-            Self { ctx, app, time: 0.0, mods: Modifiers::NONE, access: None, painted: Vec::new(), width: 1240.0, height: 900.0 }
+            Self { ctx, app, time: 0.0, mods: Modifiers::NONE, access: None, painted: Vec::new(), width: 1240.0, height: 900.0, ime: Vec::new() }
         }
 
         fn frames(&mut self, n: usize, events: Vec<egui::Event>, modifiers: Modifiers) {
@@ -827,6 +859,7 @@ mod tests {
                 out.textures_delta.clear();
                 self.access = out.platform_output.accesskit_update.take().or(self.access.take());
                 self.painted = std::mem::take(&mut out.shapes);
+                self.ime.push(out.platform_output.ime.is_some());
             }
         }
 
@@ -1923,6 +1956,77 @@ mod tests {
         h.frames(1, vec![touch(1, egui::TouchPhase::End, a), touch(2, egui::TouchPhase::End, b)], Modifiers::NONE);
         let now = h.app.last_page_rect;
         assert!(now.top() > was.top() + 40.0 && (now.width() - was.width()).abs() < 1.0, "{was:?} → {now:?}");
+    }
+
+    #[test]
+    fn on_a_phone_the_keyboard_stays_up_while_a_new_page_comes_in_and_a_menu_is_open() {
+        let mut h = Harness::new();
+        (h.width, h.height) = (412.0, 600.0);
+        h.frames(30, vec![], Modifiers::NONE);
+        h.type_text("A line.");
+        h.frames(5, vec![], Modifiers::NONE);
+        assert!(h.ime.last() == Some(&true), "writing, the keyboard is up");
+
+        // "+" brings a new page in, sliding or turning: every frame of it still asks for the keyboard.
+        h.ime.clear();
+        h.click_widget("+");
+        h.frames(90, vec![], Modifiers::NONE);
+        assert_eq!(h.app.doc.pages(), 2);
+        assert!(h.ime.iter().all(|&up| up), "the keyboard went down for {} frames of {}", h.ime.iter().filter(|&&up| !up).count(), h.ime.len());
+
+        // Through a menu and a button too.
+        h.ime.clear();
+        h.click_widget("File");
+        h.key(Key::Escape, Modifiers::NONE);
+        h.click_widget("Fit");
+        h.frames(30, vec![], Modifiers::NONE);
+        assert!(h.ime.iter().all(|&up| up), "down for {} frames of {}", h.ime.iter().filter(|&&up| !up).count(), h.ime.len());
+
+        // A field in a window takes the keys, and asks for the keyboard itself.
+        h.click_widget("Scratchpad");
+        h.click_widget(SCRATCHPAD_HINT);
+        h.type_text("a note");
+        assert_eq!(h.app.doc.scratchpad, "a note", "typed into the scratchpad, not the story");
+        assert!(h.app.ime.is_none() && h.ime.last() == Some(&true), "the field's own keyboard, not the story's");
+    }
+
+    /// The scrollbar's thumb as the last frame painted it.
+    fn thumb(h: &Harness) -> Option<egui::Rect> {
+        h.painted.iter().find_map(|cs| match &cs.shape {
+            egui::Shape::Rect(r) if r.fill == theme::pal().thumb || r.fill == theme::pal().accent => {
+                let (a, b) = h.app.last_track;
+                // On the track, as long as it runs.
+                let along = egui::Rect::from_two_pos(a, b).expand(r.rect.width().max(r.rect.height()));
+                (along.contains(r.rect.center()) && r.rect.width().min(r.rect.height()) == 16.0).then_some(r.rect)
+            }
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn a_new_page_slides_the_thumb_on_without_a_jump_back_lying_or_standing() {
+        for side in [ui::BarSide::Bottom, ui::BarSide::Left] {
+            let mut h = Harness::new();
+            h.app.bar.side = side;
+            for _ in 0..3 {
+                h.key(Key::Enter, Modifiers::COMMAND);
+            }
+            h.frames(120, vec![], Modifiers::NONE);
+            let along = |r: egui::Rect| if side == ui::BarSide::Bottom { r.center().x } else { r.center().y };
+            let mut was = along(thumb(&h).expect("the thumb"));
+            let new_page = if side == ui::BarSide::Bottom { "+ New page" } else { "+" };
+            let at = h.widget_rect(new_page).expect("New page").center();
+            let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+            // Pressed and let go a frame at a time, the thumb looked at after each.
+            let events = [vec![egui::Event::PointerMoved(at)], vec![button(true)], vec![button(false)]];
+            for (k, events) in events.into_iter().chain(std::iter::repeat_with(Vec::new).take(90)).enumerate() {
+                h.frames(1, events, Modifiers::NONE);
+                let now = along(thumb(&h).expect("the thumb"));
+                assert!(now >= was - 0.5, "{side:?}, frame {k}: the thumb went back from {was} to {now}");
+                was = now;
+            }
+            assert_eq!(h.app.doc.pages(), 5);
+        }
     }
 
     #[test]

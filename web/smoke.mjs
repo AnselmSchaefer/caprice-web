@@ -261,6 +261,16 @@ await started();
 await page.screenshot({ path: `${out}/10-welcome-again.png` });
 
 check("no errors on the page", errors.length === 0, [...new Set(errors)].slice(0, 8).join("\n  "));
+
+// When it cannot open, the page says why instead of "opening" for good: a phone has no console.
+const broken = await browser.newPage({ viewport: { width: 412, height: 839 } });
+await broken.route(/_bg\.wasm$/, r => r.fulfill({ status: 200, contentType: "application/wasm", body: Buffer.from("not wasm") }));
+await broken.goto(url);
+await broken.waitForFunction(() => document.getElementById("loading")?.className === "failed", null, { timeout: 30000 }).catch(() => {});
+const told = await broken.evaluate(() => document.getElementById("loading")?.textContent ?? "");
+check("when it cannot open, the page says why", told.startsWith("Caprice could not open:") && told.includes("WebAssembly"), told);
+await broken.screenshot({ path: `${out}/11-cannot-open.png` });
+await broken.close();
 await browser.close();
 console.log(failed.length ? `${failed.length} failed` : "all passed");
 process.exit(failed.length ? 1 : 0);

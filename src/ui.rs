@@ -1285,8 +1285,11 @@ impl App {
         let along = |s: f32| if standing { pos2(track.center().x, s) } else { pos2(s, track.center().y) };
         ui.painter().rect_filled(track, 4.0, pal().field);
         // Pages sliding in count only as they arrive, and a page sliding out until it is gone, so
-        // the thumb glides instead of jumping when pages come and go.
-        let arriving = if self.slide_in.is_some() { (self.target as f32 - self.pos).max(0.0) } else { 0.0 };
+        // the thumb glides instead of jumping when pages come and go. A page added in this very
+        // frame (New page is in this bar, drawn after `frame` starts a page sliding in) is arriving
+        // already: the thumb jumped back for a frame, then on.
+        let added = n > self.seen_pages && self.target == self.seen_target + 1;
+        let arriving = if self.slide_in.is_some() || added { (self.target as f32 - self.pos).max(0.0) } else { 0.0 };
         let going = self.slide_out.map_or(0.0, |s| 1.0 - s);
         let last = (n - 1) as f32 - arriving + going;
         let thumb_w = (len / (last + 1.0)).clamp(40.0, len);

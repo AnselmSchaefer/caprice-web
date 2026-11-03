@@ -13,14 +13,33 @@
   html, body { margin: 0; height: 100%; overflow: hidden; background: #2b2a29; }
   canvas { display: block; width: 100%; height: 100%; }
   #loading { position: fixed; inset: 0; display: grid; place-items: center; color: #d8d2c4;
-             font: 18px Georgia, serif; pointer-events: none; }
+             font: 18px Georgia, serif; pointer-events: none; padding: 0 24px; text-align: center; }
+  #loading.failed { font-size: 16px; line-height: 1.5; pointer-events: auto; user-select: text; }
 </style>
 </head>
 <body>
 <canvas id="caprice"></canvas>
 <div id="loading">Caprice is opening…</div>
 <script>
-  addEventListener("TrunkApplicationStarted", () => document.getElementById("loading").remove());
+  const loading = document.getElementById("loading");
+  addEventListener("TrunkApplicationStarted", () => loading.remove());
+  // A phone has no console to look in: what keeps Caprice from opening is said here, in place of
+  // "opening", which would otherwise stay for good.
+  const tell = (text) => {
+    if (!loading.isConnected) return;
+    loading.textContent = text;
+    loading.className = "failed";
+  };
+  const failed = (why) => tell("Caprice could not open: " + why);
+  // Not open after a long while, with nothing gone wrong to tell: say what it may be.
+  setTimeout(() => {
+    const shared = window.crossOriginIsolated && typeof SharedArrayBuffer === "function";
+    tell(shared ? "Caprice is still opening. The connection may be slow; if nothing comes, try reloading."
+      : "Caprice is still opening, but this browser does not give it the shared memory it needs. "
+        + "Open the link in Chrome, Edge or Firefox itself, not in another app's own browser.");
+  }, 20000);
+  addEventListener("error", (e) => failed(String(e.message || e.error)));
+  addEventListener("unhandledrejection", (e) => failed(String((e.reason && e.reason.message) || e.reason)));
 </script>
 </body>
 </html>
