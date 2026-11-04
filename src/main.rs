@@ -5234,6 +5234,26 @@ mod tests {
     }
 
     #[test]
+    fn on_a_phone_the_greeting_and_the_words_written_today_fit_on_the_screen() {
+        let dir = test_dir("start-phone");
+        let mut h = started_without_a_file(&dir);
+        h.width = 390.0;
+        let day = h.app.words.day();
+        h.app.words.progress.track("other", day, 1000);
+        h.app.words.progress.track("other", day, 2345);
+        h.frames(2, vec![], Modifiers::NONE);
+        let hello = h.painted.iter().find_map(|cs| match &cs.shape {
+            egui::Shape::Text(t) if t.galley.job.text.contains("words written today") => Some(t.clone()),
+            _ => None,
+        });
+        let hello = hello.expect("the greeting tells the words written today");
+        let shown: String = hello.galley.rows.iter().map(|r| r.text()).collect();
+        assert!(shown.contains("1,345 words written today."), "all of it is shown: {shown:?}");
+        assert!(hello.pos.x + hello.galley.rect.right() <= 390.0, "inside the screen: {:?}", hello.visual_bounding_rect());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn the_sheet_chosen_flies_to_the_desk_while_the_welcome_fades() {
         let dir = test_dir("start-flight");
         let mut h = started_without_a_file(&dir);

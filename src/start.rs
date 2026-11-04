@@ -553,15 +553,16 @@ impl App {
             let left = ui.max_rect().left() + (full - col) / 2.0;
             ui.add_space((area.height() * 0.07).clamp(24.0, 64.0) - 16.0);
 
-            // Who we are, and good day.
-            let name = galley(ui, "Caprice", FontId::new(46.0, serif.clone()), pal().text, col, 1, false);
+            // Who we are, and good day, beside the emblem: on a phone the greeting takes a second line.
+            let side: f32 = 84.0;
+            let beside = col - side - 28.0;
+            let name = galley(ui, "Caprice", FontId::new(46.0, serif.clone()), pal().text, beside, 1, false);
             let mut hello = greeting(now).to_owned();
             if words_today > 0 {
                 hello = format!("{hello}  {} words written today.", crate::words::grouped(words_today as usize));
             }
-            let hello = galley(ui, hello, FontId::proportional(16.0), pal().text_dim, col, 1, false);
+            let hello = galley(ui, hello, FontId::proportional(16.0), pal().text_dim, beside, 2, false);
             // The emblem, then the name and the greeting beside it, centred on it.
-            let side: f32 = 84.0;
             let text_h = name.size().y + hello.size().y + 6.0;
             let room = side * crate::emblem::HEADROOM;
             let (r, _) = ui.allocate_exact_size(vec2(full, room + side.max(text_h)), Sense::hover());
