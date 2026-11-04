@@ -425,14 +425,18 @@ fn folder_name(path: &Path) -> String {
     }
 }
 
-/// "Good morning" and so on, by the writer's clock.
-fn greeting(now: u64) -> &'static str {
+/// "Good morning" and so on, by the writer's clock; to them by their first name once signed in.
+fn greeting(now: u64, name: Option<&str>) -> String {
     let local = now as i64 + crate::words::offset();
-    match local.rem_euclid(86_400) / 3600 {
-        5..=11 => "Good morning.",
-        12..=17 => "Good afternoon.",
-        18..=22 => "Good evening.",
-        _ => "Writing late?",
+    let (hello, end) = match local.rem_euclid(86_400) / 3600 {
+        5..=11 => ("Good morning", "."),
+        12..=17 => ("Good afternoon", "."),
+        18..=22 => ("Good evening", "."),
+        _ => ("Writing late", "?"),
+    };
+    match name.and_then(|n| n.split_whitespace().next()) {
+        Some(first) => format!("{hello}, {first}{end}"),
+        None => format!("{hello}{end}"),
     }
 }
 
@@ -557,7 +561,7 @@ impl App {
             let side: f32 = 84.0;
             let beside = col - side - 28.0;
             let name = galley(ui, "Caprice", FontId::new(46.0, serif.clone()), pal().text, beside, 1, false);
-            let mut hello = greeting(now).to_owned();
+            let mut hello = greeting(now, self.cloud.who.as_ref().map(|w| w.name.as_str()));
             if words_today > 0 {
                 hello = format!("{hello}  {} words written today.", crate::words::grouped(words_today as usize));
             }

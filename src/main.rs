@@ -7004,6 +7004,30 @@ mod tests {
     }
 
     #[test]
+    fn signed_in_the_welcome_greets_the_writer_by_their_first_name() {
+        let dir = test_dir("online-greeting");
+        let mut h = started_without_a_file(&dir);
+        h.app.shelf.dir = Some(dir.clone());
+        let server = online(&mut h, &dir, false);
+        h.frames(3, vec![], Modifiers::NONE);
+        let hello = |h: &Harness| h.painted_texts().lines().find(|l| l.starts_with("Good ") || l.starts_with("Writing late")).map(str::to_owned);
+        let before = hello(&h).expect("the greeting is shown");
+        assert!(!before.contains(','), "signed out, no name: {before:?}");
+        assert!(h.painted_texts().contains("Sign in to keep your stories online"), "and signing in is offered");
+
+        // Back from Google's sign-in, the page starts again.
+        server.0.borrow_mut().signed_in = Some(("Ada Lovelace".into(), "ada".into()));
+        std::fs::write(dir.join("cloud.json"), r#"{"signing_in":true}"#).unwrap();
+        h.app.cloud = cloud::Cloud::with(Some(server.clone()), Some(dir.join("cloud.json")));
+        h.app.cloud.clock = Some(1000.0);
+        h.frames(12, vec![], Modifiers::NONE);
+        let after = hello(&h).expect("the greeting is shown");
+        assert!(after.contains(", Ada.") || after.contains(", Ada?"), "by the first name: {after:?}");
+        assert!(h.painted_texts().contains("Your stories are kept online too, as Ada Lovelace."), "{}", h.painted_texts());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn a_story_saved_goes_online_a_little_later() {
         let mut h = Harness::new();
         let dir = with_shelf(&mut h, "online-up");
@@ -7053,6 +7077,34 @@ mod tests {
         assert_eq!(h.text(), "Written on the train.");
         h.later(cloud::LOOK_EVERY + 1.0);
         assert_eq!(stories_online(&server).len(), 1, "and it is one story, not two");
+        std::fs::remove_dir_all(dir).unwrap();
+        std::fs::remove_dir_all(elsewhere).unwrap();
+    }
+
+    #[test]
+    fn in_a_new_browser_the_stories_from_online_are_on_the_welcome_page() {
+        let mut there = Harness::new();
+        let elsewhere = with_shelf(&mut there, "online-welcome-there");
+        let server = online(&mut there, &elsewhere, true);
+        there.frames(12, vec![], Modifiers::NONE);
+        there.type_text("Written on the train.");
+        there.save_on_shelf();
+        there.later(cloud::UP_AFTER + 1.0);
+        assert_eq!(stories_online(&server).len(), 1);
+
+        // Signed in in a new browser: nothing opened here yet, and the welcome page shows.
+        let dir = test_dir("online-welcome");
+        let mut h = started_without_a_file(&dir);
+        h.app.shelf.dir = Some(dir.clone());
+        std::fs::write(dir.join("cloud.json"), r#"{"signing_in":true}"#).unwrap();
+        h.app.cloud = cloud::Cloud::with(Some(server.clone()), Some(dir.join("cloud.json")));
+        h.app.cloud.clock = Some(5000.0);
+        h.frames(12, vec![], Modifiers::NONE);
+        assert!(h.painted_texts().contains("Written on the train"), "among the stories last opened: {}", h.painted_texts());
+        assert!(!h.painted_texts().contains("Stories you open or save will be here"));
+        h.click_widget("Written on the train");
+        h.frames((start::FLIGHT * 60.0) as usize + 2, vec![], Modifiers::NONE);
+        assert_eq!(h.text(), "Written on the train.", "and it opens from there");
         std::fs::remove_dir_all(dir).unwrap();
         std::fs::remove_dir_all(elsewhere).unwrap();
     }
