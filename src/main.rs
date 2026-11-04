@@ -7081,6 +7081,34 @@ mod tests {
         std::fs::remove_dir_all(elsewhere).unwrap();
     }
 
+    #[test]
+    fn in_a_new_browser_the_stories_from_online_are_on_the_welcome_page() {
+        let mut there = Harness::new();
+        let elsewhere = with_shelf(&mut there, "online-welcome-there");
+        let server = online(&mut there, &elsewhere, true);
+        there.frames(12, vec![], Modifiers::NONE);
+        there.type_text("Written on the train.");
+        there.save_on_shelf();
+        there.later(cloud::UP_AFTER + 1.0);
+        assert_eq!(stories_online(&server).len(), 1);
+
+        // Signed in in a new browser: nothing opened here yet, and the welcome page shows.
+        let dir = test_dir("online-welcome");
+        let mut h = started_without_a_file(&dir);
+        h.app.shelf.dir = Some(dir.clone());
+        std::fs::write(dir.join("cloud.json"), r#"{"signing_in":true}"#).unwrap();
+        h.app.cloud = cloud::Cloud::with(Some(server.clone()), Some(dir.join("cloud.json")));
+        h.app.cloud.clock = Some(5000.0);
+        h.frames(12, vec![], Modifiers::NONE);
+        assert!(h.painted_texts().contains("Written on the train"), "among the stories last opened: {}", h.painted_texts());
+        assert!(!h.painted_texts().contains("Stories you open or save will be here"));
+        h.click_widget("Written on the train");
+        h.frames((start::FLIGHT * 60.0) as usize + 2, vec![], Modifiers::NONE);
+        assert_eq!(h.text(), "Written on the train.", "and it opens from there");
+        std::fs::remove_dir_all(dir).unwrap();
+        std::fs::remove_dir_all(elsewhere).unwrap();
+    }
+
     /// Another browser changes the story online: its file, with `from` written as `to`.
     fn changed_elsewhere(server: &cloud::stand_in::StandIn, from: &str, to: &str) {
         let (key, name, bytes) = {

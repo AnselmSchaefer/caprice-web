@@ -639,6 +639,7 @@ impl App {
         let hash = fingerprint(&bytes);
         match task {
             Task::Download { key, to } => {
+                let new_here = to.is_none();
                 let path = to.unwrap_or_else(|| crate::platform::free_name(&dir, &format!("{}.caprice", crate::shelf::file_name(&name))));
                 let open = self.path.as_deref() == Some(path.as_path());
                 if open && self.unsaved() {
@@ -648,9 +649,14 @@ impl App {
                 }
                 let _ = fs::create_dir_all(&dir);
                 if fs::write(&path, &bytes).is_ok() {
-                    self.cloud.kept.stories.insert(key, Record { path, version, hash });
+                    self.cloud.kept.stories.insert(key, Record { path: path.clone(), version, hash });
                     self.cloud.keep();
                     self.cloud.reload |= open;
+                    // New to this browser: the welcome page offers it among the stories last opened.
+                    if new_here {
+                        self.start.remember(&path, self.keep.now());
+                        self.start.stories = None;
+                    }
                 }
             }
             Task::Compare { key, path } => {
@@ -673,6 +679,8 @@ impl App {
         if fs::write(&copy, bytes).is_err() {
             return;
         }
+        self.start.remember(&copy, self.keep.now());
+        self.start.stories = None;
         // Agreeing on the version online, but not on the words: the shelf's go up next.
         let record = Record { path: path.to_owned(), version: version.to_owned(), hash: 0 };
         self.cloud.kept.stories.insert(key.to_owned(), record);

@@ -1490,6 +1490,10 @@ In the app (`cloud.rs`) **the shelf is where a story is; online is a copy, and n
 - **A story online is named by its id and its file's name together** (`cloud::key`): "Save as"
   keeps the id, so two stories on a shelf may share one. The record keeps the path, so a story
   brought down under another name (`free_name`) keeps its name online.
+- **A story that comes down new to this browser is among the stories last opened**
+  (`Start::remember`, the welcome's list read again): a new browser is otherwise an empty welcome
+  page, and the writer thinks their stories are lost. So is a copy kept "from another browser".
+  The welcome greets whoever is signed in by their first name.
 - **Requests go through `cloud::Server`**: `platform::send` (the page's `fetch`) in the browser, a
   stand-in (`cloud::stand_in`) in tests; tests never reach a server, as they never reach printers.
 
@@ -1507,7 +1511,9 @@ keys), `in_the_browser_nothing_is_asked_of_the_server_until_the_writer_signs_in`
 `words_typed_and_not_yet_saved_are_never_written_over_by_a_story_from_online`,
 `a_limit_pauses_stories_online_and_they_go_up_once_it_lifts`,
 `signing_out_keeps_the_stories_in_this_browser_and_sends_nothing_more`,
-`deleting_the_stories_online_signs_out_and_leaves_them_here`; and in `web/smoke.mjs`, that nothing
+`deleting_the_stories_online_signs_out_and_leaves_them_here`,
+`in_a_new_browser_the_stories_from_online_are_on_the_welcome_page`,
+`signed_in_the_welcome_greets_the_writer_by_their_first_name`; and in `web/smoke.mjs`, that nothing
 is asked signed out, and the app's header on what is.
 
 ---
