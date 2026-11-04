@@ -470,6 +470,7 @@ enum Chosen {
     Begin(Kind, Rect),
     Browse,
     Story(PathBuf, Rect),
+    SignIn,
 }
 
 impl App {
@@ -520,6 +521,7 @@ impl App {
                 self.start.flight = Some(Flight { from: Some((rect, kind.sheet())), at: now });
             }
             Some(Chosen::Browse) => self.open(&ctx),
+            Some(Chosen::SignIn) => self.sign_in("google"),
             Some(Chosen::Story(path, rect)) => {
                 // A story that cannot be read says so and leaves the page up to choose another.
                 self.open_path(&ctx, path.clone());
@@ -578,6 +580,24 @@ impl App {
             ui.painter().galley(pos2(x + 2.0, below), hello, pal().text_dim);
             ui.add_space(34.0);
 
+            // Signing in, where it is seen first, on the button people know from other sites (R33).
+            if self.cloud.server.is_some() && self.shelf.dir.is_some() && self.cloud.who.is_none() {
+                let say = "Keep your stories online, to find them in any browser. Only your name is asked for.";
+                let narrow = col < 560.0;
+                let width = if narrow { col } else { col - 240.0 };
+                let g = galley(ui, say, FontId::proportional(14.0), pal().text_dim, width, 2, false);
+                let h = if narrow { 40.0 + 10.0 + g.size().y } else { 40.0f32.max(g.size().y) };
+                let (r, _) = ui.allocate_exact_size(vec2(full, h), Sense::hover());
+                let at = Rect::from_min_size(pos2(left, r.top()), vec2(220.0, 40.0));
+                let button = ui.scope_builder(UiBuilder::new().max_rect(at), crate::cloud::google_button).inner;
+                let text_at = if narrow { pos2(left, r.top() + 50.0) } else { pos2(button.rect.right() + 20.0, r.center().y - g.size().y / 2.0) };
+                ui.painter().galley(text_at, g, pal().text_dim);
+                if button.on_hover_text("Find your stories in any browser").clicked() && live && !waiting {
+                    chosen = Some(Chosen::SignIn);
+                }
+                ui.add_space(30.0);
+            }
+
             // Something new.
             heading(ui, left, full, "Begin something new");
             let per_row = if col < 560.0 { 2 } else { 4 };
@@ -630,15 +650,14 @@ impl App {
                 }
                 ui.add_space(10.0 - ui.spacing().item_spacing.y);
             }
-            // Stories online, offered once and quietly (R33).
-            if self.cloud.server.is_some() && self.shelf.dir.is_some() {
+            // Signed in: said once and quietly, and the way to the Stories online window (R33).
+            if self.cloud.server.is_some() && self.shelf.dir.is_some()
+                && let Some(who) = &self.cloud.who
+            {
                 ui.add_space(14.0);
                 let (r, _) = ui.allocate_exact_size(vec2(full, 26.0), Sense::hover());
                 let at = Rect::from_min_size(pos2(left, r.top()), vec2(col, 26.0));
-                let say = match &self.cloud.who {
-                    Some(who) => format!("Your stories are kept online too, as {}.", who.name),
-                    None => "Sign in to keep your stories online\u{2026}".into(),
-                };
+                let say = format!("Your stories are kept online too, as {}.", who.name);
                 let line = ui.put(at, egui::Button::new(egui::RichText::new(say).color(pal().text_dim)).frame(false));
                 if line.on_hover_text("Find your stories in any browser").clicked() && live {
                     self.cloud.open = true;

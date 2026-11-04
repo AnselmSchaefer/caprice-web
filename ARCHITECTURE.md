@@ -1081,6 +1081,9 @@ same in every theme, so what is printed (R20) and exported (R10) never depends o
 - **`Themes::show` runs at the start of each frame** and is the only place the palette changes
   (`apply_palette`): a new theme fades in over `FADE`, egui's own visuals with it (light or dark
   widgets switch halfway).
+- **Google's sign-in button keeps Google's colours** (`cloud::google_button`: white, grey edge, the
+  four-coloured G), in every theme, as Google asks and as people know it; like the pictures, it
+  is a deliberate exception to `pal()`.
 - **Light themes must stay readable**: `text` on `dock` at 4.5:1, `text_dim` at 3:1. A new theme
   goes into `Theme::ALL`, so the gallery and the test cover it.
 - The choice is kept in the data folder (`theme.json`), not in the story; `Harness` keeps it
@@ -1313,7 +1316,9 @@ them; it asks `platform` instead, whose desktop half does what Caprice always di
   - with a shelf (`App::shelf.dir`: always in the browser, never on the desktop), saving and
     opening a story ask in Caprice's own windows (`shelf.rs`): a name, and the story becomes
     `<shelf>/<name>.caprice`; or a story from the shelf's list, or one uploaded onto it. With a
-  shelf the File menu also has New (R22). So a
+  shelf the File menu also has New (R22). The shelf's window (`shelf_window`) is drawn wherever
+  its question can be asked, the welcome page too ("Open another…", Ctrl+O): a question asked
+  where no window shows it waits unseen, and the button seems dead. So a
     story in the browser has a path like any other, and autosave (R22) and the stories last
     opened (R27; the welcome says "In this browser") work unchanged;
   - in the browser, a file to read (a picture) comes from the page's picker into `/uploads`,
@@ -1354,7 +1359,8 @@ natively). `the_browser_s_files_are_read_back_as_written_and_folders_hold_what_i
 `a_folder_of_the_browser_s_files_is_gone_with_its_last_file` test `fs::Memory`;
 `in_the_browser_saving_asks_for_a_name_and_the_story_is_kept_under_it`,
 `in_the_browser_opening_lists_the_stories_kept_and_opens_the_one_chosen` and
-`in_the_browser_escape_saves_nothing` test the shelf, given a folder as the browser has. The browser build
+`in_the_browser_escape_saves_nothing` and
+`in_the_browser_open_another_on_the_welcome_page_shows_the_stories_kept_here` test the shelf, given a folder as the browser has. The browser build
 is checked by `web/build.sh`, and running it by `web/smoke.mjs` (headless Chromium: the welcome, a
 blank story, typing, a picture uploaded, the PDF downloaded and opened to print, a version kept in IndexedDB
 and listed again after a reload, a story saved by name, downloaded as `.caprice` and Word,
@@ -1493,7 +1499,9 @@ In the app (`cloud.rs`) **the shelf is where a story is; online is a copy, and n
 - **A story that comes down new to this browser is among the stories last opened**
   (`Start::remember`, the welcome's list read again): a new browser is otherwise an empty welcome
   page, and the writer thinks their stories are lost. So is a copy kept "from another browser".
-  The welcome greets whoever is signed in by their first name.
+  The welcome greets whoever is signed in by their first name. Signed out, it offers Google's
+  button under the greeting, which goes straight to Google (`App::sign_in`, saving first, as the
+  window's does) and asks the server nothing on the way.
 - **Requests go through `cloud::Server`**: `platform::send` (the page's `fetch`) in the browser, a
   stand-in (`cloud::stand_in`) in tests; tests never reach a server, as they never reach printers.
 
@@ -1513,7 +1521,8 @@ keys), `in_the_browser_nothing_is_asked_of_the_server_until_the_writer_signs_in`
 `signing_out_keeps_the_stories_in_this_browser_and_sends_nothing_more`,
 `deleting_the_stories_online_signs_out_and_leaves_them_here`,
 `in_a_new_browser_the_stories_from_online_are_on_the_welcome_page`,
-`signed_in_the_welcome_greets_the_writer_by_their_first_name`; and in `web/smoke.mjs`, that nothing
+`signed_in_the_welcome_greets_the_writer_by_their_first_name`,
+`the_welcome_s_google_button_goes_straight_to_google_s_sign_in`; and in `web/smoke.mjs`, that nothing
 is asked signed out, and the app's header on what is.
 
 ---
