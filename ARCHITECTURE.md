@@ -99,6 +99,8 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `platform/fs.rs` | Files: the system's on the desktop; in the browser, kept in memory by path and mirrored to IndexedDB (R31) |
 | `platform/worker.rs` | In the browser, a Web Worker for each piece of background work, started from `web/worker.js` with nothing evaluated (R31) |
 | `shelf.rs` | Stories kept in the browser: saving asks for a name, opening lists them (with an upload), each answering the waiting file dialog with a path (R31) |
+| `web/api/worker.js` | The Worker's own requests, `/api/*` only: signing in with Google or GitHub, the session cookie, stories online in R2 (R33) |
+| `web/api/ledger.js` | The Durable Object `Ledger`: who has signed up, the current version and history of each story online, every limit (R33) |
 
 ---
 
@@ -1438,6 +1440,45 @@ whole page, centred, as always.
 
 ---
 
+### R33 — Stories online: who comes only from the session, and nothing reaches R2 the limits forbid
+
+Signing in and keeping stories online are the Worker's (`web/api/worker.js`); every other path is
+a static file, served without it (`run_worker_first: ["/api/*"]`). Plan and reasons: `CLOUD_PLAN.md`.
+
+- **Who is asking comes only from the session cookie**, an HMAC of what it holds with the Worker
+  secret `SESSION_SECRET`; without a long enough secret nothing is signed or trusted (500, never a
+  guess). A user is `sha256("<provider>:<their id>")`, cut to 32 hex: the provider's id is not kept.
+- **Where a story is comes only from that user and the story's id**, which must match
+  `^[0-9a-z-]{1,64}$`: `ledger::key` is the only place an R2 key is made. Anything new kept in R2
+  is keyed under `users/<user>/` the same way, and listed and deleted with the user's stories.
+- **Only the app may ask:** every story request has `X-Caprice: 1`, every change an `Origin` equal
+  to our own; no CORS headers, ever. Sign-in's `state` and PKCE verifier are in a signed cookie
+  that lasts ten minutes. Sign-in asks for the public profile only, never the email.
+- **The Ledger says yes before R2 is touched.** R2 bills past its free amounts; Workers and
+  Durable Objects on the free plan stop instead. So every write and read of R2 is first allowed by
+  the Ledger (`begin` before `put`, then `commit`; `current` before `get`), which counts it
+  against the limits in `wrangler.jsonc` (`vars`). A new kind of R2 request needs its own count
+  there. Deleting is free and is never refused. The Ledger is one object for the whole site, so
+  its counts and the current versions are consistent; it keeps no story's text.
+- **No copy is overwritten unseen:** a save names the version it replaces (`If-Match`) or says it
+  is new (`If-None-Match: *`); otherwise 412 or 428. Every save is a new object; the Ledger keeps
+  the version before and older ones `HISTORY_APART_HOURS` apart, `HISTORY` in all, and hands the
+  Worker the rest to delete. A writer short of room loses their oldest history first.
+- **Only real stories are kept**: a body must begin like a `.caprice` file (`{` then `"version"`),
+  and no story is readable by anyone but its owner (no sharing links).
+- **The tests run in the Workers runtime** (Miniflare, with the date in `wrangler.jsonc`), signing
+  in against stand-in providers; each limit refuses, and the ones on the bill leave R2 alone.
+
+Tests (`node --test web/api`, in `web/api/api.test.mjs`): "without a session, or with a forged one,
+nothing is answered", "one writer cannot reach another's stories", "ids that could reach elsewhere
+are refused", "requests from another site are refused", "a sign-in not started here is refused",
+"a save must say which copy it replaces, and a stale one is refused", "the site's writes for the
+day pause everyone, and leave r2 alone", "the site's room is shared by everyone", "a writer's room
+drops their oldest history first, then refuses", "only caprice stories, within the size limit, are
+kept", "the off switch stops stories online at once".
+
+---
+
 ## 5. Checklists for common changes
 
 **Something new in the background** (a rendering, a request): `platform::spawn` with owned data in,
@@ -1503,6 +1544,10 @@ from `theme::pal()` (R29).
 **A new hidden gem** (`eggs.rs`): only in its magic theme; on the desk before the pages, or over
 the settled page after them; a pose as a function of time that tests can look at, ending at once
 when the writer goes on; nothing moved in the layout, nothing in print or the file (R30).
+
+**Something new the Worker keeps online** (a file, a setting): keyed with `ledger::key` under the
+user, its R2 reads and writes counted by the Ledger first, deleted with the user's stories, and a
+test that its limit refuses and leaves R2 alone (R33). Then `node --test web/api`.
 
 **Something new pinned to the text** (like notes and scenes): move it in `apply_raw` and in
 `into_doc` (R7), save it (R9), decide its Word mapping (R10).
@@ -1662,5 +1707,12 @@ when the writer goes on; nothing moved in the layout, nothing in print or the fi
   swipe to the page before or after. A finger dragged over the text used to select, as a mouse
   does; now a swipe turns a page or moves the page, and a selection begins with the finger held
   still, as on phones. A mouse still selects by dragging (R32).
+- **2026-11-04 — Stories online: open sign-up, Google and GitHub, R2.** Asked for: signing in and
+  keeping `.caprice` files online, safe and cheap, with no invite list. Cloudflare Access was the
+  first choice, but its free plan stops new sign-ups at 50 users; Supabase, Firebase, Clerk and
+  Auth0 run scripts from other origins (against the CSP) and hold the stories elsewhere. So the
+  Worker signs in with Google and GitHub itself (redirects only), keeps files in R2 and every
+  count in one Durable Object, with limits that keep R2 inside its free amounts. The browser
+  stays where a story is written; online is a copy (R33).
 - **No `.docx` import.** Export only.
 - **Contents heading is "Contents"** (English), in the app and in Word.
