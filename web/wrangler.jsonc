@@ -1,10 +1,38 @@
-// The Cloudflare Worker that serves Caprice Web: static files only, from web/dist (built by
-// web/build.sh). Deployed by hand: `npx wrangler deploy`, here in web/. See DEPLOY_PLAN.md.
+// The Cloudflare Worker that serves Caprice Web: static files from web/dist (built by
+// web/build.sh), and its own code for /api/* only (api/worker.js: signing in, stories online).
+// Deployed by hand: `npx wrangler deploy`, here in web/. See DEPLOY_PLAN.md and CLOUD_PLAN.md.
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "caprice-web",
-  "compatibility_date": "2026-10-31",
+  "main": "./api/worker.js",
+  "compatibility_date": "2026-10-30",
   "assets": {
-    "directory": "./dist"
+    "directory": "./dist",
+    // Every other path is a static file, served free without running the Worker.
+    "run_worker_first": ["/api/*"]
+  },
+  // The stories: private, reached only through the Worker.
+  "r2_buckets": [{ "binding": "STORIES", "bucket_name": "caprice-stories" }],
+  // Who has signed up, which version of each story is current, and every limit (api/ledger.js).
+  "durable_objects": { "bindings": [{ "name": "LEDGER", "class_name": "Ledger" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Ledger"] }],
+  // Variables set in the dashboard stay across deploys: SYNC_OFF = "1" switches stories online off.
+  "keep_vars": true,
+  "vars": {
+    // Not secrets: they are in the sign-in links. The secrets are `wrangler secret put`:
+    // SESSION_SECRET, GOOGLE_CLIENT_SECRET, GITHUB_CLIENT_SECRET. Empty: that sign-in is off.
+    "GOOGLE_CLIENT_ID": "622424153224-01gec9o2ustpp7gfmdkv27psoosjb941.apps.googleusercontent.com",
+    "GITHUB_CLIENT_ID": "",
+    // They keep R2 inside its free amounts (10 GB, a million writes, ten million reads a month).
+    "SITE_WRITES_PER_DAY": "20000",
+    "SITE_READS_PER_DAY": "250000",
+    "SITE_BYTES": "8000000000",
+    "SITE_ACCOUNTS_PER_DAY": "200",
+    "USER_WRITES_PER_MINUTE": "10",
+    "USER_WRITES_PER_DAY": "500",
+    "USER_BYTES": "100000000",
+    "FILE_BYTES": "25000000",
+    "HISTORY": "3",
+    "HISTORY_APART_HOURS": "6"
   }
 }

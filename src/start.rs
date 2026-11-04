@@ -626,6 +626,20 @@ impl App {
                 }
                 ui.add_space(10.0 - ui.spacing().item_spacing.y);
             }
+            // Stories online, offered once and quietly (R33).
+            if self.cloud.server.is_some() && self.shelf.dir.is_some() {
+                ui.add_space(14.0);
+                let (r, _) = ui.allocate_exact_size(vec2(full, 26.0), Sense::hover());
+                let at = Rect::from_min_size(pos2(left, r.top()), vec2(col, 26.0));
+                let say = match &self.cloud.who {
+                    Some(who) => format!("Your stories are kept online too, as {}.", who.name),
+                    None => "Sign in to keep your stories online\u{2026}".into(),
+                };
+                let line = ui.put(at, egui::Button::new(egui::RichText::new(say).color(pal().text_dim)).frame(false));
+                if line.on_hover_text("Find your stories in any browser").clicked() && live {
+                    self.cloud.open = true;
+                }
+            }
             ui.add_space(40.0);
         });
         chosen

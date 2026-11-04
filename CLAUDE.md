@@ -22,6 +22,8 @@ behaviour**: its rules (§4) say what depends on what, and which tests guard eac
   static files from `web/dist`, headers from `web/_headers`; see `DEPLOY_PLAN.md`). Live at
   https://caprice-web.caprice-web-checks.workers.dev; check it with
   `CAPRICE_URL=<that address> node web/smoke.mjs <dir>`. Never deploy without being asked.
+- Stories API (`web/api`, R33): `cd web && node --test api/api.test.mjs` (Miniflare: the Workers runtime, R2 and
+  the Durable Object in memory; about 16 s). Its limits are `vars` in `web/wrangler.jsonc`.
 - `cargo mutants` for untested code. `/tmp` is a small tmpfs here: set `TMPDIR` to a dir on disk.
 - Word output check: `CAPRICE_SAMPLE_OUT=out.docx cargo test sample_docx`, then
   `soffice --headless --convert-to pdf out.docx`
@@ -31,6 +33,7 @@ behaviour**: its rules (§4) say what depends on what, and which tests guard eac
 
 - `cargo test` passes, and clippy has no warnings beyond the ones already there (15 today).
 - `web/build.sh` builds, and `web/smoke.mjs` passes (it exits 1 on any failed check or page error).
+- `node --test web/api/api.test.mjs` passes when `web/api` or `web/wrangler.jsonc` changed.
 - CI (`.github/workflows/ci.yml`) runs all of these on every push, plus `cargo deny check`
   (`deny.toml`: vulnerabilities, licences, sources). A new advisory is looked at, not ignored
   blindly: fix it, or name it in `deny.toml` with the reason it does not reach Caprice.
@@ -109,7 +112,8 @@ Full list with reasons and tests in `ARCHITECTURE.md` §4.
     `platform::spawn` with a `platform::Waker`, never a `Context` or a lock shared with the frame;
     files are `platform::fs` (IndexedDB in the browser); file dialogs are a `platform::Dialog` to
     `ask_path` (in the browser: the shelf, the page's picker, or a download); the time is
-    `platform::since_epoch`. What must happen while the page is hidden goes in `App::logic`.
+    `platform::since_epoch`; requests to Caprice's own server are `platform::send`, through
+    `cloud::Server` (a stand-in in tests). What must happen while the page is hidden goes in `App::logic`.
     `clippy.toml` flags the `std` calls that panic or fail in the browser. The browser's
     Content-Security-Policy forbids evaluating code: no library may (`web/csp.mjs`).
 
