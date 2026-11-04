@@ -3,6 +3,7 @@ mod bands;
 mod book;
 mod cast;
 mod claude;
+mod cloud;
 mod contents;
 mod dropcap;
 mod edit;
@@ -268,6 +269,8 @@ pub struct App {
     pub dialog: Option<fileio::PendingDialog>,
     /// The stories kept in the browser, which saving and opening ask about there.
     pub shelf: shelf::Shelf,
+    /// The stories on the shelf kept online too, once signed in (`cloud.rs`, R33).
+    pub cloud: cloud::Cloud,
     /// The Print window and what it has chosen.
     pub print: print::Print,
     /// Which story this is, to keep its versions together (`versions.rs`).
@@ -386,6 +389,7 @@ impl App {
             cast_panel: cast::CastPanel::default(),
             dialog: None,
             shelf: shelf::Shelf::new(),
+            cloud: cloud::Cloud::new(),
             print: print::Print::new(),
             story_id: versions::new_id(),
             keep: versions::Keeper::new(),
@@ -610,6 +614,7 @@ impl App {
     fn logic(&mut self) {
         self.page_hidden(platform::page_hidden());
         platform::warn_on_leaving(self.keep.has_changes());
+        self.tend_cloud();
     }
 
     /// One frame of the whole app (separate from `eframe::App::ui` so tests can drive it).
@@ -629,6 +634,7 @@ impl App {
             self.open_path(&ctx, path);
         }
         self.poll_dialog(&ctx);
+        self.cloud_frame(&ctx);
         self.guard_close(&ctx);
         self.ensure_textures(&ctx);
         // Opened without a file, the welcome page stands in for the desk until a story is chosen.
@@ -637,6 +643,7 @@ impl App {
                 self.open(&ctx);
             }
             self.welcome(ui);
+            self.cloud_window(&ctx);
             self.update_title_and_toast(ui, area);
             return;
         }
@@ -780,6 +787,7 @@ impl App {
         self.print_window(&ctx);
         self.versions_window(&ctx);
         self.shelf_window(&ctx);
+        self.cloud_window(&ctx);
         self.info_window(&ctx);
         self.keep_safe(&ctx);
         self.track_words(&ctx);
@@ -6924,6 +6932,268 @@ mod tests {
         h.file_new();
         assert!(h.app.leaving.is_none(), "nothing to save, nothing asked");
         assert!(h.app.story_id != blank && h.text().is_empty(), "a new blank story at once");
+    }
+
+    /// The browser's shelf and Caprice's server, a stand-in for it: `cloud.json` beside the
+    /// stories, a clock the test moves, and (when `signed_in`) back from signing in as Ada.
+    fn online(h: &mut Harness, dir: &std::path::Path, signed_in: bool) -> std::rc::Rc<cloud::stand_in::StandIn> {
+        let server = std::rc::Rc::new(cloud::stand_in::StandIn::default());
+        server.0.borrow_mut().providers = vec!["google".into()];
+        if signed_in {
+            server.0.borrow_mut().signed_in = Some(("Ada".into(), "ada".into()));
+            std::fs::create_dir_all(dir).unwrap();
+            std::fs::write(dir.join("cloud.json"), r#"{"signing_in":true}"#).unwrap();
+        }
+        h.app.cloud = cloud::Cloud::with(Some(server.clone()), Some(dir.join("cloud.json")));
+        h.app.cloud.clock = Some(1000.0);
+        server
+    }
+
+    impl Harness {
+        /// Time goes by for the stories online, and the app runs some frames meanwhile.
+        fn later(&mut self, secs: f64) {
+            self.app.cloud.clock = self.app.cloud.clock.map(|t| t + secs);
+            self.frames(12, vec![], Modifiers::NONE);
+        }
+
+        /// Save a new story on the shelf under the name it suggests.
+        fn save_on_shelf(&mut self) {
+            self.key(Key::S, Modifiers::COMMAND);
+            self.key(Key::Enter, Modifiers::NONE);
+        }
+    }
+
+    /// What is online, as (name, file) for each story.
+    fn stories_online(server: &cloud::stand_in::StandIn) -> Vec<(String, String)> {
+        server.0.borrow().stories.values().map(|(name, _, bytes)| (name.clone(), String::from_utf8_lossy(bytes).into_owned())).collect()
+    }
+
+    #[test]
+    fn in_the_browser_nothing_is_asked_of_the_server_until_the_writer_signs_in() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "online-quiet");
+        let server = online(&mut h, &dir, false);
+        h.app.keep.autosave = true;
+        h.frames(3, vec![], Modifiers::NONE);
+        h.type_text("It was a dark night.");
+        h.save_on_shelf();
+        h.later(cloud::LOOK_EVERY + 1.0);
+        assert!(server.0.borrow().asked.is_empty(), "signed out, nothing is sent: {:?}", server.0.borrow().asked);
+
+        h.click_widget("File");
+        h.click_widget("Stories online\u{2026} ");
+        assert!(h.labels().contains("Sign in with Google"), "the sign-ins the server has are offered");
+        h.type_text(" Unsaved words.");
+        h.click_widget("Sign in with Google");
+        assert_eq!(server.0.borrow().went_to, ["/api/login/google"], "the page goes to Google's sign-in");
+        assert!(!h.app.unsaved(), "the story was saved before the page went");
+
+        // Back from Google: the page starts again, and finds Ada signed in.
+        server.0.borrow_mut().signed_in = Some(("Ada".into(), "ada".into()));
+        let mut back = Harness::new();
+        back.app.shelf.dir = Some(dir.clone());
+        back.app.cloud = cloud::Cloud::with(Some(server.clone()), Some(dir.join("cloud.json")));
+        back.app.cloud.clock = Some(2000.0);
+        back.frames(12, vec![], Modifiers::NONE);
+        assert_eq!(back.app.cloud.who.as_ref().map(|w| w.name.as_str()), Some("Ada"));
+        let online = stories_online(&server);
+        assert_eq!(online.len(), 1, "the story on the shelf went up");
+        assert_eq!(online[0].0, "It was a dark night");
+        assert!(online[0].1.contains("It was a dark night. Unsaved words."), "as saved");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_story_saved_goes_online_a_little_later() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "online-up");
+        let server = online(&mut h, &dir, true);
+        h.frames(12, vec![], Modifiers::NONE);
+        h.type_text("The sea was calm.");
+        h.save_on_shelf();
+        h.frames(12, vec![], Modifiers::NONE);
+        assert!(stories_online(&server).is_empty(), "not at once: the writer often saves again");
+        h.later(cloud::UP_AFTER + 1.0);
+        assert!(stories_online(&server)[0].1.contains("The sea was calm."));
+
+        h.type_text(" Then the wind came.");
+        h.key(Key::S, Modifiers::COMMAND);
+        h.later(cloud::UP_AFTER + 1.0);
+        let online = stories_online(&server);
+        assert_eq!(online.len(), 1, "the same story, newer");
+        assert!(online[0].1.contains("Then the wind came."));
+        h.key(Key::O, Modifiers::COMMAND);
+        assert!(h.labels().contains("online"), "the shelf says it is online");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_story_newer_online_comes_down_onto_the_shelf_and_opens() {
+        // Written in another browser.
+        let mut there = Harness::new();
+        let elsewhere = with_shelf(&mut there, "online-there");
+        let server = online(&mut there, &elsewhere, true);
+        there.frames(12, vec![], Modifiers::NONE);
+        there.type_text("Written on the train.");
+        there.save_on_shelf();
+        there.later(cloud::UP_AFTER + 1.0);
+        assert_eq!(stories_online(&server).len(), 1);
+
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "online-down");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("cloud.json"), r#"{"signing_in":true}"#).unwrap();
+        h.app.cloud = cloud::Cloud::with(Some(server.clone()), Some(dir.join("cloud.json")));
+        h.app.cloud.clock = Some(5000.0);
+        h.frames(12, vec![], Modifiers::NONE);
+        assert!(dir.join("Written on the train.caprice").exists(), "it came down onto this shelf");
+        h.key(Key::O, Modifiers::COMMAND);
+        h.click_widget("Written on the train");
+        h.frames(3, vec![], Modifiers::NONE);
+        assert_eq!(h.text(), "Written on the train.");
+        h.later(cloud::LOOK_EVERY + 1.0);
+        assert_eq!(stories_online(&server).len(), 1, "and it is one story, not two");
+        std::fs::remove_dir_all(dir).unwrap();
+        std::fs::remove_dir_all(elsewhere).unwrap();
+    }
+
+    /// Another browser changes the story online: its file, with `from` written as `to`.
+    fn changed_elsewhere(server: &cloud::stand_in::StandIn, from: &str, to: &str) {
+        let (key, name, bytes) = {
+            let o = server.0.borrow();
+            let (key, (name, _, bytes)) = o.stories.iter().next().unwrap();
+            (key.clone(), name.clone(), String::from_utf8_lossy(bytes).replace(from, to))
+        };
+        server.put(&key, &name, bytes.as_bytes());
+    }
+
+    #[test]
+    fn the_open_story_changed_in_another_browser_is_shown_as_it_is_there() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "online-reload");
+        let server = online(&mut h, &dir, true);
+        h.frames(12, vec![], Modifiers::NONE);
+        h.type_text("First words.");
+        h.save_on_shelf();
+        h.later(cloud::UP_AFTER + 1.0);
+        changed_elsewhere(&server, "First words.", "First words, and more from the train.");
+        h.later(cloud::LOOK_EVERY + 1.0);
+        assert_eq!(h.text(), "First words, and more from the train.", "the open story shows it");
+        assert!(!h.app.unsaved(), "as saved");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().filter(|e| e.as_ref().unwrap().path().extension().is_some_and(|x| x == "caprice")).count(), 1);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_story_changed_here_and_in_another_browser_is_kept_twice_and_loses_no_word() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "online-both");
+        let server = online(&mut h, &dir, true);
+        h.frames(12, vec![], Modifiers::NONE);
+        h.type_text("First words.");
+        h.save_on_shelf();
+        h.later(cloud::UP_AFTER + 1.0);
+        changed_elsewhere(&server, "First words.", "First words, and more from the train.");
+        h.type_text(" Written here.");
+        h.key(Key::S, Modifiers::COMMAND);
+        h.later(cloud::UP_AFTER + 1.0);
+        h.later(1.0);
+        assert_eq!(h.text(), "First words. Written here.", "the open story keeps what was written here");
+        let copy = std::fs::read_to_string(dir.join("First words (from another browser).caprice")).unwrap();
+        assert!(copy.contains("more from the train"), "the other browser's words are kept beside it");
+        let mut online: Vec<String> = stories_online(&server).into_iter().map(|(name, _)| name).collect();
+        online.sort();
+        assert_eq!(online, ["First words", "First words (from another browser)"], "both are online");
+        assert!(stories_online(&server).iter().any(|(_, f)| f.contains("Written here.")));
+        h.app.cloud.open = true;
+        assert!(h.labels().contains("both are kept"), "and the writer is told");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn words_typed_and_not_yet_saved_are_never_written_over_by_a_story_from_online() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "online-unsaved");
+        let server = online(&mut h, &dir, true);
+        h.frames(12, vec![], Modifiers::NONE);
+        h.type_text("First words.");
+        h.save_on_shelf();
+        h.later(cloud::UP_AFTER + 1.0);
+        changed_elsewhere(&server, "First words.", "First words, and more from the train.");
+        h.type_text(" Not saved yet.");
+        h.later(cloud::LOOK_EVERY + 1.0);
+        assert_eq!(h.text(), "First words. Not saved yet.", "the page keeps what was typed");
+        assert!(h.app.unsaved());
+        let copy = std::fs::read_to_string(dir.join("First words (from another browser).caprice")).unwrap();
+        assert!(copy.contains("more from the train"), "the words from online are kept beside it");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_limit_pauses_stories_online_and_they_go_up_once_it_lifts() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "online-limit");
+        let server = online(&mut h, &dir, true);
+        h.frames(12, vec![], Modifiers::NONE);
+        server.0.borrow_mut().refuse = Some((503, 3600, "Stories online are paused until tomorrow.".into()));
+        h.type_text("Written on a busy day.");
+        h.save_on_shelf();
+        h.later(cloud::UP_AFTER + 1.0);
+        h.app.cloud.open = true;
+        assert!(h.labels().contains("Paused: Stories online are paused until tomorrow."));
+        server.0.borrow_mut().refuse = None;
+        let asked = server.0.borrow().asked.len();
+        h.later(600.0);
+        assert_eq!(server.0.borrow().asked.len(), asked, "nothing is sent before the server said");
+        h.later(3001.0);
+        assert!(stories_online(&server)[0].1.contains("Written on a busy day."), "then it goes up");
+        assert!(!h.labels().contains("Paused"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn signing_out_keeps_the_stories_in_this_browser_and_sends_nothing_more() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "online-out");
+        let server = online(&mut h, &dir, true);
+        h.frames(12, vec![], Modifiers::NONE);
+        h.type_text("Mine.");
+        h.save_on_shelf();
+        h.later(cloud::UP_AFTER + 1.0);
+        h.app.cloud.open = true;
+        h.frames(3, vec![], Modifiers::NONE);
+        h.click_widget("Sign out");
+        h.frames(6, vec![], Modifiers::NONE);
+        assert!(h.app.cloud.who.is_none() && server.0.borrow().signed_in.is_none());
+        assert!(dir.join("Mine.caprice").exists(), "the story stays here");
+        let asked = server.0.borrow().asked.len();
+        h.type_text(" More.");
+        h.key(Key::S, Modifiers::COMMAND);
+        h.later(cloud::LOOK_EVERY + 1.0);
+        assert_eq!(server.0.borrow().asked.len(), asked, "signed out, nothing more is sent");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn deleting_the_stories_online_signs_out_and_leaves_them_here() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "online-delete");
+        let server = online(&mut h, &dir, true);
+        h.frames(12, vec![], Modifiers::NONE);
+        h.type_text("Mine alone.");
+        h.save_on_shelf();
+        h.later(cloud::UP_AFTER + 1.0);
+        assert_eq!(stories_online(&server).len(), 1);
+        h.app.cloud.open = true;
+        h.frames(3, vec![], Modifiers::NONE);
+        h.click_widget("Delete my stories online\u{2026}");
+        h.click_widget("Delete them online");
+        h.frames(6, vec![], Modifiers::NONE);
+        assert!(stories_online(&server).is_empty(), "gone online");
+        assert!(h.app.cloud.who.is_none(), "and signed out, so they are not put back");
+        assert!(h.labels().contains("Your stories online are deleted"), "the writer is told");
+        assert!(dir.join("Mine alone.caprice").exists(), "still here");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

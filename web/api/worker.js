@@ -69,10 +69,13 @@ async function route(request, env) {
     if (method !== "POST") return text(405, "POST only");
     return new Response(null, { status: 204, headers: { "Set-Cookie": clear(SESSION) } });
   }
+  // The ways to sign in that are set up, so the app offers only those.
+  if (path === "/api/providers") return json(Object.keys(PROVIDERS).filter(p => PROVIDERS[p].id(env) && PROVIDERS[p].secret(env)));
 
   const session = await opened(request, SESSION, env);
   if (!session) return text(401, "Not signed in");
-  if (path === "/api/me") return json({ name: session.n, provider: session.p });
+  // The user's id is no secret of theirs (a hash), and tells the app when someone else signs in.
+  if (path === "/api/me") return json({ name: session.n, provider: session.p, user: session.u });
 
   if (env.SYNC_OFF === "1") return text(503, "Stories online are switched off for now", { "Retry-After": "3600" });
   const ledger = env.LEDGER.get(env.LEDGER.idFromName("ledger"));

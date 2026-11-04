@@ -23,6 +23,11 @@ function check(name, ok, seen = "") {
   if (!ok) failed.push(name);
 }
 page.on("worker", w => workers.push(w.url()));
+// Every request to Caprice's own server (R33), with the header that says it is the app asking.
+const asked = [];
+page.on("request", r => { if (new URL(r.url()).pathname.startsWith("/api/")) asked.push([r.method(), new URL(r.url()).pathname, r.headers()["x-caprice"]]); });
+// web/serve.mjs has no server behind /api: the page is told Google sign-in is there.
+await page.route("**/api/providers", r => r.fulfill({ status: 200, contentType: "application/json", body: '["google"]' }));
 
 // egui opens a menu on a press and a release in different frames, which an instant click is not.
 async function click(x, y) {
@@ -89,9 +94,9 @@ async function upload(file, ...clicks) {
 // The shelf's upload button, below a row for each story kept.
 const uploadButton = async () => [565, 190 + 38 * Math.max(0, (await stories()).length - 1)];
 // The File menu's items, a row each: New, Open, Save, Save as, Export, Print, Versions, Drop changes,
-// Document info, Download a copy.
+// Document info, Download a copy, Stories online.
 const FILE = [85, 38], NEW = [80, 75], OPEN = [93, 113], SAVE = [84, 151], EXPORT = [140, 227], PRINT = [90, 265];
-const VERSIONS = [100, 303], DOWNLOAD = [120, 417];
+const VERSIONS = [100, 303], DOWNLOAD = [120, 417], ONLINE = [110, 455];
 
 await page.goto(url);
 check("the page is cross-origin isolated, so the workers share memory", await page.evaluate(() => crossOriginIsolated));
@@ -248,6 +253,15 @@ await page.waitForTimeout(500);
 const copied = await page.evaluate(() => navigator.clipboard.readText());
 check("typing beyond ASCII and through an input method, and copying", copied.endsWith("Café, naïve, Größe, «Ελληνικά» 你好"));
 await page.waitForTimeout(6000);
+
+// Signed out, nothing was asked of the server; File → Stories online asks it how to sign in.
+check("signed out, nothing is asked of the server", asked.length === 0, asked.map(a => a.slice(0, 2).join(" ")).join(", "));
+await click(...FILE);
+await click(...ONLINE);
+await page.waitForTimeout(800);
+await page.screenshot({ path: `${out}/9-online.png` });
+const providers = asked.find(([m, p]) => m === "GET" && p === "/api/providers");
+check("Stories online asks how to sign in, as the app", providers?.[2] === "1", asked.map(a => a.join(" ")).join(", "));
 
 // File → New: the story has changes since it was saved by hand, so it asks about them first.
 await click(...FILE);

@@ -33,6 +33,8 @@ struct Kept {
     name: String,
     path: PathBuf,
     changed: Option<u64>,
+    /// Whether it is online too, while signed in (`cloud.rs`).
+    online: Option<&'static str>,
 }
 
 impl Shelf {
@@ -48,8 +50,8 @@ impl Shelf {
         self.asking = Some(Asking::Name { name, tx, focused: false });
     }
 
-    /// Ask which story to open. The path chosen, or None, goes to `tx`.
-    pub fn ask_open(&mut self, tx: Sender<Option<PathBuf>>) {
+    /// Ask which story to open, each with what `mark` says of it. The path chosen, or None, goes to `tx`.
+    pub fn ask_open(&mut self, tx: Sender<Option<PathBuf>>, mark: &dyn Fn(&std::path::Path) -> Option<&'static str>) {
         let Some(dir) = &self.dir else { return };
         let mut stories: Vec<Kept> = crate::platform::fs::read_dir(dir)
             .unwrap_or_default()
@@ -58,6 +60,7 @@ impl Shelf {
             .map(|path| Kept {
                 name: path.file_stem().map_or(String::new(), |s| s.to_string_lossy().into_owned()),
                 changed: crate::platform::fs::modified(&path),
+                online: mark(&path),
                 path,
             })
             .collect();
@@ -67,7 +70,7 @@ impl Shelf {
 }
 
 /// A name the writer typed, made fit for a file: no slashes, no space around it.
-fn file_name(name: &str) -> String {
+pub(crate) fn file_name(name: &str) -> String {
     let name: String = name.trim().chars().map(|c| if matches!(c, '/' | '\\') { '-' } else { c }).collect();
     if name.is_empty() { "Untitled".into() } else { name }
 }
@@ -127,6 +130,9 @@ impl App {
                                 }
                                 if let Some(at) = k.changed {
                                     ui.weak(crate::versions::ago(at, now));
+                                }
+                                if let Some(online) = k.online {
+                                    ui.weak(format!("\u{00b7} {online}"));
                                 }
                             });
                         }

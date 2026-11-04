@@ -111,6 +111,11 @@ impl Keeper {
         self.changed_since.is_some()
     }
 
+    /// Is the page out of sight, as last told (`App::page_hidden`)?
+    pub fn hidden(&self) -> bool {
+        self.hidden
+    }
+
     pub fn now(&self) -> u64 {
         self.clock.unwrap_or_else(|| crate::platform::since_epoch().as_secs())
     }

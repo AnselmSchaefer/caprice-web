@@ -467,6 +467,7 @@ impl App {
                 self.saved_hash = self.content_hash();
                 self.as_saved = serde_json::to_string(&self.doc_file()).ok().map(|j| (self.saved_hash, j));
                 self.saved_at = Some(self.keep.now());
+                self.cloud.saved();
                 "- saved".into()
             }
             Err(e) => format!("- save failed: {e}"),
@@ -528,7 +529,7 @@ impl App {
         let pick = matches!(purpose, DialogFor::Open | DialogFor::Picture);
         match purpose {
             DialogFor::Save if self.shelf.dir.is_some() => self.shelf.ask_name(dialog.name, tx),
-            DialogFor::Open if self.shelf.dir.is_some() => self.shelf.ask_open(tx),
+            DialogFor::Open if self.shelf.dir.is_some() => self.shelf.ask_open(tx, &|p| self.cloud.mark(p)),
             #[cfg(target_arch = "wasm32")]
             _ if pick => crate::platform::upload(&dialog, crate::platform::UPLOADS.into(), tx, crate::platform::Waker::new(ctx)),
             #[cfg(target_arch = "wasm32")]

@@ -101,7 +101,9 @@ test("signing in with google gives a session that names the writer", async t => 
   const api = await writer(mf, "1", "Ada");
   const me = await api("/api/me");
   assert.equal(me.status, 200);
-  assert.deepEqual(await me.json(), { name: "Ada", provider: "google" });
+  const { name, provider, user } = await me.json();
+  assert.deepEqual({ name, provider }, { name: "Ada", provider: "google" });
+  assert.match(user, /^[0-9a-f]{32}$/, "the user's id is a hash, not Google's own id");
 });
 
 test("signing in with github works the same", async t => {
@@ -109,7 +111,8 @@ test("signing in with github works the same", async t => {
   const { back, session } = await signIn(mf, "42", "Grace", "github");
   assert.equal(back.headers.get("Location"), "/");
   const me = await mf.dispatchFetch(`${SITE}/api/me`, { headers: { "X-Caprice": "1", Cookie: session } });
-  assert.deepEqual(await me.json(), { name: "Grace", provider: "github" });
+  const { name, provider } = await me.json();
+  assert.deepEqual({ name, provider }, { name: "Grace", provider: "github" });
 });
 
 test("the session cookie is out of reach of scripts and other sites", async t => {
@@ -143,6 +146,8 @@ test("a sign-in turned back at the provider goes home signed out", async t => {
 test("signing in with a provider that is not set up is not offered", async t => {
   const mf = await start(t, { GITHUB_CLIENT_ID: "" });
   assert.equal((await mf.dispatchFetch(`${SITE}/api/login/github`, { redirect: "manual" })).status, 404);
+  const offered = await mf.dispatchFetch(`${SITE}/api/providers`, { headers: { "X-Caprice": "1" } });
+  assert.deepEqual(await offered.json(), ["google"]);
 });
 
 test("without a session, or with a forged one, nothing is answered", async t => {

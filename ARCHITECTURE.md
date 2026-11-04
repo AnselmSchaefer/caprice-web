@@ -95,10 +95,11 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `fonts.rs` | Installed fonts loaded on demand, a missing one drawn with a twin of the same widths |
 | `theme.rs` | The themes (`Theme`, `Palette`): colours and egui visuals around the page, the palette in use (`pal`), fading from one to the next, the choice kept in the data folder; the page's own `PAPER` and `INK` |
 | `eggs.rs` | What is hidden in the magic themes: in the Magic Garden a plant a chapter growing on the desk and a balloon flying in each new chapter title; in the Magic City a street of houses a chapter, a floor a page, and a dragon flying a new title in held in its feet; in the Magic Sea a ship a chapter, built in a yard a part a page and launched into the bay when the next chapter begins |
-| `platform.rs` | What the desktop and the browser do differently: background work (`spawn`, `Waker`, `keep_awake`), the time and time zone, the run's id, the data folder, file dialogs (`Dialog`), uploads and downloads (R31) |
+| `platform.rs` | What the desktop and the browser do differently: background work (`spawn`, `Waker`, `keep_awake`), the time and time zone, the run's id, the data folder, file dialogs (`Dialog`), uploads and downloads, requests to Caprice's server (`send`, `go_to`) (R31, R33) |
 | `platform/fs.rs` | Files: the system's on the desktop; in the browser, kept in memory by path and mirrored to IndexedDB (R31) |
 | `platform/worker.rs` | In the browser, a Web Worker for each piece of background work, started from `web/worker.js` with nothing evaluated (R31) |
 | `shelf.rs` | Stories kept in the browser: saving asks for a name, opening lists them (with an upload), each answering the waiting file dialog with a path (R31) |
+| `cloud.rs` | Stories online: signing in and out, what to do with each story (`decide`), one request at a time, `cloud.json`, the Stories online window; a stand-in server for tests (R33) |
 | `web/api/worker.js` | The Worker's own requests, `/api/*` only: signing in with Google or GitHub, the session cookie, stories online in R2 (R33) |
 | `web/api/ledger.js` | The Durable Object `Ledger`: who has signed up, the current version and history of each story online, every limit (R33) |
 
@@ -1469,13 +1470,45 @@ a static file, served without it (`run_worker_first: ["/api/*"]`). Plan and reas
 - **The tests run in the Workers runtime** (Miniflare, with the date in `wrangler.jsonc`), signing
   in against stand-in providers; each limit refuses, and the ones on the bill leave R2 alone.
 
+In the app (`cloud.rs`) **the shelf is where a story is; online is a copy, and no words are lost.**
+
+- **Nothing is sent unless the writer signed in here**: at start the app asks `/api/me` only if
+  `cloud.json` says a sign-in was begun, or who was signed in. The session cookie is HttpOnly, so
+  the page cannot see it; `cloud.json` is how it knows to ask. Signing out forgets `cloud.json`.
+- **Saving never waits for the network.** `save_to` calls `Cloud::saved`, and the story goes up
+  `UP_AFTER` later; going out of sight or coming back looks at once; otherwise every `LOOK_EVERY`.
+- **What to do is `decide`**, from the shelf's file (its fingerprint, and whether it is the open
+  story with changes not saved), the record of when the two sides last agreed, and the version
+  online. Changed on both sides, or never agreed and different, the copy online is saved beside
+  the shelf's as "<name> (from another browser)"; the shelf's goes up over it. A story only on one
+  side goes to the other, even if it was deleted there. Something new that writes stories on the
+  shelf needs nothing more: a changed file is found by its fingerprint (`fingerprint`, stable in
+  every browser), not by being told.
+- **The open story is never written over** while it has changes not saved: the copy from online
+  goes beside it. Without such changes it is written and shown again (`Cloud::reload`), the caret
+  kept, its page shown with `go_to_page` (R5).
+- **A story online is named by its id and its file's name together** (`cloud::key`): "Save as"
+  keeps the id, so two stories on a shelf may share one. The record keeps the path, so a story
+  brought down under another name (`free_name`) keeps its name online.
+- **Requests go through `cloud::Server`**: `platform::send` (the page's `fetch`) in the browser, a
+  stand-in (`cloud::stand_in`) in tests; tests never reach a server, as they never reach printers.
+
 Tests (`node --test web/api`, in `web/api/api.test.mjs`): "without a session, or with a forged one,
 nothing is answered", "one writer cannot reach another's stories", "ids that could reach elsewhere
 are refused", "requests from another site are refused", "a sign-in not started here is refused",
 "a save must say which copy it replaces, and a stale one is refused", "the site's writes for the
 day pause everyone, and leave r2 alone", "the site's room is shared by everyone", "a writer's room
 drops their oldest history first, then refuses", "only caprice stories, within the size limit, are
-kept", "the off switch stops stories online at once".
+kept", "the off switch stops stories online at once". In the app: the `cloud::tests` (`decide`, names,
+keys), `in_the_browser_nothing_is_asked_of_the_server_until_the_writer_signs_in`,
+`a_story_saved_goes_online_a_little_later`, `a_story_newer_online_comes_down_onto_the_shelf_and_opens`,
+`the_open_story_changed_in_another_browser_is_shown_as_it_is_there`,
+`a_story_changed_here_and_in_another_browser_is_kept_twice_and_loses_no_word`,
+`words_typed_and_not_yet_saved_are_never_written_over_by_a_story_from_online`,
+`a_limit_pauses_stories_online_and_they_go_up_once_it_lifts`,
+`signing_out_keeps_the_stories_in_this_browser_and_sends_nothing_more`,
+`deleting_the_stories_online_signs_out_and_leaves_them_here`; and in `web/smoke.mjs`, that nothing
+is asked signed out, and the app's header on what is.
 
 ---
 

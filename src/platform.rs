@@ -280,6 +280,63 @@ pub fn free_name(dir: &std::path::Path, name: &str) -> PathBuf {
         .unwrap_or_else(|| dir.join(name))
 }
 
+/// A request to Caprice's own server (`web/api`, R33): the path there, the method, its headers
+/// and what it sends.
+pub struct Request {
+    pub method: &'static str,
+    pub path: String,
+    pub headers: Vec<(&'static str, String)>,
+    pub body: Option<Vec<u8>>,
+}
+
+/// The server's answer: its status (0 when none came: offline, or the server is not there), the
+/// headers Caprice reads, and what it sent.
+#[derive(Default, Debug)]
+pub struct Answer {
+    pub status: u16,
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
+}
+
+impl Answer {
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers.iter().find(|(n, _)| n.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str())
+    }
+}
+
+/// The headers of an answer that Caprice reads (the page can see only those it names).
+#[cfg(target_arch = "wasm32")]
+const READ: [&str; 3] = ["ETag", "X-Caprice-Name", "Retry-After"];
+
+/// In the browser: send `request` to the page's own server, and its answer to `tx`. It is the
+/// page's `fetch`, waited for on the main thread, so it shares nothing with the workers.
+#[cfg(target_arch = "wasm32")]
+pub fn send(request: Request, tx: std::sync::mpsc::Sender<Answer>, wake: Waker) {
+    let names = js_sys::Array::new();
+    let values = js_sys::Array::new();
+    for (name, value) in &request.headers {
+        names.push(&(*name).into());
+        values.push(&value.into());
+    }
+    let reads: js_sys::Array = READ.iter().map(|h| wasm_bindgen::JsValue::from(*h)).collect();
+    // The body is copied out of the app's memory before `send` returns: it is shared, and the
+    // request cannot hold it as it is.
+    let sending = browser::send(request.method, &request.path, names, values, request.body.as_deref(), reads);
+    wasm_bindgen_futures::spawn_local(async move {
+        let answer = sending.await;
+        let _ = tx.send(answer);
+        wake.wake();
+    });
+}
+
+/// In the browser: leave the page for `path` on its own server (signing in, which comes back).
+#[cfg(target_arch = "wasm32")]
+pub fn go_to(path: &str) {
+    if let Some(window) = web_sys::window() {
+        let _ = window.location().assign(path);
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 mod browser {
     use wasm_bindgen::prelude::*;
@@ -318,6 +375,25 @@ mod browser {
                 input.click();
             });
         }
+        // A request to the page's own server: the header that says it is Caprice asking (no
+        // other site can add it), and its answer, or status 0 when none came.
+        export function api_send(method, path, names, values, body, reads) {
+            const headers = new Headers({ "X-Caprice": "1" });
+            names.forEach((n, i) => headers.set(n, values[i]));
+            const sent = fetch(path, {
+                method, headers, body: body ? new Uint8Array(body) : undefined,
+                credentials: "same-origin", cache: "no-store", redirect: "manual",
+            });
+            return (async () => {
+                try {
+                    const r = await sent;
+                    const got = new Uint8Array(await r.arrayBuffer());
+                    return [r.status, reads.map(h => r.headers.get(h) ?? ""), got];
+                } catch {
+                    return [0, reads.map(() => ""), new Uint8Array()];
+                }
+            })();
+        }
         export async function fetch_bytes(url) {
             const r = await fetch(url);
             if (!r.ok) throw new Error(`${url}: ${r.status}`);
@@ -349,6 +425,28 @@ mod browser {
         fn js_show_pdf(bytes: &[u8]);
         #[wasm_bindgen(js_name = fetch_bytes, catch)]
         async fn js_fetch_bytes(url: &str) -> Result<JsValue, JsValue>;
+        #[wasm_bindgen(js_name = api_send)]
+        fn js_api_send(method: &str, path: &str, names: js_sys::Array, values: js_sys::Array, body: Option<Box<[u8]>>, reads: js_sys::Array) -> js_sys::Promise;
+    }
+
+    /// Send a request to the page's own server (`platform::send`); the request is made before this
+    /// returns, and the answer is waited for after.
+    pub fn send(
+        method: &str, path: &str, names: js_sys::Array, values: js_sys::Array, body: Option<&[u8]>, reads: js_sys::Array,
+    ) -> impl std::future::Future<Output = super::Answer> + use<> {
+        let read: Vec<String> = reads.iter().filter_map(|h| h.as_string()).collect();
+        let promise = js_api_send(method, path, names, values, body.map(Box::from), reads);
+        async move {
+            let Ok(got) = wasm_bindgen_futures::JsFuture::from(promise).await else { return super::Answer::default() };
+            let got = js_sys::Array::from(&got);
+            let values = js_sys::Array::from(&got.get(1));
+            let headers = read.into_iter().zip(values.iter()).filter_map(|(n, v)| Some((n, v.as_string()?))).filter(|(_, v)| !v.is_empty());
+            super::Answer {
+                status: got.get(0).as_f64().unwrap_or(0.0) as u16,
+                headers: headers.collect(),
+                body: js_sys::Uint8Array::new(&got.get(2)).to_vec(),
+            }
+        }
     }
 
     /// The file at `url`, from where the page came from.
