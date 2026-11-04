@@ -643,6 +643,8 @@ impl App {
                 self.open(&ctx);
             }
             self.welcome(ui);
+            // In the browser, "Open another…" asks the shelf: its window shows over the welcome too.
+            self.shelf_window(&ctx);
             self.cloud_window(&ctx);
             self.update_title_and_toast(ui, area);
             return;
@@ -6763,6 +6765,26 @@ mod tests {
     }
 
     #[test]
+    fn in_the_browser_open_another_on_the_welcome_page_shows_the_stories_kept_here() {
+        let mut there = Harness::new();
+        let dir = with_shelf(&mut there, "welcome-open");
+        there.frames(3, vec![], Modifiers::NONE);
+        there.type_text("Kept in this browser.");
+        there.save_on_shelf();
+
+        let mut h = started_without_a_file(&dir.join("start"));
+        h.app.shelf.dir = Some(dir.clone());
+        h.click_widget("Open another\u{2026}");
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.labels().contains("Kept in this browser"), "the shelf shows its stories: {}", h.labels());
+        h.click_widget("Kept in this browser");
+        h.frames((start::FLIGHT * 60.0) as usize + 2, vec![], Modifiers::NONE);
+        assert!(!h.app.start.open, "the welcome gives way to the story");
+        assert_eq!(h.text(), "Kept in this browser.");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn in_the_browser_saving_asks_for_a_name_and_the_story_is_kept_under_it() {
         let mut h = Harness::new();
         let dir = with_shelf(&mut h, "save");
@@ -7013,7 +7035,7 @@ mod tests {
         let hello = |h: &Harness| h.painted_texts().lines().find(|l| l.starts_with("Good ") || l.starts_with("Writing late")).map(str::to_owned);
         let before = hello(&h).expect("the greeting is shown");
         assert!(!before.contains(','), "signed out, no name: {before:?}");
-        assert!(h.painted_texts().contains("Sign in to keep your stories online"), "and signing in is offered");
+        assert!(h.labels().contains("Sign in with Google"), "and signing in is offered, where it is seen first");
 
         // Back from Google's sign-in, the page starts again.
         server.0.borrow_mut().signed_in = Some(("Ada Lovelace".into(), "ada".into()));
@@ -7024,6 +7046,20 @@ mod tests {
         let after = hello(&h).expect("the greeting is shown");
         assert!(after.contains(", Ada.") || after.contains(", Ada?"), "by the first name: {after:?}");
         assert!(h.painted_texts().contains("Your stories are kept online too, as Ada Lovelace."), "{}", h.painted_texts());
+        assert!(!h.labels().contains("Sign in with Google"), "signed in, it is not offered again");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn the_welcome_s_google_button_goes_straight_to_google_s_sign_in() {
+        let dir = test_dir("online-welcome-button");
+        let mut h = started_without_a_file(&dir);
+        h.app.shelf.dir = Some(dir.clone());
+        let server = online(&mut h, &dir, false);
+        h.frames(3, vec![], Modifiers::NONE);
+        h.click_widget("Sign in with Google");
+        assert_eq!(server.0.borrow().went_to, ["/api/login/google"], "one click, and the page goes to Google");
+        assert!(server.0.borrow().asked.is_empty(), "nothing was asked of the server on the way: {:?}", server.0.borrow().asked);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

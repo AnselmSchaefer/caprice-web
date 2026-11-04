@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 
-use eframe::egui::{self, Id, pos2};
+use eframe::egui::{self, Color32, CornerRadius, FontId, Id, Painter, Pos2, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use serde::{Deserialize, Serialize};
 
 use crate::App;
@@ -689,6 +689,13 @@ impl App {
         self.cloud.due_now();
     }
 
+    /// Off to sign in: the page goes, so the story is saved, and a version kept, first.
+    pub fn sign_in(&mut self, provider: &str) {
+        self.save_before_leaving();
+        self.keep_now();
+        self.cloud.sign_in(provider);
+    }
+
     /// The Stories online window: signing in and out, and how the stories online are.
     pub fn cloud_window(&mut self, ctx: &egui::Context) {
         if !self.cloud.open || self.cloud.server.is_none() {
@@ -765,8 +772,8 @@ impl App {
                             }
                             Some(providers) => {
                                 for p in providers {
-                                    let by = if p == "github" { "GitHub" } else { "Google" };
-                                    if ui.button(format!("Sign in with {by}")).clicked() {
+                                    let pressed = if p == "google" { google_button(ui).clicked() } else { ui.button("Sign in with GitHub").clicked() };
+                                    if pressed {
                                         sign_in = Some(p.clone());
                                     }
                                 }
@@ -781,10 +788,7 @@ impl App {
             self.cloud.told = None;
         }
         if let Some(provider) = sign_in {
-            // The page goes: the story is saved, and a version kept, first.
-            self.save_before_leaving();
-            self.keep_now();
-            self.cloud.sign_in(&provider);
+            self.sign_in(&provider);
         }
         let cloud = &mut self.cloud;
         if (sign_out || delete) && cloud.asking.is_none() {
@@ -798,6 +802,45 @@ impl App {
             }
         }
     }
+}
+
+/// Google's own sign-in button, as people know it from other sites: white, a thin grey edge,
+/// round ends, and the G in its four colours. White in every theme, so it stands out on a dark desk;
+/// its colours are Google's, as Google asks, not the theme's (R29).
+pub fn google_button(ui: &mut Ui) -> egui::Response {
+    let rgb = Color32::from_rgb;
+    let (fill, edge, ink) = (Color32::WHITE, rgb(0x74, 0x77, 0x75), rgb(0x1f, 0x1f, 0x1f));
+    let text = "Sign in with Google";
+    let galley = ui.painter().layout_no_wrap(text.into(), FontId::proportional(14.0), ink);
+    let (rect, resp) = ui.allocate_exact_size(vec2(12.0 + 18.0 + 10.0 + galley.size().x + 14.0, 40.0), Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, text));
+    if ui.is_rect_visible(rect) {
+        let p = ui.painter();
+        let fill = if resp.hovered() { fill.lerp_to_gamma(ink, 0.08) } else { fill };
+        p.rect(rect, CornerRadius::same(20), fill, Stroke::new(1.0, edge), StrokeKind::Inside);
+        google_g(p, pos2(rect.left() + 21.0, rect.center().y), 18.0);
+        p.galley(pos2(rect.left() + 40.0, rect.center().y - galley.size().y / 2.0), galley, ink);
+    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// The G: a ring open at the upper right, red, yellow, green and blue going round, and a blue bar.
+fn google_g(p: &Painter, c: Pos2, size: f32) {
+    let (r, w) = (size / 2.0, size * 0.2);
+    let mid = r - w / 2.0;
+    let arc = |from: f32, to: f32, color: Color32| {
+        let points = (0..=12).map(|i| {
+            let a = (from + (to - from) * i as f32 / 12.0).to_radians();
+            pos2(c.x + mid * a.cos(), c.y - mid * a.sin())
+        });
+        p.line(points.collect(), Stroke::new(w, color));
+    };
+    arc(42.0, 145.0, Color32::from_rgb(0xea, 0x43, 0x35));
+    arc(145.0, 215.0, Color32::from_rgb(0xfb, 0xbc, 0x05));
+    arc(215.0, 320.0, Color32::from_rgb(0x34, 0xa8, 0x53));
+    arc(320.0, 366.0, Color32::from_rgb(0x42, 0x85, 0xf4));
+    let bar = egui::Rect::from_min_max(pos2(c.x - 0.5, c.y - w / 2.0), pos2(c.x + r, c.y + w / 2.0));
+    p.rect_filled(bar, 0.0, Color32::from_rgb(0x42, 0x85, 0xf4));
 }
 
 fn story_name(path: &Path) -> String {

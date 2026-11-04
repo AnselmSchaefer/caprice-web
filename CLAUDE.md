@@ -106,7 +106,7 @@ Full list with reasons and tests in `ARCHITECTURE.md` §4.
     nothing outside their own folders.
 13. **Colours around the page come from `theme::pal()`**, never literals; the page itself (`PAPER`, `INK`)
     is the same in every theme.
-    Pictures (the emblem, the garden, houses, ships and sea, balloon and dragon) keep their own colours.
+    Pictures (the emblem, the garden, houses, ships and sea, balloon and dragon) and Google's sign-in button keep their own colours.
 
 14. **The desktop and the browser differ only in `platform.rs`.** Background work is
     `platform::spawn` with a `platform::Waker`, never a `Context` or a lock shared with the frame;
