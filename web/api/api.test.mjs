@@ -1,7 +1,7 @@
 // The stories API, run in the Workers runtime itself (Miniflare: R2 and the Durable Object in
 // memory), signing in against stand-in Google and GitHub. Each limit is shown to refuse, and the
 // ones that guard the bill to leave R2 untouched when they do.
-// node --test api/   (here in web/)
+// node --test api/api.test.mjs   (here in web/; Node 24 takes no folder)
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";

@@ -1493,7 +1493,7 @@ In the app (`cloud.rs`) **the shelf is where a story is; online is a copy, and n
 - **Requests go through `cloud::Server`**: `platform::send` (the page's `fetch`) in the browser, a
   stand-in (`cloud::stand_in`) in tests; tests never reach a server, as they never reach printers.
 
-Tests (`node --test web/api`, in `web/api/api.test.mjs`): "without a session, or with a forged one,
+Tests (`node --test web/api/api.test.mjs`): "without a session, or with a forged one,
 nothing is answered", "one writer cannot reach another's stories", "ids that could reach elsewhere
 are refused", "requests from another site are refused", "a sign-in not started here is refused",
 "a save must say which copy it replaces, and a stale one is refused", "the site's writes for the
@@ -1580,7 +1580,7 @@ when the writer goes on; nothing moved in the layout, nothing in print or the fi
 
 **Something new the Worker keeps online** (a file, a setting): keyed with `ledger::key` under the
 user, its R2 reads and writes counted by the Ledger first, deleted with the user's stories, and a
-test that its limit refuses and leaves R2 alone (R33). Then `node --test web/api`.
+test that its limit refuses and leaves R2 alone (R33). Then `node --test web/api/api.test.mjs`.
 
 **Something new pinned to the text** (like notes and scenes): move it in `apply_raw` and in
 `into_doc` (R7), save it (R9), decide its Word mapping (R10).

@@ -96,7 +96,7 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Stories API, in the Workers runtime (Miniflare)
         working-directory: web
-        run: node --test api/
+        run: node --test api/api.test.mjs
       - name: Chromium for the smoke test
         working-directory: web
         run: npx playwright-core install --with-deps chromium
