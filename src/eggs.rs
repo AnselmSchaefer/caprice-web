@@ -11,7 +11,9 @@
 //! title in place and flies away. Both follow one course in time (`pose`), each along its own way
 //! (`rig`). In the Magic Sea a ship is built in a yard for each chapter, a part for each page, each
 //! coming out of a little light; when the next chapter begins, the ship is finished at once, slides
-//! down the slipway and sails out to lie in the bay with the others, rocking on the water.
+//! down the slipway and sails out to lie in the bay with the others, rocking on the water. In
+//! the Magic Forest each page lights a lantern in a swarm over an old forest, each chapter's swarm
+//! becomes a big lantern in its trees, and an owl brings each new title (`forest`).
 //!
 //! None of it is on the page: the garden, the city and the sea lie on the desk behind the pages, and what brings a title
 //! is drawn
@@ -27,6 +29,8 @@ use eframe::egui::{self, Color32, Pos2, Rect, Shape, Stroke, Vec2, pos2, vec2};
 use crate::App;
 use crate::theme::Theme;
 
+pub mod forest;
+
 /// What brings a new chapter title in, in which theme.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Carrier {
@@ -34,6 +38,8 @@ pub enum Carrier {
     /// from the other side.
     Dragon { right: bool },
     Balloon { right: bool },
+    /// In the Magic Forest: from its perch, and back to a new one (`forest::flight`).
+    Owl,
 }
 
 impl Carrier {
@@ -41,6 +47,7 @@ impl Carrier {
         match theme {
             Theme::City => Some(Carrier::Dragon { right: true }),
             Theme::Garden => Some(Carrier::Balloon { right: true }),
+            Theme::Forest => Some(Carrier::Owl),
             _ => None,
         }
     }
@@ -50,6 +57,7 @@ impl Carrier {
     pub fn pace(self) -> f32 {
         match self {
             Carrier::Dragon { .. } => 1.7,
+            Carrier::Owl => 1.3,
             Carrier::Balloon { .. } => 1.0,
         }
     }
@@ -242,6 +250,19 @@ pub struct Eggs {
     /// Each ship drawn last frame: its chapter, around it, how many parts were shown, and whether
     /// it was in the water; for tests.
     pub ships: Vec<(usize, Rect, usize, bool)>,
+    /// Where the Magic Forest's owl sits, from the last forest drawn, and where it sat when it
+    /// flew out with a title.
+    pub perch: Option<Pos2>,
+    pub flew_from: Option<Pos2>,
+    /// The story the Magic Forest was shown for, the chapter whose swarm of lanterns is shown,
+    /// when each of its lanterns was lit (long ago for those already there), and the swarm flying
+    /// into the great tree, if one is: since when, its chapter and how many lanterns it had.
+    forest_for: Option<String>,
+    flowed: usize,
+    born: Vec<f64>,
+    merge: Option<(f64, usize, usize)>,
+    /// The forest drawn last frame, for tests.
+    pub forest: Option<forest::Seen>,
 }
 
 /// The dragon or the balloon bringing the chapter title that begins at `at` into place on page `page`.
@@ -260,7 +281,7 @@ impl Default for Eggs {
         let seed = crate::platform::since_epoch().as_nanos() as u64;
         Self { grown_for: None, grown: Vec::new(), grown_at: 0.0, measured: None, lift: None, place: None, desk: Rect::NOTHING, odds: None, from_right: false, rng: seed | 1, plants: Vec::new(),
             built_for: None, built: 0.0, built_at: 0.0, order: Vec::new(), scale: None, houses: Vec::new(), light: None, sailed_for: None, berths: Vec::new(), rigged: 0.0, rigged_at: 0.0,
-            launch: None, ships: Vec::new() }
+            launch: None, ships: Vec::new(), forest_for: None, flowed: 0, born: Vec::new(), merge: None, forest: None, perch: None, flew_from: None }
     }
 }
 
@@ -278,6 +299,23 @@ impl Eggs {
         }
         self.scale = Some((shown, now));
         shown
+    }
+
+    /// How far the title lying at `place` on the page at `page` is from its place at `p`, brought
+    /// `by` that: the owl's from where it sat to where it sits now.
+    pub fn offset(&self, by: Carrier, p: Pose, place: Rect, page: Rect) -> Vec2 {
+        match by {
+            Carrier::Owl => {
+                let from = self.flew_from.unwrap_or(place.center_top());
+                forest::owl_offset(p, place, from, self.perch.unwrap_or(from), self.size())
+            }
+            _ => offset(by, p, place, page, self.desk),
+        }
+    }
+
+    /// The size of things on this desk, as `unit` has it, for what is drawn over the page.
+    fn size(&self) -> f32 {
+        self.scale.map_or((self.desk.height() / 900.0).clamp(0.6, 1.6), |s| s.0)
     }
 
     /// A number from 0 to 1, at random.
@@ -405,7 +443,7 @@ pub fn pose_of(by: Carrier, t: f32, duck: Option<f32>) -> Pose {
     let k = by.pace();
     let along = |t: f32| match by {
         Carrier::Dragon { .. } => (t + 0.8 * surge(t)) / k,
-        Carrier::Balloon { .. } => t / k,
+        Carrier::Balloon { .. } | Carrier::Owl => t / k,
     };
     Pose { t, ..pose(along(t), duck.map(along)) }
 }
@@ -475,6 +513,8 @@ fn rig(by: Carrier, p: Pose, place: Rect, page: Rect, desk: Rect) -> Rig {
     let (right, tall, rope, sizes, reach) = match by {
         Carrier::Balloon { right } => (right, TALL, page.height() * 0.02, (0.035, 0.06), 1.5),
         Carrier::Dragon { right } => (right, DRAGON_TALL, 0.0, (0.045, 0.1), 5.0),
+        // Not in from the side: from its perch (`Eggs::offset`).
+        Carrier::Owl => return Rig { hook: place.center_top(), size: 0.0, offset: Vec2::ZERO },
     };
     let side = if right { 1.0 } else { -1.0 };
     let away = 1.0 - p.enter;
@@ -484,7 +524,7 @@ fn rig(by: Carrier, p: Pose, place: Rect, page: Rect, desk: Rect) -> Rig {
     // The balloon bobs as it floats over; the dragon rises and sinks with its wings, the title
     // with it, less and less as it lowers the title into place.
     let heave = match by {
-        Carrier::Balloon { .. } => 0.0,
+        Carrier::Balloon { .. } | Carrier::Owl => 0.0,
         Carrier::Dragon { .. } => heave(p.t) * size,
     };
     // How far beyond the title's middle the desk's edge is on the side it comes from, and on the
@@ -496,7 +536,7 @@ fn rig(by: Carrier, p: Pose, place: Rect, page: Rect, desk: Rect) -> Rig {
     let (hook, offset) = if p.hooked {
         let x = place.center().x + side * ((1.0 - p.run) * page.width() * 0.35 + away * come);
         let bob = match by {
-            Carrier::Balloon { .. } => (p.run * PI).sin() * page.height() * 0.015,
+            Carrier::Balloon { .. } | Carrier::Owl => (p.run * PI).sin() * page.height() * 0.015,
             Carrier::Dragon { .. } => heave * (1.0 - p.lower),
         };
         let load = pos2(x, place.center().y - hang * (1.0 - p.lower) - bob);
@@ -2169,9 +2209,12 @@ impl App {
         if !self.doc.chapters(false).iter().any(|e| e.at == at) || self.eggs.roll() >= self.eggs.odds.unwrap_or(1.0) {
             return;
         }
-        let (Carrier::Balloon { right } | Carrier::Dragon { right }) = &mut by;
-        self.eggs.from_right = !self.eggs.from_right;
-        *right = self.eggs.from_right;
+        if let Carrier::Balloon { right } | Carrier::Dragon { right } = &mut by {
+            self.eggs.from_right = !self.eggs.from_right;
+            *right = self.eggs.from_right;
+        }
+        // The owl flies out from where it sits; with nowhere to sit, from beyond the desk's edge.
+        self.eggs.flew_from = self.eggs.perch.or(Some(pos2(self.eggs.desk.left() - 60.0, self.eggs.desk.center().y)));
         let started = ctx.input(|i| i.time);
         self.eggs.lift = Some(Lift { by, at, page: self.doc.page_of(at), started, duck: None });
         ctx.request_repaint();
@@ -2223,6 +2266,11 @@ impl App {
         ui.painter().extend(match by {
             Carrier::Dragon { .. } => dragon(by, p, place, page, self.eggs.desk),
             Carrier::Balloon { .. } => balloon(by, p, place, page, self.eggs.desk),
+            Carrier::Owl => {
+                let from = self.eggs.flew_from.unwrap_or(place.center_top());
+                let f = forest::flight(p, place, from, self.eggs.perch.unwrap_or(from), self.eggs.size());
+                forest::owl(f.feet, Some(f), self.eggs.size(), ui.ctx().input(|i| i.time))
+            }
         });
     }
 }
@@ -2257,7 +2305,7 @@ mod tests {
         let page = Rect::from_min_size(pos2(300.0, 50.0), vec2(600.0, 800.0));
         let place = Rect::from_min_size(pos2(500.0, 400.0), vec2(200.0, 30.0));
         for by in [true, false].into_iter().flat_map(|right| [Carrier::Balloon { right }, Carrier::Dragon { right }]) {
-            let (Carrier::Balloon { right } | Carrier::Dragon { right }) = by;
+            let (Carrier::Balloon { right } | Carrier::Dragon { right }) = by else { continue };
             let side = if right { 1.0 } else { -1.0 };
             let at = |t: f32| offset(by, pose(t, None), place, page, desk());
             let start = at(0.0);
@@ -2383,6 +2431,7 @@ mod tests {
                     let shapes = match by {
                         Carrier::Dragon { .. } => dragon(by, p, place, page, desk()),
                         Carrier::Balloon { .. } => balloon(by, p, place, page, desk()),
+                        Carrier::Owl => Vec::new(),
                     };
                     let seen = shapes.iter().fold(Rect::NOTHING, |r, s| r | s.visual_bounding_rect());
                     assert!(!seen.intersects(desk()), "{by:?} at {t}: {seen:?}");
@@ -2408,6 +2457,7 @@ mod tests {
                 let shapes = match by {
                     Carrier::Dragon { .. } => dragon(by, p, place, page, desk()),
                     Carrier::Balloon { .. } => balloon(by, p, place, page, desk()),
+                    Carrier::Owl => Vec::new(),
                 };
                 for shape in shapes {
                     let mut mesh = egui::epaint::Mesh::default();

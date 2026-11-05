@@ -72,10 +72,11 @@ pub enum Theme {
     Garden,
     City,
     Sea,
+    Forest,
 }
 
 impl Theme {
-    pub const ALL: [Theme; 10] = [
+    pub const ALL: [Theme; 11] = [
         Theme::Midnight,
         Theme::Lagoon,
         Theme::Marmalade,
@@ -86,6 +87,7 @@ impl Theme {
         Theme::Garden,
         Theme::City,
         Theme::Sea,
+        Theme::Forest,
     ];
 
     pub fn name(self) -> &'static str {
@@ -100,6 +102,7 @@ impl Theme {
             Theme::Garden => "Magic Garden",
             Theme::City => "Magic City",
             Theme::Sea => "Magic Sea",
+            Theme::Forest => "Magic Forest",
         }
     }
 
@@ -116,6 +119,7 @@ impl Theme {
             Theme::Garden => "Plant a story and see what comes up",
             Theme::City => "Lights on in a city that builds itself",
             Theme::Sea => "Salt air, and a story that sets sail",
+            Theme::Forest => "Moss, moonlight, and a path that goes on",
         }
     }
 
@@ -293,6 +297,24 @@ impl Theme {
                 caret: rgb(206, 70, 48),
                 thumb: rgb(120, 170, 206),
                 light: true,
+            },
+            // A forest at night; the trees and what lives among them are drawn on it (`eggs::forest`).
+            Theme::Forest => Palette {
+                desk: rgb(10, 24, 30),
+                desk_top: rgb(24, 52, 58),
+                dock: rgb(20, 44, 48),
+                dock_edge: rgb(46, 88, 84),
+                btn: rgb(30, 62, 64),
+                btn_hover: rgb(40, 80, 80),
+                text: rgb(226, 246, 236),
+                text_hot: Color32::WHITE,
+                text_dim: rgb(140, 186, 172),
+                accent: rgb(150, 236, 196),
+                on_accent: rgb(10, 36, 30),
+                field: rgb(14, 34, 38),
+                caret: rgb(80, 196, 156),
+                thumb: rgb(90, 160, 140),
+                light: false,
             },
         }
     }

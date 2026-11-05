@@ -705,6 +705,7 @@ impl App {
         self.draw_garden(ui, area, page_rect);
         self.draw_city(ui, area, page_rect);
         self.draw_sea(ui, area, page_rect);
+        self.draw_forest(ui, area, page_rect);
         let base = self.pos.floor() as usize;
         let t = self.pos - base as f32;
         self.animate_held(ui);
@@ -6223,11 +6224,18 @@ mod tests {
         chapter_one(&mut h);
         assert!(h.app.eggs.plants.is_empty() && h.app.eggs.houses.is_empty() && !h.app.eggs.ships.is_empty());
         assert!(h.app.eggs.lift.is_none(), "no one brings a title to the sea");
+        assert!(h.app.eggs.forest.is_none(), "no forest at sea");
+        let mut h = Harness::new();
+        in_the_theme(&mut h, theme::Theme::Forest, 1.0);
+        chapter_one(&mut h);
+        assert!(h.app.eggs.forest.is_some());
+        assert!(h.app.eggs.plants.is_empty() && h.app.eggs.houses.is_empty() && h.app.eggs.ships.is_empty());
         let mut h = Harness::new();
         h.frames(3, vec![], Modifiers::NONE);
         h.app.eggs.odds = Some(1.0);
         chapter_one(&mut h);
         assert!(h.app.eggs.plants.is_empty() && h.app.eggs.houses.is_empty() && h.app.eggs.ships.is_empty() && h.app.eggs.lift.is_none());
+        assert!(h.app.eggs.forest.is_none());
     }
 
     #[test]
@@ -6569,7 +6577,7 @@ mod tests {
 
     #[test]
     fn going_on_writing_while_a_title_is_brought_sets_it_down_at_once() {
-        for t in [theme::Theme::City, theme::Theme::Garden] {
+        for t in [theme::Theme::City, theme::Theme::Garden, theme::Theme::Forest] {
             let mut h = Harness::new();
             in_the_theme(&mut h, t, 1.0);
             chapter_one(&mut h);
@@ -6584,21 +6592,97 @@ mod tests {
     }
 
     #[test]
-    fn print_shows_neither_the_garden_the_houses_the_ships_nor_what_brings_a_title() {
+    fn print_shows_neither_the_garden_the_houses_the_ships_the_forest_nor_what_brings_a_title() {
         let mut h = Harness::new();
         chapter_one(&mut h);
         let ctx = h.ctx.clone();
         let plain = h.app.pdf(&ctx, 0..=0).unwrap();
-        for t in [theme::Theme::City, theme::Theme::Garden, theme::Theme::Sea] {
+        for t in [theme::Theme::City, theme::Theme::Garden, theme::Theme::Sea, theme::Theme::Forest] {
             let mut g = Harness::new();
             in_the_theme(&mut g, t, 1.0);
             chapter_one(&mut g);
             g.frames(70, vec![], Modifiers::NONE);
-            let drawn = !(g.app.eggs.plants.is_empty() && g.app.eggs.houses.is_empty() && g.app.eggs.ships.is_empty());
+            let e = &g.app.eggs;
+            let drawn = !(e.plants.is_empty() && e.houses.is_empty() && e.ships.is_empty() && e.forest.is_none());
             assert!(drawn && (g.app.eggs.lift.is_some() || eggs::Carrier::of(t).is_none()), "{t:?}");
             let ctx = g.ctx.clone();
             assert!(g.app.pdf(&ctx, 0..=0).unwrap() == plain, "{t:?}");
         }
+    }
+
+    #[test]
+    fn in_the_magic_forest_each_page_lights_a_lantern_in_the_swarm() {
+        let mut h = Harness::new();
+        in_the_theme(&mut h, theme::Theme::Forest, 0.0);
+        let seen = |h: &Harness| h.app.eggs.forest.clone().expect("the forest is there");
+        assert_eq!(seen(&h).lanterns.len(), 1, "a lantern for the first page");
+        assert!(seen(&h).hung.is_empty(), "no big lantern yet");
+        h.type_text(&"It was nearly midnight and the Prime Minister sat alone in his office. ".repeat(220));
+        let pages = h.app.doc.pages();
+        assert!(pages >= 4, "pages: {pages}");
+        h.frames(30, vec![], Modifiers::NONE);
+        let rising = seen(&h).lanterns.last().copied().unwrap();
+        h.frames(200, vec![], Modifiers::NONE);
+        let forest = seen(&h);
+        assert_eq!(forest.lanterns.len(), pages, "a lantern a page");
+        assert!(forest.lanterns.last().unwrap().y < rising.y - 50.0, "the newest rose from the floor into the swarm");
+        assert!(h.app.eggs.lift.is_none(), "nothing brings a title");
+
+        // The swarm drifts; taking the pages away puts out no lantern.
+        let was = forest.lanterns[0];
+        h.wait(10.0);
+        assert!(seen(&h).lanterns[0] != was, "the swarm drifts");
+        h.key(Key::A, Modifiers::COMMAND);
+        h.key(Key::Backspace, Modifiers::NONE);
+        h.frames(60, vec![], Modifiers::NONE);
+        assert_eq!(seen(&h).lanterns.len(), pages);
+    }
+
+    #[test]
+    fn in_the_magic_forest_the_owl_brings_each_new_title_and_sits_by_the_new_big_lantern() {
+        let mut h = Harness::new();
+        in_the_theme(&mut h, theme::Theme::Forest, 1.0);
+        let seen = |h: &Harness| h.app.eggs.forest.clone().unwrap();
+        let sat = seen(&h).owl.expect("an owl sits in the trees");
+        let pace = eggs::Carrier::Owl.pace();
+        chapter_one(&mut h);
+        assert_eq!(h.app.eggs.lift.map(|l| l.by), Some(eggs::Carrier::Owl));
+        assert!(seen(&h).owl.is_none(), "it flew out");
+        let coming = h.painted_at("Chapter One").expect("the title is drawn");
+        h.frames((eggs::COURSE * pace * 60.0) as usize + 30, vec![], Modifiers::NONE);
+        assert!(h.app.eggs.lift.is_none(), "done");
+        let rest = h.painted_at("Chapter One").unwrap();
+        assert!(coming.distance(rest) > 100.0 && h.app.last_page_rect.contains(rest), "brought from the trees into its place: {coming:?} {rest:?}");
+        assert_eq!(seen(&h).owl, Some(sat), "back where it sat, with no big lantern yet");
+
+        h.key(Key::Enter, Modifiers::NONE);
+        h.type_text(&"It was nearly midnight and the Prime Minister sat alone in his office. ".repeat(100));
+        h.frames(150, vec![], Modifiers::NONE);
+        for (n, lanterns) in [("Two", 1), ("Three", 2)] {
+            h.key(Key::Enter, Modifiers::NONE);
+            h.type_text(&format!("Chapter {n}"));
+            h.click_widget("Chapter");
+            assert_eq!(h.app.eggs.lift.map(|l| l.by), Some(eggs::Carrier::Owl), "Chapter {n}: every new title");
+            h.frames(30, vec![], Modifiers::NONE);
+            assert!(!seen(&h).flowing.is_empty(), "Chapter {n}: the swarm flies to the trees");
+            h.frames((eggs::COURSE * pace * 60.0) as usize + 30, vec![], Modifiers::NONE);
+            let forest = seen(&h);
+            assert!(forest.flowing.is_empty() && forest.lanterns.len() == 1, "Chapter {n}: into the trees, and a new swarm begun");
+            assert_eq!(forest.hung.len(), lanterns, "Chapter {n}: a big lantern for each chapter before");
+            let newest = forest.hung.last().unwrap().0;
+            assert!(forest.owl.is_some_and(|o| o.distance(newest) < 80.0), "Chapter {n}: the owl by the new lantern: {:?} {newest:?}", forest.owl);
+        }
+        let page = h.app.last_page_rect;
+        let hooks: Vec<egui::Pos2> = seen(&h).hung.iter().map(|l| l.0).collect();
+        assert!((hooks[0].x < page.left()) != (hooks[1].x < page.left()), "on trees on either side of the page");
+
+        // Picked again, the theme shows it as it stands at once.
+        let ctx = h.ctx.clone();
+        h.app.themes.choose(&ctx, theme::Theme::Sea);
+        h.frames(2, vec![], Modifiers::NONE);
+        h.app.themes.choose(&ctx, theme::Theme::Forest);
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(seen(&h).hung.len() == 2 && seen(&h).hung.iter().all(|l| l.1 == 1.0) && seen(&h).flowing.is_empty());
     }
 
     /// The height the garden's first plant was drawn at, once grown.
