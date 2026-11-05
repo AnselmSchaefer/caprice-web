@@ -2010,6 +2010,10 @@ impl App {
         }
 
         let unit = (area.height() / 900.0).clamp(0.6, 1.6);
+        // Lying along the bottom, the page bar hides the foot of every plant: each grows that much
+        // taller, so a chapter of a page or two has a plant in sight too.
+        let hidden = if self.bar.side == crate::ui::BarSide::Bottom { area.bottom() - self.bar_rect(area, self.bar.side).top() } else { 0.0 };
+        let e = &mut self.eggs;
         let painter = ui.painter();
         painter.extend(grass(&self.story_id, area, unit));
         let n = e.grown.len();
@@ -2020,7 +2024,7 @@ impl App {
             let gutter = if left { page.left() - area.left() } else { area.right() - page.right() };
             let gap = (70.0 * unit).min(gutter / (on_side as f32 + 0.5)).max(12.0);
             let x = if left { page.left() - gap * (j as f32 + 0.6) } else { page.right() + gap * (j as f32 + 0.6) };
-            let height = (g * TALLEST * area.height()).max(4.0 * unit);
+            let height = hidden + (g * TALLEST * area.height()).max(4.0 * unit);
             let root = pos2(x, area.bottom());
             // A chapter flowers once the next one has begun. The newest plant grows on, not the last
             // chapter's: a title taken away would take the flower off a plant that had it.

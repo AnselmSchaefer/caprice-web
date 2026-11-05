@@ -6696,6 +6696,48 @@ mod tests {
     }
 
     #[test]
+    fn a_chapter_added_to_a_story_opened_again_grows_a_plant_in_sight_above_the_page_bar() {
+        let dir = test_dir("garden-reopened");
+        let path = dir.join("story.caprice");
+        let mut h = Harness::new();
+        h.frames(3, vec![], Modifiers::NONE);
+        for title in ["Chapter One", "Chapter Two"] {
+            h.type_text(title);
+            h.click_widget("Chapter");
+            h.key(Key::Enter, Modifiers::NONE);
+            h.type_text("Words of the chapter.");
+            h.key(Key::Enter, Modifiers::NONE);
+        }
+        h.frames(3, vec![], Modifiers::NONE);
+        h.app.save_to(path.clone());
+
+        // Opened again in the Magic City, a chapter added, then the Magic Garden picked.
+        let mut h = Harness::new();
+        in_the_theme(&mut h, theme::Theme::City, 0.0);
+        let ctx = h.ctx.clone();
+        h.app.open_path(&ctx, path.clone());
+        h.frames(3, vec![], Modifiers::NONE);
+        assert_eq!(h.app.doc.garden.len(), 2, "two chapters, two plants: {:?}", h.app.doc.garden);
+        h.key(Key::End, Modifiers::COMMAND);
+        h.type_text("Chapter Three");
+        h.frames(3, vec![], Modifiers::NONE);
+        // The title written first, then made one: nothing typed since.
+        h.click_widget("Chapter");
+        h.frames(3, vec![], Modifiers::NONE);
+        h.app.themes.choose(&ctx, theme::Theme::Garden);
+        h.wait(1.0);
+        h.frames(200, vec![], Modifiers::NONE);
+        assert_eq!(h.app.doc.chapters(false).len(), 3);
+        assert_eq!(h.app.eggs.plants.len(), 3, "a plant for the new chapter: {:?}", h.app.doc.garden);
+        // Chapters of a page each: their plants are short, but none is hidden behind the page bar.
+        let bar = h.app.bar_rect(h.ctx.content_rect(), h.app.bar.side);
+        for (plant, _) in &h.app.eggs.plants {
+            assert!(plant.top() < bar.top() - 20.0, "in sight above the page bar at {}: {plant:?}", bar.top());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_story_opened_before_its_font_has_come_grows_its_garden_with_every_page_added() {
         // A twin no other test asks for, so it is not loaded yet when the story is opened.
         let font = "Tinos";

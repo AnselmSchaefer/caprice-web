@@ -1104,6 +1104,10 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   (`height_of`), flowering once the next chapter has begun: every plant flowers but the newest
   (the last of `Doc::garden`, not of `Doc::chapters`). The chapters come from `Doc::chapters`
   and `page_of`, so the garden follows whatever changes them, with nothing to keep in step.
+  Every plant is also as much taller as the page bar hides when it lies along the bottom
+  (`bar_rect`): a chapter of a page grew a plant shorter than the bar, all of it out of sight.
+  Anything else growing up from the desk's bottom edge must clear the bar the same way. Test:
+  `a_chapter_added_to_a_story_opened_again_grows_a_plant_in_sight_above_the_page_bar`.
 - **It never shrinks, and is kept with the story** (`Doc::garden`, saved as `DocFile::garden`): the
   most pages each plant has had, a plant a chapter in order. `grow_garden` raises it, in every
   theme, whenever the story's version or its number of pages changed, so the Magic Garden shows
