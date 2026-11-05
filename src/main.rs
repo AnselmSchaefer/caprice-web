@@ -6577,7 +6577,7 @@ mod tests {
 
     #[test]
     fn going_on_writing_while_a_title_is_brought_sets_it_down_at_once() {
-        for t in [theme::Theme::City, theme::Theme::Garden, theme::Theme::Forest] {
+        for t in [theme::Theme::City, theme::Theme::Garden] {
             let mut h = Harness::new();
             in_the_theme(&mut h, t, 1.0);
             chapter_one(&mut h);
@@ -6639,42 +6639,33 @@ mod tests {
     }
 
     #[test]
-    fn in_the_magic_forest_the_owl_brings_each_new_title_and_sits_by_the_new_big_lantern() {
+    fn in_the_magic_forest_a_chapter_s_swarm_becomes_a_big_lantern_in_the_trees_near_the_page() {
         let mut h = Harness::new();
         in_the_theme(&mut h, theme::Theme::Forest, 1.0);
         let seen = |h: &Harness| h.app.eggs.forest.clone().unwrap();
-        let sat = seen(&h).owl.expect("an owl sits in the trees");
-        let pace = eggs::Carrier::Owl.pace();
         chapter_one(&mut h);
-        assert_eq!(h.app.eggs.lift.map(|l| l.by), Some(eggs::Carrier::Owl));
-        assert!(seen(&h).owl.is_none(), "it flew out");
-        let coming = h.painted_at("Chapter One").expect("the title is drawn");
-        h.frames((eggs::COURSE * pace * 60.0) as usize + 30, vec![], Modifiers::NONE);
-        assert!(h.app.eggs.lift.is_none(), "done");
-        let rest = h.painted_at("Chapter One").unwrap();
-        assert!(coming.distance(rest) > 100.0 && h.app.last_page_rect.contains(rest), "brought from the trees into its place: {coming:?} {rest:?}");
-        assert_eq!(seen(&h).owl, Some(sat), "back where it sat, with no big lantern yet");
-
+        assert!(h.app.eggs.lift.is_none(), "nothing brings a title");
         h.key(Key::Enter, Modifiers::NONE);
         h.type_text(&"It was nearly midnight and the Prime Minister sat alone in his office. ".repeat(100));
         h.frames(150, vec![], Modifiers::NONE);
+        assert!(seen(&h).lanterns.len() >= 2, "a lantern a page of the chapter");
         for (n, lanterns) in [("Two", 1), ("Three", 2)] {
             h.key(Key::Enter, Modifiers::NONE);
             h.type_text(&format!("Chapter {n}"));
             h.click_widget("Chapter");
-            assert_eq!(h.app.eggs.lift.map(|l| l.by), Some(eggs::Carrier::Owl), "Chapter {n}: every new title");
             h.frames(30, vec![], Modifiers::NONE);
             assert!(!seen(&h).flowing.is_empty(), "Chapter {n}: the swarm flies to the trees");
-            h.frames((eggs::COURSE * pace * 60.0) as usize + 30, vec![], Modifiers::NONE);
+            h.frames((eggs::forest::MERGE * 60.0) as usize + 10, vec![], Modifiers::NONE);
             let forest = seen(&h);
             assert!(forest.flowing.is_empty() && forest.lanterns.len() == 1, "Chapter {n}: into the trees, and a new swarm begun");
             assert_eq!(forest.hung.len(), lanterns, "Chapter {n}: a big lantern for each chapter before");
-            let newest = forest.hung.last().unwrap().0;
-            assert!(forest.owl.is_some_and(|o| o.distance(newest) < 80.0), "Chapter {n}: the owl by the new lantern: {:?} {newest:?}", forest.owl);
+            assert!(forest.hung.iter().all(|l| l.1 == 1.0), "Chapter {n}: lit");
         }
         let page = h.app.last_page_rect;
         let hooks: Vec<egui::Pos2> = seen(&h).hung.iter().map(|l| l.0).collect();
         assert!((hooks[0].x < page.left()) != (hooks[1].x < page.left()), "on trees on either side of the page");
+        let near = |p: &egui::Pos2| (p.x - page.left()).abs().min((p.x - page.right()).abs());
+        assert!(hooks.iter().all(|p| near(p) < 330.0), "close to the page: {hooks:?}");
 
         // Picked again, the theme shows it as it stands at once.
         let ctx = h.ctx.clone();

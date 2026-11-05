@@ -4,15 +4,11 @@
 //! from the forest floor and joins the others in a swarm, drifting over the desk and now and then
 //! across behind the page. When a new chapter begins, the swarm of the one before flies to a
 //! branch of one of the trees nearest the page and becomes one big lantern hanging there, its warm
-//! light falling on the trunks about it; over a book the forest fills with them. An owl lives
-//! there, sitting beside the newest big lantern; when the writer makes a new chapter title it flies
-//! out with the title in its talons, sets it in its place on the page, and flies back to sit beside
-//! the new lantern.
+//! light falling on the trunks about it; over a book the forest fills with them.
 //!
-//! Like everything in `eggs.rs` it lies on the desk behind the pages, the owl in flight over the
-//! page on the screen only; it is drawn from shapes as a function of the story and of time;
-//! nothing is printed or saved, and nothing new is kept: the lanterns are counted from
-//! `Doc::garden`.
+//! Like everything in `eggs.rs` it lies on the desk behind the pages and is drawn from shapes as a
+//! function of the story and of time; nothing is printed or saved, and nothing new is kept: the
+//! lanterns are counted from `Doc::garden`.
 
 use super::*;
 
@@ -26,15 +22,10 @@ const FLOOR: Color32 = Color32::from_rgb(8, 24, 24);
 const LIT_BARK: Color32 = Color32::from_rgb(112, 78, 48);
 /// A lantern's paper, its flame, and the warm light it throws.
 pub const PAPER_GLOW: Color32 = Color32::from_rgb(255, 200, 110);
+/// The string a big lantern hangs by.
+const STRING: Color32 = Color32::from_rgb(214, 176, 128);
 const FLAME: Color32 = Color32::from_rgb(255, 244, 200);
 const WARM: Color32 = Color32::from_rgb(255, 176, 80);
-/// The owl, seen by lantern light.
-const FEATHER: Color32 = Color32::from_rgb(150, 108, 70);
-const FEATHER_LIGHT: Color32 = Color32::from_rgb(214, 176, 128);
-const EYE: Color32 = Color32::from_rgb(255, 214, 90);
-const DARK: Color32 = Color32::from_rgb(20, 14, 12);
-const BEAK: Color32 = Color32::from_rgb(230, 186, 90);
-
 /// How far up the desk each row of trunks behind stands, in units, and how far out from the page
 /// the forest reaches.
 const DEPTH: f32 = 30.0;
@@ -297,93 +288,6 @@ fn warm_light(spot: &Spot, at: Pos2, shown: f32, u: f32, time: f64) -> Vec<Shape
     vec![radial(bark, spot.w * 0.5, 110.0 * u, LIT_BARK, 0.45 * a), radial(at, 170.0 * u, 150.0 * u, WARM, 0.28 * a)]
 }
 
-/// Where the owl sits by the big lantern on `spot`: on its branch, between the trunk and it.
-pub fn perch(spot: &Spot) -> Pos2 {
-    spot.on(0.42) - vec2(0.0, spot.w * 0.07)
-}
-
-/// How much bigger the owl is than at a unit.
-const OWL: f32 = 1.3;
-
-/// The owl at a moment of bringing a title: where its feet are, whether it holds the title by its
-/// top in them, and whether it beats its wings (it glides as it lowers the title).
-#[derive(Clone, Copy, Debug)]
-pub struct Flight {
-    pub feet: Pos2,
-    pub carrying: bool,
-    pub beating: bool,
-}
-
-/// Where the owl is at `p`, bringing the title lying at `place` from its perch at `from` to its
-/// new one at `to`: it flies up and over to above the title's place with it, lowers it into
-/// place, lets go, rises a little and flies in an arc to its new perch, arriving as its course
-/// ends. Its course in time is the dragon's and the balloon's (`pose`), along a way of its own.
-pub fn flight(p: Pose, place: Rect, from: Pos2, to: Pos2, u: f32) -> Flight {
-    // Close above the title, so that over a title at the top of a page the owl stays below the
-    // toolbar.
-    let hold = place.center_top();
-    let over = hold - vec2(0.0, 22.0 * u);
-    let arc = |a: Pos2, b: Pos2, s: f32| bend(a, pos2((a.x + b.x) / 2.0, a.y.min(b.y) - 90.0 * u), b, ease(s));
-    if p.hooked && p.lower <= 0.0 {
-        let s = (p.enter * ENTER + p.run * RUN) / (ENTER + RUN);
-        return Flight { feet: arc(from, over, s), carrying: true, beating: true };
-    }
-    if p.hooked {
-        return Flight { feet: over + (hold - over) * p.lower, carrying: true, beating: false };
-    }
-    let up = hold - vec2(0.0, 40.0 * u * p.hook);
-    Flight { feet: arc(up, to, 1.0 - p.enter), carrying: false, beating: true }
-}
-
-/// How far the title lying at `place` is from its place at `p`, in the owl's feet.
-pub fn owl_offset(p: Pose, place: Rect, from: Pos2, to: Pos2, u: f32) -> Vec2 {
-    let f = flight(p, place, from, to, u);
-    if f.carrying { f.feet - place.center_top() } else { Vec2::ZERO }
-}
-
-/// The owl with its feet at `feet`: sitting with its wings folded, blinking now and then and
-/// turning its head; or flying, seen from the front, its wings spread and beating (or held out
-/// gliding), its talons closed on the title's top when it carries one.
-pub fn owl(feet: Pos2, flying: Option<Flight>, u: f32, time: f64) -> Vec<Shape> {
-    let t = time as f32;
-    // A little smaller in flight, holding the title close.
-    let z = if flying.is_some() { 1.05 * u } else { OWL * u };
-    let mut out = Vec::new();
-    let body = feet - vec2(0.0, if flying.is_some() { 12.0 } else { 16.0 } * z);
-    if let Some(f) = flying {
-        let beat = if f.beating { (t * 9.0).sin() } else { 0.3 };
-        for s in [-1.0f32, 1.0] {
-            let shoulder = body + vec2(s * 7.0, -4.0) * z;
-            let tip = shoulder + vec2(s * 30.0, -6.0 - 12.0 * beat) * z;
-            let trail = shoulder + vec2(s * 21.0, 9.0 - 4.0 * beat) * z;
-            out.push(solid(vec![shoulder, tip, trail, shoulder + vec2(0.0, 8.0 * z)], FEATHER));
-            out.push(solid(vec![shoulder + (tip - shoulder) * 0.45, tip, shoulder + (trail - shoulder) * 0.7], FEATHER_LIGHT));
-        }
-        if f.carrying {
-            for s in [-1.0f32, 1.0] {
-                out.push(Shape::line_segment([body + vec2(s * 3.0, 9.0) * z, feet + vec2(s * 2.0 * z, 0.0)], Stroke::new(1.4 * z, BEAK)));
-            }
-        }
-    }
-    out.push(oval(body, vec2(0.0, 1.0), 15.0 * z, 11.0 * z, FEATHER));
-    out.push(oval(body + vec2(0.0, 4.0 * z), vec2(0.0, 1.0), 9.0 * z, 7.0 * z, FEATHER_LIGHT));
-    let turn = if flying.is_some() { 0.0 } else { (t * 0.35).sin().clamp(-0.6, 0.6) * 4.0 * z };
-    let head = body - vec2(-turn * 0.3, 17.0 * z);
-    out.push(Shape::circle_filled(head, 10.0 * z, FEATHER));
-    for s in [-1.0f32, 1.0] {
-        out.push(solid(vec![head + vec2(s * 4.0, -7.0) * z, head + vec2(s * 9.0, -6.0) * z, head + vec2(s * 8.0, -14.0) * z], FEATHER));
-        let eye = head + vec2(s * 4.2 * z + turn, 0.0);
-        out.push(Shape::circle_filled(eye, 3.4 * z, FEATHER_LIGHT));
-        if flying.is_some() || (t % 5.0) > 0.15 {
-            out.push(Shape::circle_filled(eye, 2.3 * z, EYE));
-            out.push(Shape::circle_filled(eye, 1.0 * z, DARK));
-        }
-    }
-    let beak = head + vec2(turn, 0.0);
-    out.push(solid(vec![beak + vec2(-1.5, 3.0) * z, beak + vec2(1.5, 3.0) * z, beak + vec2(0.0, 6.5) * z], BEAK));
-    out
-}
-
 /// Chapter `k`'s big lantern, hanging by a string from its branch at `hook`, swaying a little, as
 /// lit as `shown`: it swells out of the swarm that becomes it. Where it hangs, and its shapes.
 fn big_lantern(hook: Pos2, shown: f32, u: f32, k: usize, time: f64) -> (Pos2, Vec<Shape>) {
@@ -392,7 +296,7 @@ fn big_lantern(hook: Pos2, shown: f32, u: f32, k: usize, time: f64) -> (Pos2, Ve
     let swing = (t * 0.7 + k as f32).sin() * 0.06;
     let down = vec2(swing, 1.0).normalized();
     let at = hook + down * 30.0 * u;
-    let mut out = vec![Shape::line_segment([hook, at - down * 13.0 * u * s], Stroke::new(1.0 * u, glow(FEATHER_LIGHT, s)))];
+    let mut out = vec![Shape::line_segment([hook, at - down * 13.0 * u * s], Stroke::new(1.0 * u, glow(STRING, s)))];
     out.extend(lantern(at, s, 2.6 * u * s.max(0.05), k, time));
     (at, out)
 }
@@ -400,7 +304,7 @@ fn big_lantern(hook: Pos2, shown: f32, u: f32, k: usize, time: f64) -> (Pos2, Ve
 impl App {
     /// The forest on the desk, behind the pages lying at `page`, in the Magic Forest only: a lantern
     /// for each page the chapter being written has had, a big lantern in the trees for each
-    /// chapter before it (`Doc::garden`, so none goes out), and the owl beside the newest.
+    /// chapter before it (`Doc::garden`, so none goes out).
     pub fn draw_forest(&mut self, ui: &egui::Ui, area: Rect, page: Rect) {
         self.eggs.forest = None;
         if self.themes.theme != Theme::Forest {
@@ -465,13 +369,6 @@ impl App {
             painter.extend(big_lantern(spot(k).hook(), shown(k), unit, k, now).1);
             seen.hung.push((spot(k).hook(), shown(k)));
         }
-        // The owl sits by the newest big lantern, or where the first will hang; while it brings a
-        // title it is drawn in flight over the page (`draw_carrier`), on its way to sit there.
-        e.perch = (!places.is_empty()).then(|| perch(&spot(chapter.saturating_sub(1))));
-        if let Some(at) = e.perch.filter(|_| e.lift.is_none_or(|l| l.by != Carrier::Owl)) {
-            painter.extend(owl(at, None, unit, now));
-            seen.owl = Some(at);
-        }
         // The swarm flying into the trees, each lantern to the big one's place, and into it.
         if let Some((q, k, n)) = merging.filter(|_| !places.is_empty()) {
             let to = spot(k).hook() + vec2(0.0, 30.0 * unit);
@@ -498,13 +395,12 @@ impl App {
 }
 
 /// The forest drawn last frame, for tests: each lantern of the swarm, each flying into the trees,
-/// each big lantern in them, where it hangs from and how lit it is, and where the owl sits.
+/// and each big lantern in them, where it hangs from and how lit it is.
 #[derive(Clone, Default, Debug)]
 pub struct Seen {
     pub lanterns: Vec<Pos2>,
     pub flowing: Vec<Pos2>,
     pub hung: Vec<(Pos2, f32)>,
-    pub owl: Option<Pos2>,
 }
 
 #[cfg(test)]
@@ -559,29 +455,5 @@ mod tests {
         assert!(hooks[..8].iter().all(|h| near(h) < 330.0), "the first eight close to the page: {:?}", &hooks[..8]);
         let lefts = hooks[..8].iter().filter(|h| h.x < page().left()).count();
         assert!((3..=5).contains(&lefts), "on both sides: {lefts}");
-        assert!(places.iter().all(|s| perch(s).distance(s.hook()) < 70.0), "the owl can sit beside each");
-    }
-
-    #[test]
-    fn the_owl_flies_from_its_perch_with_the_title_sets_it_in_place_and_sits_by_the_new_lantern() {
-        let (from, to) = (pos2(300.0, 500.0), pos2(1100.0, 300.0));
-        let place = Rect::from_min_size(pos2(600.0, 140.0), vec2(200.0, 30.0));
-        let pace = Carrier::Owl.pace();
-        let at = |t: f32| pose_of(Carrier::Owl, t * pace, None);
-        let feet = |t: f32| flight(at(t), place, from, to, 1.0).feet;
-        let title = |t: f32| place.center_top() + owl_offset(at(t), place, from, to, 1.0);
-        assert!(feet(0.0).distance(from) < 0.5 && title(0.0).distance(from) < 0.5, "from its perch, the title in its feet");
-        let over = feet(OVER);
-        assert!((over.x - place.center().x).abs() < 1.0 && over.y < place.top(), "over the title's place: {over:?}");
-        assert!(title(ENTER + RUN + LOWER).distance(place.center_top()) < 0.5, "lowered into place");
-        assert_eq!(title(COURSE - LEAVE), place.center_top(), "and let go");
-        assert!(feet(COURSE).distance(to) < 0.5, "sitting at its new perch");
-        assert!(pose_of(Carrier::Owl, (COURSE + 0.01) * pace, None).done);
-        let mut was = feet(0.0);
-        for f in 1..(COURSE * 60.0) as usize {
-            let now = feet(f as f32 / 60.0);
-            assert!(now.distance(was) < 40.0, "flying, not jumping, at {f}");
-            was = now;
-        }
     }
 }

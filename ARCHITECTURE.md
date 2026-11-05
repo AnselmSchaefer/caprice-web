@@ -94,7 +94,7 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `ideas.rs` | The What next window (lower left): ways the story could go on from the caret, kept in the scratchpad |
 | `fonts.rs` | Installed fonts loaded on demand, a missing one drawn with a twin of the same widths |
 | `theme.rs` | The themes (`Theme`, `Palette`): colours and egui visuals around the page, the palette in use (`pal`), fading from one to the next, the choice kept in the data folder; the page's own `PAPER` and `INK` |
-| `eggs.rs` | What is hidden in the magic themes: in the Magic Garden a plant a chapter growing on the desk and a balloon flying in each new chapter title; in the Magic City a street of houses a chapter, a floor a page, and a dragon flying a new title in held in its feet; in the Magic Sea a ship a chapter, built in a yard a part a page and launched into the bay when the next chapter begins; in the Magic Forest (`eggs/forest.rs`) an old forest at night with a swarm of lanterns, a lantern a page, each chapter's swarm becoming a big lantern on a branch, and an owl bringing each new title |
+| `eggs.rs` | What is hidden in the magic themes: in the Magic Garden a plant a chapter growing on the desk and a balloon flying in each new chapter title; in the Magic City a street of houses a chapter, a floor a page, and a dragon flying a new title in held in its feet; in the Magic Sea a ship a chapter, built in a yard a part a page and launched into the bay when the next chapter begins; in the Magic Forest (`eggs/forest.rs`) an old forest at night with a swarm of lanterns, a lantern a page, each chapter's swarm becoming a big lantern on a branch near the page |
 | `platform.rs` | What the desktop and the browser do differently: background work (`spawn`, `Waker`, `keep_awake`), the time and time zone, the run's id, the data folder, file dialogs (`Dialog`), uploads and downloads, requests to Caprice's server (`send`, `go_to`) (R31, R33) |
 | `platform/fs.rs` | Files: the system's on the desktop; in the browser, kept in memory by path and mirrored to IndexedDB (R31) |
 | `platform/worker.rs` | In the browser, a Web Worker for each piece of background work, started from `web/worker.js` with nothing evaluated (R31) |
@@ -1095,7 +1095,7 @@ same in every theme, so what is printed (R20) and exported (R10) never depends o
 
 The magic themes hide things for the writer to find (`eggs.rs`): the Magic Garden (`Theme::Garden`)
 a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a dragon, the Magic Sea
-(`Theme::Sea`) ships, the Magic Forest (`Theme::Forest`) lanterns and an owl. Their blurbs give nothing away. What a theme hides is its own: picking another theme is how to stop it.
+(`Theme::Sea`) ships, the Magic Forest (`Theme::Forest`) lanterns. Their blurbs give nothing away. What a theme hides is its own: picking another theme is how to stop it.
 
 - **The garden lies on the desk, behind every page**, in the Magic Garden only. `draw_garden` is
   called in `frame` right after `page_rect` and before any page is drawn, so the pages hide what is
@@ -1199,17 +1199,10 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   lantern would hang behind the page, under the window's top or low among the trunks, nor within
   reach of one before it; chapters past them all hang on the last. Its warm light falls on the
   trunks about it and its own tree's bark (`warm_light`). Light is drawn as one mesh fading to
-  nothing (`radial`): circles laid over each other showed rings. The owl sits beside the newest
-  big lantern, or where the first will hang (`perch`, kept in `Eggs::perch` each frame). It brings
-  each new chapter title (`Carrier::Owl`): it flies out from where it sat when the title was made
-  (`Eggs::flew_from`, set in `maybe_lift_title`) with the title in its talons, close above it so
-  that it stays below the toolbar over a title at the top of a page, lowers it into place, and
-  flies to sit by the new lantern, arriving as its course ends (`flight`, along `pose`'s course at
-  its own pace). Its way is not `rig`'s from the side: the title is moved by `Eggs::offset`, which
-  `editor_surface` calls, and it is drawn in flight by `draw_carrier`, sitting by `draw_forest`,
-  never both. A story opened or the theme picked comes with all of it there (`forest_for`,
-  forgotten in another theme). In the Magic Forest the app asks for a frame every 33 ms even when
-  idle, the most of any theme.
+  nothing (`radial`): circles laid over each other showed rings. Nothing brings a title in this
+  theme. A story opened or the theme picked comes with all of it there (`forest_for`, forgotten
+  in another theme). In the Magic Forest the app asks for a frame every 33 ms even when idle, the
+  most of any theme.
 - **It grows in sight.** How far each plant is drawn grown (`Eggs::grown`, by `story_id`) only goes
   up, a tenth of a second's growth a frame at most; a story opened comes with its garden grown.
   So does a theme picked: each forgets how far it had shown things (`grown_for`, `built_for`,
@@ -1293,11 +1286,10 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   `the_size_of_things_follows_a_new_window_height_over_a_moment`,
   `the_forest_is_there_from_the_start_the_same_for_the_same_story`,
   `the_lanterns_fly_together_in_a_swarm_which_drifts_from_one_side_of_the_page_to_the_other`,
-  `the_trees_nearest_the_page_have_branches_enough_for_many_big_lanterns_close_to_it`,
-  `the_owl_flies_from_its_perch_with_the_title_sets_it_in_place_and_sits_by_the_new_lantern`
+  `the_trees_nearest_the_page_have_branches_enough_for_many_big_lanterns_close_to_it`
   (in `eggs/forest.rs`); and
   `in_the_magic_forest_each_page_lights_a_lantern_in_the_swarm`,
-  `in_the_magic_forest_the_owl_brings_each_new_title_and_sits_by_the_new_big_lantern`,
+  `in_the_magic_forest_a_chapter_s_swarm_becomes_a_big_lantern_in_the_trees_near_the_page`,
   `a_window_made_narrower_and_wider_again_moves_no_floor_from_one_house_to_another`,
   `a_window_made_narrower_leaves_every_ship_in_its_place_beside_the_page_and_as_big`,
   `in_the_magic_sea_a_ship_is_built_a_part_a_page_and_sails_out_whole_when_the_next_chapter_begins`,
@@ -1793,8 +1785,8 @@ test that its limit refuses and leaves R2 alone (R33). Then `node --test web/api
   (a pocket watch, a teapot, a ship in a bottle), each with a little life of its own. Found not to
   look well and left out: a door, a nest, a bat, a book in a hollow. Then all of them were too
   many details: only the lanterns stay, the trees nearest the page got more branches so that more
-  big lanterns hang near it, and the owl brings each new title from where it sits and then sits by
-  the new lantern, like the dragon and the balloon but from its perch rather than the side. All of it is counted from
+  big lanterns hang near it. An owl bringing each new title from its perch and sitting by the new
+  lantern was tried and taken out again: nothing brings a title in this theme. All of it is counted from
   the garden's saved pages per chapter, so nothing new is saved and nothing goes out (R9, R30).
   The swarm is a wave of the time rather than a wander kept from frame to frame, so a test can
   look at any moment.
