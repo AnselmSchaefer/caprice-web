@@ -11,7 +11,9 @@
 //! title in place and flies away. Both follow one course in time (`pose`), each along its own way
 //! (`rig`). In the Magic Sea a ship is built in a yard for each chapter, a part for each page, each
 //! coming out of a little light; when the next chapter begins, the ship is finished at once, slides
-//! down the slipway and sails out to lie in the bay with the others, rocking on the water.
+//! down the slipway and sails out to lie in the bay with the others, rocking on the water. In
+//! the Magic Forest each page lights a lantern in a swarm over an old forest, each chapter's swarm
+//! becomes a big lantern in its trees (`forest`).
 //!
 //! None of it is on the page: the garden, the city and the sea lie on the desk behind the pages, and what brings a title
 //! is drawn
@@ -26,6 +28,8 @@ use eframe::egui::{self, Color32, Pos2, Rect, Shape, Stroke, Vec2, pos2, vec2};
 
 use crate::App;
 use crate::theme::Theme;
+
+pub mod forest;
 
 /// What brings a new chapter title in, in which theme.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -242,6 +246,15 @@ pub struct Eggs {
     /// Each ship drawn last frame: its chapter, around it, how many parts were shown, and whether
     /// it was in the water; for tests.
     pub ships: Vec<(usize, Rect, usize, bool)>,
+    /// The story the Magic Forest was shown for, the chapter whose swarm of lanterns is shown,
+    /// when each of its lanterns was lit (long ago for those already there), and the swarm flying
+    /// into the great tree, if one is: since when, its chapter and how many lanterns it had.
+    forest_for: Option<String>,
+    flowed: usize,
+    born: Vec<f64>,
+    merge: Option<(f64, usize, usize)>,
+    /// The forest drawn last frame, for tests.
+    pub forest: Option<forest::Seen>,
 }
 
 /// The dragon or the balloon bringing the chapter title that begins at `at` into place on page `page`.
@@ -260,7 +273,7 @@ impl Default for Eggs {
         let seed = crate::platform::since_epoch().as_nanos() as u64;
         Self { grown_for: None, grown: Vec::new(), grown_at: 0.0, measured: None, lift: None, place: None, desk: Rect::NOTHING, odds: None, from_right: false, rng: seed | 1, plants: Vec::new(),
             built_for: None, built: 0.0, built_at: 0.0, order: Vec::new(), scale: None, houses: Vec::new(), light: None, sailed_for: None, berths: Vec::new(), rigged: 0.0, rigged_at: 0.0,
-            launch: None, ships: Vec::new() }
+            launch: None, ships: Vec::new(), forest_for: None, flowed: 0, born: Vec::new(), merge: None, forest: None }
     }
 }
 

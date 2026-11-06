@@ -10,13 +10,25 @@
   Referrer-Policy: no-referrer
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
 
+# The page itself is never kept: it names this build's files, and a page kept from the build
+# before (a tab restored, going back to it) asked for files a new build had taken away, and stayed
+# on "opening" until the browser's history was cleared. worker.js and the snippets keep their
+# names across builds (the snippets' folder is named for the crate, not their contents), so they
+# are asked about each time: kept for good, a snippet's old copy failed the integrity the new page
+# asks of it, and kept failing however often the page was reloaded.
+/
+  Cache-Control: no-store
+/index.html
+  Cache-Control: no-store
+/worker.js
+  Cache-Control: no-cache
+/snippets/*
+  Cache-Control: no-cache
+
 # Named by their contents, so a new build gives new names: kept a year, never asked for again.
-# index.html is not, and so is asked for again each time, and names the new ones.
 /caprice-web-*
   Cache-Control: public, max-age=31536000, immutable
 /icon-*
-  Cache-Control: public, max-age=31536000, immutable
-/snippets/*
   Cache-Control: public, max-age=31536000, immutable
 
 # The fonts keep their names; a day, then asked again.
