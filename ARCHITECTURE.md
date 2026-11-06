@@ -1085,7 +1085,10 @@ same in every theme, so what is printed (R20) and exported (R10) never depends o
   four-coloured G), in every theme, as Google asks and as people know it; like the pictures, it
   is a deliberate exception to `pal()`.
 - **Light themes must stay readable**: `text` on `dock` at 4.5:1, `text_dim` at 3:1. A new theme
-  goes into `Theme::ALL`, so the gallery and the test cover it.
+  goes into `Theme::ALL`, so the gallery and the test cover it; a magic one (hiding things to
+  find, R30) also into `Theme::magic`, as the Page menu's Theme gallery shows the classic themes
+  or the magic ones as a switch at its top says, first those of the theme in use
+  (`the_theme_menu_shows_the_classic_themes_or_the_magic_ones_as_its_switch_says`).
 - The choice is kept in the data folder (`theme.json`), not in the story; `Harness` keeps it
   nowhere (`Themes::kept_in(None)`).
 - Tests: `a_theme_picked_in_the_page_menu_washes_over_the_desk_and_is_kept_for_next_time`,
@@ -1381,6 +1384,27 @@ them; it asks `platform` instead, whose desktop half does what Caprice always di
   When touching it: a library that evaluates code, or a new inline script, is refused by the
   browser; `web/serve.mjs` serves `_headers` as Cloudflare does, so the smoke test sees it.
   `smoke.mjs` checks that a stranger's inline script is refused, and fails on any refusal of ours.
+- **The page itself is never kept; a build's own files are kept for good only if named by
+  their contents.** Trunk names the script and the WebAssembly by their contents, so a new build
+  has new names and they can be kept a year (`_headers`). The page names them, so it is
+  `no-store`: kept, a tab restored or gone back to used the page of the build before, asked for
+  files the new one had taken away (Cloudflare answers 403, `serve.mjs` 404), and stayed on
+  "opening" until the browser's history was cleared, here and when deployed. `worker.js` and the
+  snippets keep their names across builds (the snippets' folder is named for the crate, not their
+  contents), so they are asked about each time (`no-cache`): kept a year, a snippet's old copy
+  failed the integrity the new page asks of it, and kept failing however often it was reloaded.
+  Should a file of it still not load, the page fetches every file it loads afresh past the
+  browser's copies (`cache: "reload"`; only the one that failed, and the next stale one failed
+  after it) and reloads itself once (`index.html`, remembered in `sessionStorage` until it has
+  opened), and says which file if that does not help, forgetting it tried so that a reload tries
+  again: a file failing to load is never an error on `window`, so without this it waited 20
+  seconds to say only that it was still opening. Tried for real in a browser that keeps what it
+  is sent: with old snippets kept a year, the new build stayed on "opening" without this, and
+  opened with it.
+  Anything new served beside the page under a name that stays across builds needs a rule there
+  too. Checked by `smoke.mjs`: "the page itself is never kept", "the snippets, whose names stay,
+  are asked about each time", "a file of it gone at first is fetched again, and Caprice opens",
+  "an old copy of a file failing its integrity is fetched afresh, and Caprice opens".
 - **"Follow my writing" is not offered in the browser** (the Scene menu hides its checkbox), for
   now. It is the only way into `Mode::Writing`, which is never saved.
 
@@ -1786,7 +1810,9 @@ test that its limit refuses and leaves R2 alone (R33). Then `node --test web/api
   look well and left out: a door, a nest, a bat, a book in a hollow. Then all of them were too
   many details: only the lanterns stay, the trees nearest the page got more branches so that more
   big lanterns hang near it. An owl bringing each new title from its perch and sitting by the new
-  lantern was tried and taken out again: nothing brings a title in this theme. All of it is counted from
+  lantern was tried and taken out again: nothing brings a title in this theme. A word from its
+  page on each small lantern and the chapter's title on each big one, on round paper lanterns, was
+  tried too and taken out again: the plain small lanterns were liked better. All of it is counted from
   the garden's saved pages per chapter, so nothing new is saved and nothing goes out (R9, R30).
   The swarm is a wave of the time rather than a wander kept from frame to frame, so a test can
   look at any moment.

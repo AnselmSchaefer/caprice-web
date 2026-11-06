@@ -90,6 +90,12 @@ impl Theme {
         Theme::Forest,
     ];
 
+    /// Is it one of the magic themes, which hide things to find (`eggs.rs`), rather than colours
+    /// alone? The Page menu shows them apart.
+    pub fn magic(self) -> bool {
+        matches!(self, Theme::Garden | Theme::City | Theme::Sea | Theme::Forest)
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Theme::Midnight => "Midnight Ink",

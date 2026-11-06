@@ -251,52 +251,64 @@ fn color_dropdown(ui: &mut egui::Ui, color: Option<[u8; 3]>) -> Option<Option<[u
     pick
 }
 
-/// The themes, each drawn as a little desk with its dock, a page and the accent; the one clicked
-/// becomes `theme`.
+/// The themes, each drawn as a little desk with its dock, a page and the accent: the classic ones,
+/// of colours alone, or the magic ones, as the switch at the top says (first those of the theme in
+/// use, then as last switched); the one clicked becomes `theme`.
 fn theme_gallery(ui: &mut egui::Ui, theme: &mut Theme) {
-    egui::Grid::new("theme_gallery").num_columns(2).spacing(vec2(12.0, 6.0)).show(ui, |ui| {
-        for (k, t) in Theme::ALL.into_iter().enumerate() {
-            ui.vertical(|ui| {
-                ui.label(egui::RichText::new(t.name()).size(12.0).color(pal().text_dim));
-                let (rect, resp) = ui.allocate_exact_size(vec2(150.0, 84.0), Sense::click());
-                resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, t.name()));
-                let c = t.palette();
-                let p = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
-                p.rect_filled(rect, 6.0, c.desk);
-                let glow = Rect::from_min_max(rect.min, pos2(rect.right(), rect.center().y));
-                p.rect_filled(glow, egui::CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 }, c.desk_top.gamma_multiply(0.7));
-                let dock = Rect::from_min_size(rect.min + vec2(14.0, 7.0), vec2(rect.width() - 28.0, 14.0));
-                p.rect_filled(dock, 5.0, c.dock);
-                p.rect_stroke(dock, 5.0, Stroke::new(1.0, c.dock_edge), egui::StrokeKind::Inside);
-                for (j, fill) in [c.btn, c.btn, c.accent, c.btn].into_iter().enumerate() {
-                    let b = Rect::from_min_size(dock.min + vec2(4.0 + j as f32 * 13.0, 3.0), vec2(10.0, 8.0));
-                    p.rect_filled(b, 2.0, fill);
-                }
-                let line = Rect::from_min_size(pos2(dock.right() - 34.0, dock.center().y - 1.0), vec2(28.0, 2.0));
-                p.rect_filled(line, 1.0, c.text_dim);
-                let page = Rect::from_min_size(pos2(rect.center().x - 22.0, dock.bottom() + 7.0), vec2(44.0, 52.0));
-                p.rect_filled(page, 1.0, crate::theme::PAPER);
-                for j in 0..6 {
-                    let w = if j == 5 { 18.0 } else { 34.0 };
-                    let y = page.top() + 7.0 + j as f32 * 6.0;
-                    p.rect_filled(Rect::from_min_size(pos2(page.left() + 5.0, y), vec2(w, 1.5)), 0.0, Color32::from_gray(190));
-                }
-                p.circle_filled(pos2(page.right() + 12.0, page.bottom() - 6.0), 4.0, c.accent);
-                p.circle_filled(pos2(page.left() - 12.0, page.top() + 10.0), 2.5, c.caret);
-                if *theme == t {
-                    ui.painter().rect_stroke(rect.expand(1.5), 7.0, Stroke::new(2.0, pal().accent), egui::StrokeKind::Outside);
-                } else if resp.hovered() {
-                    ui.painter().rect_stroke(rect, 6.0, Stroke::new(1.0, pal().text_dim), egui::StrokeKind::Outside);
-                }
-                if resp.on_hover_text(t.about()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                    *theme = t;
-                }
-            });
-            if k % 2 == 1 {
-                ui.end_row();
-            }
-        }
+    let id = egui::Id::new("theme_gallery_magic");
+    let mut magic = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(theme.magic());
+    ui.horizontal(|ui| {
+        ui.selectable_value(&mut magic, false, "Classic").on_hover_text("Colours around the page");
+        ui.selectable_value(&mut magic, true, "Magic").on_hover_text("Themes that hide things to find");
     });
+    ui.data_mut(|d| d.insert_temp(id, magic));
+    ui.separator();
+    {
+        let themes = Theme::ALL.into_iter().filter(|t| t.magic() == magic);
+        egui::Grid::new(("theme_gallery", magic)).num_columns(2).spacing(vec2(12.0, 6.0)).show(ui, |ui| {
+            for (k, t) in themes.enumerate() {
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new(t.name()).size(12.0).color(pal().text_dim));
+                    let (rect, resp) = ui.allocate_exact_size(vec2(150.0, 84.0), Sense::click());
+                    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, t.name()));
+                    let c = t.palette();
+                    let p = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+                    p.rect_filled(rect, 6.0, c.desk);
+                    let glow = Rect::from_min_max(rect.min, pos2(rect.right(), rect.center().y));
+                    p.rect_filled(glow, egui::CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 }, c.desk_top.gamma_multiply(0.7));
+                    let dock = Rect::from_min_size(rect.min + vec2(14.0, 7.0), vec2(rect.width() - 28.0, 14.0));
+                    p.rect_filled(dock, 5.0, c.dock);
+                    p.rect_stroke(dock, 5.0, Stroke::new(1.0, c.dock_edge), egui::StrokeKind::Inside);
+                    for (j, fill) in [c.btn, c.btn, c.accent, c.btn].into_iter().enumerate() {
+                        let b = Rect::from_min_size(dock.min + vec2(4.0 + j as f32 * 13.0, 3.0), vec2(10.0, 8.0));
+                        p.rect_filled(b, 2.0, fill);
+                    }
+                    let line = Rect::from_min_size(pos2(dock.right() - 34.0, dock.center().y - 1.0), vec2(28.0, 2.0));
+                    p.rect_filled(line, 1.0, c.text_dim);
+                    let page = Rect::from_min_size(pos2(rect.center().x - 22.0, dock.bottom() + 7.0), vec2(44.0, 52.0));
+                    p.rect_filled(page, 1.0, crate::theme::PAPER);
+                    for j in 0..6 {
+                        let w = if j == 5 { 18.0 } else { 34.0 };
+                        let y = page.top() + 7.0 + j as f32 * 6.0;
+                        p.rect_filled(Rect::from_min_size(pos2(page.left() + 5.0, y), vec2(w, 1.5)), 0.0, Color32::from_gray(190));
+                    }
+                    p.circle_filled(pos2(page.right() + 12.0, page.bottom() - 6.0), 4.0, c.accent);
+                    p.circle_filled(pos2(page.left() - 12.0, page.top() + 10.0), 2.5, c.caret);
+                    if *theme == t {
+                        ui.painter().rect_stroke(rect.expand(1.5), 7.0, Stroke::new(2.0, pal().accent), egui::StrokeKind::Outside);
+                    } else if resp.hovered() {
+                        ui.painter().rect_stroke(rect, 6.0, Stroke::new(1.0, pal().text_dim), egui::StrokeKind::Outside);
+                    }
+                    if resp.on_hover_text(t.about()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                        *theme = t;
+                    }
+                });
+                if k % 2 == 1 {
+                    ui.end_row();
+                }
+            }
+        });
+    }
 }
 
 /// Something picked in the Insert menu.

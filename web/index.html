@@ -22,7 +22,9 @@
 <div id="loading">Caprice is opening…</div>
 <script>
   const loading = document.getElementById("loading");
-  addEventListener("TrunkApplicationStarted", () => loading.remove());
+  // Whether the page has just reloaded itself to fetch a new build (below); forgotten once open.
+  const remembered = (set) => { try { return set === undefined ? sessionStorage.getItem("caprice-reloaded") : (set ? sessionStorage.setItem("caprice-reloaded", "1") : sessionStorage.removeItem("caprice-reloaded")); } catch { return null; } };
+  addEventListener("TrunkApplicationStarted", () => { loading.remove(); remembered(false); });
   // A phone has no console to look in: what keeps Caprice from opening is said here, in place of
   // "opening", which would otherwise stay for good.
   const tell = (text) => {
@@ -39,6 +41,26 @@
         + "Open the link in Chrome, Edge or Firefox itself, not in another app's own browser.");
   }, 20000);
   addEventListener("error", (e) => failed(String(e.message || e.error)));
+  // One of Caprice's own files would not load (a script or one preloaded): most likely this page
+  // was kept from a build before and names files a new one has taken away, or the browser kept
+  // old copies of files that have the same names in the new one, and they fail the integrity asked
+  // of them. Fetch every file the page loads afresh, past the browser's copies (not only the one
+  // that failed: the next would fail after it), then reload once, which fetches the page afresh
+  // too. If that does not help either, say which file, and let a reload try all of it again.
+  const fresh = () => Promise.all([...document.querySelectorAll("link[href], script[src]")]
+    .map((el) => el.href || el.src).filter((url) => url.startsWith(location.origin))
+    .map((url) => fetch(url, { cache: "reload" }).catch(() => {})));
+  addEventListener("error", (e) => {
+    const file = e.target instanceof HTMLScriptElement ? e.target.src : e.target instanceof HTMLLinkElement ? e.target.href : "";
+    if (!file) return;
+    if (!remembered()) {
+      remembered(true);
+      fresh().finally(() => location.reload());
+    } else {
+      remembered(false);
+      failed("a file of it would not load (" + file.split("/").pop() + "). Reload the page to try again.");
+    }
+  }, true);
   addEventListener("unhandledrejection", (e) => failed(String((e.reason && e.reason.message) || e.reason)));
 </script>
 </body>

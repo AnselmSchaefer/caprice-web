@@ -276,6 +276,30 @@ await page.screenshot({ path: `${out}/10-welcome-again.png` });
 
 check("no errors on the page", errors.length === 0, [...new Set(errors)].slice(0, 8).join("\n  "));
 
+// The page itself is never kept, so a new build is what opens; and a page kept from a build before,
+// naming files a new one took away, reloads itself once and opens rather than "opening" for good.
+check("the page itself is never kept", ((await fetch(url)).headers.get("cache-control") ?? "").includes("no-store"));
+// The snippets keep their names across builds: asked about each time, never kept for good.
+const snippet = (await (await fetch(url)).text()).match(/snippets\/[^"]+\.js/)?.[0];
+check("the snippets, whose names stay, are asked about each time", snippet !== undefined && ((await fetch(new URL(snippet, url))).headers.get("cache-control") ?? "").includes("no-cache"), snippet);
+const stale = await browser.newPage({ viewport: { width: 1280, height: 860 } });
+let fetched = 0;
+await stale.route(/caprice-web-[0-9a-f]+\.js$/, r => fetched++ === 0 ? r.fulfill({ status: 404, body: "" }) : r.continue());
+await stale.goto(url);
+const recovered = await stale.waitForSelector("#loading", { state: "detached", timeout: 120000 }).then(() => true, () => false);
+check("a file of it gone at first is fetched again, and Caprice opens", recovered && fetched >= 2, `fetched ${fetched} times`);
+await stale.close();
+// A snippet the browser kept from a build before, which fails the integrity the new page asks.
+const old = await browser.newPage({ viewport: { width: 1280, height: 860 } });
+// Every snippet is an old copy the first time it is asked for, as when the browser kept them all.
+let served = 0;
+const once = new Set();
+await old.route(/snippets\/.+\.js$/, r => (served++, once.has(r.request().url())) ? r.continue() : (once.add(r.request().url()), r.fulfill({ status: 200, contentType: "text/javascript", body: "// an older copy" })));
+await old.goto(url);
+const renewed = await old.waitForSelector("#loading", { state: "detached", timeout: 120000 }).then(() => true, () => false);
+check("an old copy of a file failing its integrity is fetched afresh, and Caprice opens", renewed, `served ${served} times`);
+await old.close();
+
 // When it cannot open, the page says why instead of "opening" for good: a phone has no console.
 const broken = await browser.newPage({ viewport: { width: 412, height: 839 } });
 await broken.route(/_bg\.wasm$/, r => r.fulfill({ status: 200, contentType: "application/wasm", body: Buffer.from("not wasm") }));

@@ -6073,6 +6073,28 @@ mod tests {
     }
 
     #[test]
+    fn the_theme_menu_shows_the_classic_themes_or_the_magic_ones_as_its_switch_says() {
+        let mut h = Harness::new();
+        h.frames(3, vec![], Modifiers::NONE);
+        // What the gallery offers, leaving out the theme in use, whose name is on the menu's button too.
+        let offered = |h: &Harness| theme::Theme::ALL.into_iter().filter(|&t| t != h.app.themes.theme && h.painted_at(t.name()).is_some()).collect::<Vec<_>>();
+        let classic: Vec<theme::Theme> = theme::Theme::ALL.into_iter().filter(|&t| !t.magic() && t != theme::Theme::Midnight).collect();
+        let magic: Vec<theme::Theme> = theme::Theme::ALL.into_iter().filter(|t| t.magic()).collect();
+        h.click_widget("Page");
+        h.click_widget("Midnight Ink ⏵");
+        assert_eq!(offered(&h), classic, "those of the theme in use, the classic ones");
+        h.click_widget("Magic");
+        h.frames(2, vec![], Modifiers::NONE);
+        assert_eq!(offered(&h), magic, "switched, the magic ones");
+        h.click_widget("Magic Forest");
+        h.wait(1.0);
+        assert_eq!(h.app.themes.theme, theme::Theme::Forest);
+        h.click_widget("Classic");
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(offered(&h).iter().all(|t| !t.magic()) && h.painted_at("Lagoon").is_some(), "and back");
+    }
+
+    #[test]
     fn the_docks_stay_readable_in_every_theme() {
         let mut h = Harness::new();
         for t in theme::Theme::ALL {
