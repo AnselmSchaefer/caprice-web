@@ -706,6 +706,7 @@ impl App {
         self.draw_city(ui, area, page_rect);
         self.draw_sea(ui, area, page_rect);
         self.draw_forest(ui, area, page_rect);
+        self.draw_reef(ui, area, page_rect);
         let base = self.pos.floor() as usize;
         let t = self.pos - base as f32;
         self.animate_held(ui);
@@ -747,6 +748,7 @@ impl App {
                 // Someone of the cast may be behind the page, peeking out (`peek.rs`).
                 self.update_peeks(&ctx, i);
                 self.draw_peek(ui, page_rect, i, true);
+                self.draw_carrier(ui, page_rect, i, true);
                 Self::paper(ui.painter(), page_rect);
                 ui.painter().extend(self.backdrop_shapes(&ctx, i, page_rect, &|p| p, 1.0, 1.0));
                 self.draw_bands(ui, page_rect, i);
@@ -755,7 +757,7 @@ impl App {
                 self.text_boxes(ui, page_rect, i);
                 self.draw_notes(ui, page_rect, i);
                 self.draw_peek(ui, page_rect, i, false);
-                self.draw_carrier(ui, page_rect, i);
+                self.draw_carrier(ui, page_rect, i, false);
                 self.pen_surface(ui, page_rect, i);
             }
         } else if self.slides_in(base) && self.appearance == Appearance::Book {
@@ -6274,12 +6276,18 @@ mod tests {
         chapter_one(&mut h);
         assert!(h.app.eggs.forest.is_some());
         assert!(h.app.eggs.plants.is_empty() && h.app.eggs.houses.is_empty() && h.app.eggs.ships.is_empty());
+        assert!(h.app.eggs.reef.is_none(), "no reef in the forest");
+        let mut h = Harness::new();
+        in_the_theme(&mut h, theme::Theme::Reef, 1.0);
+        chapter_one(&mut h);
+        assert!(h.app.eggs.reef.is_some() && h.app.eggs.forest.is_none() && h.app.eggs.ships.is_empty());
+        assert!(h.app.eggs.lift.is_some_and(|l| matches!(l.by, eggs::Carrier::Octopus { .. })), "the octopus brings it");
         let mut h = Harness::new();
         h.frames(3, vec![], Modifiers::NONE);
         h.app.eggs.odds = Some(1.0);
         chapter_one(&mut h);
         assert!(h.app.eggs.plants.is_empty() && h.app.eggs.houses.is_empty() && h.app.eggs.ships.is_empty() && h.app.eggs.lift.is_none());
-        assert!(h.app.eggs.forest.is_none());
+        assert!(h.app.eggs.forest.is_none() && h.app.eggs.reef.is_none());
     }
 
     #[test]
@@ -6636,18 +6644,18 @@ mod tests {
     }
 
     #[test]
-    fn print_shows_neither_the_garden_the_houses_the_ships_the_forest_nor_what_brings_a_title() {
+    fn print_shows_neither_the_garden_the_houses_the_ships_the_forest_the_reef_nor_what_brings_a_title() {
         let mut h = Harness::new();
         chapter_one(&mut h);
         let ctx = h.ctx.clone();
         let plain = h.app.pdf(&ctx, 0..=0).unwrap();
-        for t in [theme::Theme::City, theme::Theme::Garden, theme::Theme::Sea, theme::Theme::Forest] {
+        for t in [theme::Theme::City, theme::Theme::Garden, theme::Theme::Sea, theme::Theme::Forest, theme::Theme::Reef] {
             let mut g = Harness::new();
             in_the_theme(&mut g, t, 1.0);
             chapter_one(&mut g);
             g.frames(70, vec![], Modifiers::NONE);
             let e = &g.app.eggs;
-            let drawn = !(e.plants.is_empty() && e.houses.is_empty() && e.ships.is_empty() && e.forest.is_none());
+            let drawn = !(e.plants.is_empty() && e.houses.is_empty() && e.ships.is_empty() && e.forest.is_none() && e.reef.is_none());
             assert!(drawn && (g.app.eggs.lift.is_some() || eggs::Carrier::of(t).is_none()), "{t:?}");
             let ctx = g.ctx.clone();
             assert!(g.app.pdf(&ctx, 0..=0).unwrap() == plain, "{t:?}");
@@ -6718,6 +6726,106 @@ mod tests {
         h.app.themes.choose(&ctx, theme::Theme::Forest);
         h.frames(2, vec![], Modifiers::NONE);
         assert!(seen(&h).hung.len() == 2 && seen(&h).hung.iter().all(|l| l.1 == 1.0) && seen(&h).flowing.is_empty());
+    }
+
+    #[test]
+    fn in_the_magic_reef_each_page_grows_the_chapter_s_coral_a_branch_beside_the_page() {
+        let mut h = Harness::new();
+        in_the_theme(&mut h, theme::Theme::Reef, 0.0);
+        let seen = |h: &Harness| h.app.eggs.reef.clone().expect("the reef is there");
+        assert_eq!(seen(&h).corals.iter().map(|c| c.1).collect::<Vec<_>>(), [1], "a branch for the first page");
+        assert!(seen(&h).fish.is_empty(), "no fish yet");
+        h.type_text(&"It was nearly midnight and the Prime Minister sat alone in his office. ".repeat(220));
+        let pages = h.app.doc.pages();
+        assert!(pages >= 4, "pages: {pages}");
+        h.frames(20, vec![], Modifiers::NONE);
+        let growing = seen(&h).corals[0];
+        assert!(growing.1 < pages, "growing in sight: {growing:?}");
+        h.frames((eggs::reef::GROW * 60.0) as usize * pages, vec![], Modifiers::NONE);
+        let coral = seen(&h).corals[0];
+        assert_eq!(coral.1, pages, "a branch a page");
+        // Bigger, though not always taller: tube sponges grow side by side.
+        let bigger = coral.0.contains_rect(growing.0) && coral.0.area() > growing.0.area();
+        assert!(bigger && beside_the_page(&h, coral.0), "bigger, on the desk: {coral:?} {growing:?}");
+        assert!(!coral.2, "its polyps closed while its chapter is written");
+
+        // Taking the pages away takes no branch off.
+        h.key(Key::A, Modifiers::COMMAND);
+        h.key(Key::Backspace, Modifiers::NONE);
+        h.frames(60, vec![], Modifiers::NONE);
+        assert_eq!(seen(&h).corals[0].1, pages);
+    }
+
+    #[test]
+    fn in_the_magic_reef_an_octopus_brings_each_new_chapter_title_from_behind_the_page() {
+        let mut h = Harness::new();
+        in_the_theme(&mut h, theme::Theme::Reef, 1.0);
+        let page = h.app.last_page_rect;
+        let mut sides = Vec::new();
+        for n in ["One", "Two"] {
+            h.type_text(&format!("Chapter {n}"));
+            h.click_widget("Chapter");
+            let lift = h.app.eggs.lift.expect("it came");
+            let eggs::Carrier::Octopus { right } = lift.by else { panic!("{:?}", lift.by) };
+            sides.push(right);
+            let title = format!("Chapter {n}");
+            assert!(h.painted_at(&title).is_none(), "{n}: not shown before it comes out");
+            // Its head comes out past the page's edge, with the title in its arm above its place.
+            h.frames((eggs::OVER * lift.by.pace() * 60.0) as usize, vec![], Modifiers::NONE);
+            let o = eggs::reef::octopus_at(right, eggs::pose_of(lift.by, eggs::OVER * lift.by.pace(), None), h.app.eggs.place.unwrap(), page);
+            assert!(if right { o.body.x > page.right() } else { o.body.x < page.left() }, "{n}: out from behind the page: {o:?}");
+            let held = h.painted_at(&title).expect("the title shows");
+            let skin = |h: &Harness| h.painted.iter().any(|cs| matches!(&cs.shape, egui::Shape::Circle(c) if c.fill == eggs::reef::OCTOPUS));
+            assert!(skin(&h), "{n}: the octopus is drawn");
+            h.frames((eggs::COURSE * lift.by.pace() * 60.0) as usize, vec![], Modifiers::NONE);
+            assert!(h.app.eggs.lift.is_none() && !skin(&h), "{n}: gone back behind the page");
+            let set = h.painted_at(&title).expect("the title in its place");
+            assert!(held.y < set.y - 20.0, "{n}: held up above its place: {held:?} {set:?}");
+            h.key(Key::Enter, Modifiers::NONE);
+        }
+        assert!(sides[0] != sides[1], "the next from the other side");
+    }
+
+    #[test]
+    fn in_the_magic_reef_a_chapter_s_coral_spawns_and_fish_come_to_live_about_it_when_the_next_begins() {
+        let mut h = Harness::new();
+        in_the_theme(&mut h, theme::Theme::Reef, 1.0);
+        let seen = |h: &Harness| h.app.eggs.reef.clone().unwrap();
+        chapter_one(&mut h);
+        h.key(Key::Enter, Modifiers::NONE);
+        h.type_text(&"It was nearly midnight and the Prime Minister sat alone in his office. ".repeat(100));
+        h.frames(240, vec![], Modifiers::NONE);
+        let first = seen(&h).corals[0];
+        for (n, corals) in [("Two", 2), ("Three", 3)] {
+            h.key(Key::Enter, Modifiers::NONE);
+            h.type_text(&format!("Chapter {n}"));
+            h.click_widget("Chapter");
+            h.frames(60, vec![], Modifiers::NONE);
+            let reef = seen(&h);
+            assert_eq!(reef.corals.len(), corals, "Chapter {n}: a new coral begun");
+            assert!(reef.spawn > 0, "Chapter {n}: the coral before spawns");
+            h.frames((eggs::reef::SPAWN * 60.0) as usize + 10, vec![], Modifiers::NONE);
+            let reef = seen(&h);
+            assert_eq!(reef.spawn, 0, "Chapter {n}: spawned");
+            assert!(reef.corals[..corals - 1].iter().all(|c| c.2) && !reef.corals[corals - 1].2, "Chapter {n}: open once done");
+            assert!(reef.fish.len() >= corals - 1, "Chapter {n}: fish about each coral done: {:?}", reef.fish);
+        }
+        assert_eq!(seen(&h).corals[0].1, first.1, "the first coral as it was");
+        let page = h.app.last_page_rect;
+        let corals = seen(&h).corals;
+        assert!(corals[0].0.center().x < page.left() && corals[1].0.center().x > page.right(), "on either side of the page");
+        let fish = seen(&h).fish[0];
+        h.wait(3.0);
+        assert!(seen(&h).fish[0] != fish, "the fish swim");
+
+        // Picked again, the theme shows it as it stands at once.
+        let ctx = h.ctx.clone();
+        h.app.themes.choose(&ctx, theme::Theme::Forest);
+        h.frames(2, vec![], Modifiers::NONE);
+        h.app.themes.choose(&ctx, theme::Theme::Reef);
+        h.frames(2, vec![], Modifiers::NONE);
+        let reef = seen(&h);
+        assert!(reef.corals.len() == 3 && reef.spawn == 0 && reef.corals[0].2 && reef.corals[0].1 == first.1);
     }
 
     /// The height the garden's first plant was drawn at, once grown.

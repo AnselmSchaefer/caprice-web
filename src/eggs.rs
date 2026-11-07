@@ -13,7 +13,9 @@
 //! coming out of a little light; when the next chapter begins, the ship is finished at once, slides
 //! down the slipway and sails out to lie in the bay with the others, rocking on the water. In
 //! the Magic Forest each page lights a lantern in a swarm over an old forest, each chapter's swarm
-//! becomes a big lantern in its trees (`forest`).
+//! becomes a big lantern in its trees (`forest`). In the Magic Reef each chapter has a coral, a
+//! branch for each page, which spawns when the next chapter begins and a shoal of fish comes to
+//! live about (`reef`).
 //!
 //! None of it is on the page: the garden, the city and the sea lie on the desk behind the pages, and what brings a title
 //! is drawn
@@ -30,14 +32,17 @@ use crate::App;
 use crate::theme::Theme;
 
 pub mod forest;
+pub mod reef;
 
 /// What brings a new chapter title in, in which theme.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Carrier {
-    /// In the Magic City, and in the Magic Garden; each from the right side or the left, the next
-    /// from the other side.
+    /// In the Magic City, in the Magic Garden, and in the Magic Reef; each from the right side or
+    /// the left, the next from the other side.
     Dragon { right: bool },
     Balloon { right: bool },
+    /// From behind the page, not from beyond the desk (`reef::octopus_at`).
+    Octopus { right: bool },
 }
 
 impl Carrier {
@@ -45,6 +50,7 @@ impl Carrier {
         match theme {
             Theme::City => Some(Carrier::Dragon { right: true }),
             Theme::Garden => Some(Carrier::Balloon { right: true }),
+            Theme::Reef => Some(Carrier::Octopus { right: true }),
             _ => None,
         }
     }
@@ -55,6 +61,8 @@ impl Carrier {
         match self {
             Carrier::Dragon { .. } => 1.7,
             Carrier::Balloon { .. } => 1.0,
+            // It reaches unhurried, as an octopus does.
+            Carrier::Octopus { .. } => 1.4,
         }
     }
 }
@@ -255,6 +263,15 @@ pub struct Eggs {
     merge: Option<(f64, usize, usize)>,
     /// The forest drawn last frame, for tests.
     pub forest: Option<forest::Seen>,
+    /// The story the Magic Reef was shown for and the chapter whose coral grows, how many branches
+    /// it has grown to, the last perhaps in part, and the coral spawning, if one is: since when,
+    /// and its chapter.
+    reef_for: Option<(String, usize)>,
+    branched: f32,
+    branched_at: f64,
+    spawn: Option<(f64, usize)>,
+    /// The reef drawn last frame, for tests.
+    pub reef: Option<reef::Seen>,
 }
 
 /// The dragon or the balloon bringing the chapter title that begins at `at` into place on page `page`.
@@ -273,7 +290,8 @@ impl Default for Eggs {
         let seed = crate::platform::since_epoch().as_nanos() as u64;
         Self { grown_for: None, grown: Vec::new(), grown_at: 0.0, measured: None, lift: None, place: None, desk: Rect::NOTHING, odds: None, from_right: false, rng: seed | 1, plants: Vec::new(),
             built_for: None, built: 0.0, built_at: 0.0, order: Vec::new(), scale: None, houses: Vec::new(), light: None, sailed_for: None, berths: Vec::new(), rigged: 0.0, rigged_at: 0.0,
-            launch: None, ships: Vec::new(), forest_for: None, flowed: 0, born: Vec::new(), merge: None, forest: None }
+            launch: None, ships: Vec::new(), forest_for: None, flowed: 0, born: Vec::new(), merge: None, forest: None,
+            reef_for: None, branched: 0.0, branched_at: 0.0, spawn: None, reef: None }
     }
 }
 
@@ -418,7 +436,7 @@ pub fn pose_of(by: Carrier, t: f32, duck: Option<f32>) -> Pose {
     let k = by.pace();
     let along = |t: f32| match by {
         Carrier::Dragon { .. } => (t + 0.8 * surge(t)) / k,
-        Carrier::Balloon { .. } => t / k,
+        Carrier::Balloon { .. } | Carrier::Octopus { .. } => t / k,
     };
     Pose { t, ..pose(along(t), duck.map(along)) }
 }
@@ -486,7 +504,8 @@ fn rig(by: Carrier, p: Pose, place: Rect, page: Rect, desk: Rect) -> Rig {
     // part (the balloon's silk; the dragon's tail behind, its head and fire ahead), and coming,
     // the title it carries.
     let (right, tall, rope, sizes, reach) = match by {
-        Carrier::Balloon { right } => (right, TALL, page.height() * 0.02, (0.035, 0.06), 1.5),
+        // The octopus has a way of its own (`offset`), and is never rigged.
+        Carrier::Balloon { right } | Carrier::Octopus { right } => (right, TALL, page.height() * 0.02, (0.035, 0.06), 1.5),
         Carrier::Dragon { right } => (right, DRAGON_TALL, 0.0, (0.045, 0.1), 5.0),
     };
     let side = if right { 1.0 } else { -1.0 };
@@ -497,7 +516,7 @@ fn rig(by: Carrier, p: Pose, place: Rect, page: Rect, desk: Rect) -> Rig {
     // The balloon bobs as it floats over; the dragon rises and sinks with its wings, the title
     // with it, less and less as it lowers the title into place.
     let heave = match by {
-        Carrier::Balloon { .. } => 0.0,
+        Carrier::Balloon { .. } | Carrier::Octopus { .. } => 0.0,
         Carrier::Dragon { .. } => heave(p.t) * size,
     };
     // How far beyond the title's middle the desk's edge is on the side it comes from, and on the
@@ -509,7 +528,7 @@ fn rig(by: Carrier, p: Pose, place: Rect, page: Rect, desk: Rect) -> Rig {
     let (hook, offset) = if p.hooked {
         let x = place.center().x + side * ((1.0 - p.run) * page.width() * 0.35 + away * come);
         let bob = match by {
-            Carrier::Balloon { .. } => (p.run * PI).sin() * page.height() * 0.015,
+            Carrier::Balloon { .. } | Carrier::Octopus { .. } => (p.run * PI).sin() * page.height() * 0.015,
             Carrier::Dragon { .. } => heave * (1.0 - p.lower),
         };
         let load = pos2(x, place.center().y - hang * (1.0 - p.lower) - bob);
@@ -524,7 +543,19 @@ fn rig(by: Carrier, p: Pose, place: Rect, page: Rect, desk: Rect) -> Rig {
 
 /// How far the title is from its place at `p`, brought `by` that.
 pub fn offset(by: Carrier, p: Pose, place: Rect, page: Rect, desk: Rect) -> Vec2 {
-    rig(by, p, place, page, desk).offset
+    match by {
+        Carrier::Octopus { right } => reef::octopus_at(right, p, place, page).offset,
+        _ => rig(by, p, place, page, desk).offset,
+    }
+}
+
+/// How much of the title being brought shows, from 0 to 1: the octopus's fades in as it comes out
+/// from behind the page with it.
+pub fn shown(by: Carrier, p: Pose, place: Rect, page: Rect) -> f32 {
+    match by {
+        Carrier::Octopus { right } => reef::octopus_at(right, p, place, page).shown,
+        _ => 1.0,
+    }
 }
 
 /// A filled convex shape that egui draws cleanly. egui pushes a shape's soft edge out along each
@@ -1456,6 +1487,31 @@ pub fn placed(story: &str, area: Rect, page: Rect, unit: f32, built: f32, order:
     street.into_iter().filter(|(_, h, fits)| *fits || h.floors > 0 || h.building > 0.0).map(|(left, h, _)| (left, h)).collect()
 }
 
+/// Light about `at`, `r` across and `h` high, `alpha` at its middle and fading smoothly to
+/// nothing at its edge: one mesh, so it shows no rings.
+fn radial(at: Pos2, r: f32, h: f32, color: Color32, alpha: f32) -> Shape {
+    let mut mesh = egui::epaint::Mesh::default();
+    mesh.colored_vertex(at, glow(color, alpha));
+    let rings = [(0.35, 0.55), (0.7, 0.18), (1.0, 0.0)];
+    let n = 32;
+    for &(f, a) in &rings {
+        for i in 0..n {
+            let ang = i as f32 / n as f32 * 2.0 * PI;
+            mesh.colored_vertex(at + vec2(ang.cos() * r * f, ang.sin() * h * f), glow(color, alpha * a));
+        }
+    }
+    for i in 0..n as u32 {
+        let j = (i + 1) % n as u32;
+        mesh.add_triangle(0, 1 + i, 1 + j);
+        for ring in 0..rings.len() as u32 - 1 {
+            let (a, b) = (1 + ring * n as u32, 1 + (ring + 1) * n as u32);
+            mesh.add_triangle(a + i, b + i, a + j);
+            mesh.add_triangle(a + j, b + i, b + j);
+        }
+    }
+    Shape::mesh(mesh)
+}
+
 /// `color`, see-through by `alpha`.
 fn glow(color: Color32, alpha: f32) -> Color32 {
     let [r, g, b, _] = color.to_array();
@@ -2182,7 +2238,7 @@ impl App {
         if !self.doc.chapters(false).iter().any(|e| e.at == at) || self.eggs.roll() >= self.eggs.odds.unwrap_or(1.0) {
             return;
         }
-        let (Carrier::Balloon { right } | Carrier::Dragon { right }) = &mut by;
+        let (Carrier::Balloon { right } | Carrier::Dragon { right } | Carrier::Octopus { right }) = &mut by;
         self.eggs.from_right = !self.eggs.from_right;
         *right = self.eggs.from_right;
         let started = ctx.input(|i| i.time);
@@ -2230,12 +2286,17 @@ impl App {
         Some((lift.by, p, lift.at.saturating_sub(start)..end.saturating_sub(start)))
     }
 
-    /// The dragon or the balloon over page `i` lying at `page`, if it is at work there.
-    pub fn draw_carrier(&self, ui: &egui::Ui, page: Rect, i: usize) {
+    /// The dragon, the balloon or the octopus over page `i` lying at `page`, if it is at work there:
+    /// what is `behind` the page (the octopus but its arm) before the page is drawn, the rest after.
+    pub fn draw_carrier(&self, ui: &egui::Ui, page: Rect, i: usize, behind: bool) {
         let (Some((by, p, _)), Some(place)) = (self.lifting(ui.ctx(), i), self.eggs.place) else { return };
+        let now = ui.ctx().input(|inp| inp.time);
         ui.painter().extend(match by {
-            Carrier::Dragon { .. } => dragon(by, p, place, page, self.eggs.desk),
-            Carrier::Balloon { .. } => balloon(by, p, place, page, self.eggs.desk),
+            Carrier::Dragon { .. } if !behind => dragon(by, p, place, page, self.eggs.desk),
+            Carrier::Balloon { .. } if !behind => balloon(by, p, place, page, self.eggs.desk),
+            Carrier::Octopus { right } if behind => reef::octopus_at(right, p, place, page).behind(now),
+            Carrier::Octopus { right } => reef::octopus_at(right, p, place, page).arm(now),
+            _ => Vec::new(),
         });
     }
 }
@@ -2270,7 +2331,7 @@ mod tests {
         let page = Rect::from_min_size(pos2(300.0, 50.0), vec2(600.0, 800.0));
         let place = Rect::from_min_size(pos2(500.0, 400.0), vec2(200.0, 30.0));
         for by in [true, false].into_iter().flat_map(|right| [Carrier::Balloon { right }, Carrier::Dragon { right }]) {
-            let (Carrier::Balloon { right } | Carrier::Dragon { right }) = by;
+            let (Carrier::Balloon { right } | Carrier::Dragon { right } | Carrier::Octopus { right }) = by;
             let side = if right { 1.0 } else { -1.0 };
             let at = |t: f32| offset(by, pose(t, None), place, page, desk());
             let start = at(0.0);
@@ -2396,6 +2457,7 @@ mod tests {
                     let shapes = match by {
                         Carrier::Dragon { .. } => dragon(by, p, place, page, desk()),
                         Carrier::Balloon { .. } => balloon(by, p, place, page, desk()),
+                        Carrier::Octopus { .. } => unreachable!("only the balloon and the dragon"),
                     };
                     let seen = shapes.iter().fold(Rect::NOTHING, |r, s| r | s.visual_bounding_rect());
                     assert!(!seen.intersects(desk()), "{by:?} at {t}: {seen:?}");
@@ -2421,6 +2483,7 @@ mod tests {
                 let shapes = match by {
                     Carrier::Dragon { .. } => dragon(by, p, place, page, desk()),
                     Carrier::Balloon { .. } => balloon(by, p, place, page, desk()),
+                    Carrier::Octopus { .. } => unreachable!("only the balloon and the dragon"),
                 };
                 for shape in shapes {
                     let mut mesh = egui::epaint::Mesh::default();

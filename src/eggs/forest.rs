@@ -253,31 +253,6 @@ fn lantern(at: Pos2, light: f32, u: f32, k: usize, time: f64) -> Vec<Shape> {
 }
 
 
-/// Light about `at`, `r` across and `h` high, `alpha` at its middle and fading smoothly to
-/// nothing at its edge: one mesh, so it shows no rings.
-fn radial(at: Pos2, r: f32, h: f32, color: Color32, alpha: f32) -> Shape {
-    let mut mesh = egui::epaint::Mesh::default();
-    mesh.colored_vertex(at, glow(color, alpha));
-    let rings = [(0.35, 0.55), (0.7, 0.18), (1.0, 0.0)];
-    let n = 32;
-    for &(f, a) in &rings {
-        for i in 0..n {
-            let ang = i as f32 / n as f32 * 2.0 * PI;
-            mesh.colored_vertex(at + vec2(ang.cos() * r * f, ang.sin() * h * f), glow(color, alpha * a));
-        }
-    }
-    for i in 0..n as u32 {
-        let j = (i + 1) % n as u32;
-        mesh.add_triangle(0, 1 + i, 1 + j);
-        for ring in 0..rings.len() as u32 - 1 {
-            let (a, b) = (1 + ring * n as u32, 1 + (ring + 1) * n as u32);
-            mesh.add_triangle(a + i, b + i, a + j);
-            mesh.add_triangle(a + j, b + i, b + j);
-        }
-    }
-    Shape::mesh(mesh)
-}
-
 /// The warm light of a big lantern at `at` hanging from `spot`, `shown` of the way lit: thrown
 /// wide over the trunks about it, and falling on its own tree's bark.
 fn warm_light(spot: &Spot, at: Pos2, shown: f32, u: f32, time: f64) -> Vec<Shape> {

@@ -94,7 +94,7 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `ideas.rs` | The What next window (lower left): ways the story could go on from the caret, kept in the scratchpad |
 | `fonts.rs` | Installed fonts loaded on demand, a missing one drawn with a twin of the same widths |
 | `theme.rs` | The themes (`Theme`, `Palette`): colours and egui visuals around the page, the palette in use (`pal`), fading from one to the next, the choice kept in the data folder; the page's own `PAPER` and `INK` |
-| `eggs.rs` | What is hidden in the magic themes: in the Magic Garden a plant a chapter growing on the desk and a balloon flying in each new chapter title; in the Magic City a street of houses a chapter, a floor a page, and a dragon flying a new title in held in its feet; in the Magic Sea a ship a chapter, built in a yard a part a page and launched into the bay when the next chapter begins; in the Magic Forest (`eggs/forest.rs`) an old forest at night with a swarm of lanterns, a lantern a page, each chapter's swarm becoming a big lantern on a branch near the page |
+| `eggs.rs` | What is hidden in the magic themes: in the Magic Garden a plant a chapter growing on the desk and a balloon flying in each new chapter title; in the Magic City a street of houses a chapter, a floor a page, and a dragon flying a new title in held in its feet; in the Magic Sea a ship a chapter, built in a yard a part a page and launched into the bay when the next chapter begins; in the Magic Forest (`eggs/forest.rs`) an old forest at night with a swarm of lanterns, a lantern a page, each chapter's swarm becoming a big lantern on a branch near the page; in the Magic Reef (`eggs/reef.rs`) a sunlit sea with a coral a chapter, a branch a page, spawning and taking in a shoal of fish when the next chapter begins, and an octopus bringing each new title from behind the page |
 | `platform.rs` | What the desktop and the browser do differently: background work (`spawn`, `Waker`, `keep_awake`), the time and time zone, the run's id, the data folder, file dialogs (`Dialog`), uploads and downloads, requests to Caprice's server (`send`, `go_to`) (R31, R33) |
 | `platform/fs.rs` | Files: the system's on the desktop; in the browser, kept in memory by path and mirrored to IndexedDB (R31) |
 | `platform/worker.rs` | In the browser, a Web Worker for each piece of background work, started from `web/worker.js` with nothing evaluated (R31) |
@@ -1102,7 +1102,7 @@ same in every theme, so what is printed (R20) and exported (R10) never depends o
 
 The magic themes hide things for the writer to find (`eggs.rs`): the Magic Garden (`Theme::Garden`)
 a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a dragon, the Magic Sea
-(`Theme::Sea`) ships, the Magic Forest (`Theme::Forest`) lanterns. Their blurbs give nothing away. What a theme hides is its own: picking another theme is how to stop it.
+(`Theme::Sea`) ships, the Magic Forest (`Theme::Forest`) lanterns, the Magic Reef (`Theme::Reef`) corals. Their blurbs give nothing away. What a theme hides is its own: picking another theme is how to stop it.
 
 - **The garden lies on the desk, behind every page**, in the Magic Garden only. `draw_garden` is
   called in `frame` right after `page_rect` and before any page is drawn, so the pages hide what is
@@ -1210,6 +1210,25 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   theme. A story opened or the theme picked comes with all of it there (`forest_for`, forgotten
   in another theme). In the Magic Forest the app asks for a frame every 33 ms even when idle, the
   most of any theme.
+- **The reef lies on the desk the same way**, in the Magic Reef only (`eggs/reef.rs`): `draw_reef`
+  is called right after `draw_forest`. The sea itself is there from the start (`water`: rays of
+  sun swaying from the surface, the reef far behind, seagrass, sand and rocks; `bubbles`), at
+  distances from the page that come from `story_id`. A coral for each chapter of `Doc::garden`
+  (`foot`: taking turns left and right of the page from its edge outwards, closer and smaller
+  when there are many), of a kind and colour from `story_id` and its number (`Coral::of`; the
+  kinds take turns), with a branch for each page its chapter has had, up to `BRANCHES`. All of a
+  coral's branches are laid out whatever how many are shown, so a new one only adds at the tips;
+  it grows out of a glimmer over `GROW` (`Eggs::branched`, the newest coral's only). When the
+  chapter being written changes to a later one (`Eggs::reef_for`), the coral of the one before
+  spawns over `SPAWN` (`Eggs::spawn`): eggs rise from its tips, its polyps open, and its shoal
+  (`fish_at`, a function of the time) swims in from beyond the desk on its side; every coral
+  but the newest keeps its polyps open and its fish. As in the forest and the sea, the newest
+  coral is the last of `Doc::garden`, not of `Doc::chapters`, and a story opened or the theme
+  picked comes with all of it there, nothing spawning. Each fish faces the way it swims across,
+  as a number from 1 to -1 rather than a side: at each end of its way round it turns through
+  facing the writer, seen narrower, over a second or two (a side flipped it in one frame); one
+  arriving turns from the way it came into its way round as it slows. An octopus brings a new
+  chapter title (`Carrier::Octopus`, below).
 - **It grows in sight.** How far each plant is drawn grown (`Eggs::grown`, by `story_id`) only goes
   up, a tenth of a second's growth a frame at most; a story opened comes with its garden grown.
   So does a theme picked: each forgets how far it had shown things (`grown_for`, `built_for`,
@@ -1220,7 +1239,12 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   the writer makes a paragraph with words in it a chapter title with the Chapter button (`maybe_lift_title`, from
   `apply_tools`): not on opening a file, undo, or a title made any other way. Which theme brings it
   how is `Carrier::of`: the balloon floats, and the dragon flies, in from the side at the title's
-  height, each from the other side than the last, and away past the other. A title is often high
+  height, each from the other side than the last, and away past the other. The octopus
+  (`reef::octopus_at`, its own way rather than `rig`) comes from behind the page instead, on the
+  other side than the last: its head slides out past the page's edge a little below the title's
+  height, an arm over the edge holding the title up by its end, which fades in as it comes out
+  (`eggs::shown`); it carries it over its place, lowers it, lets go, draws its arm in and slips
+  back behind the page, along the same `pose`. A title is often high
   on its page, so either hangs only as high as there is room for below the top of the page, and is
   smaller there (`TALL`, `DRAGON_TALL`: their heights above the title, wings up). Both follow one
   course in time (`pose`: come, carry over the place, lower, settle, let go, leave), each along its
@@ -1260,17 +1284,21 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   and the carrier hurries away (`update_lift`); a page turned ends it. A press, never a letting go:
   on a touch screen eframe lets go twice, the second a frame after the tap on Chapter that called
   it, and on a phone it was gone before it was seen. A new carrier is a `Carrier`
-  variant, its way in `rig` and its drawing in `draw_carrier`.
+  variant, its way in `rig` (or its own, through `offset` and `shown`) and its drawing in
+  `draw_carrier`.
 - **The title being brought is only drawn elsewhere.** `editor_surface` moves the title's pieces of
   the page's layout by `eggs::offset` while painting them and puts them back after. Its place is
   its galleys' own rects (`galley.rect` at `x`, `y`), not their sizes from `x`: a centered title is
   placed by its middle, and taking `x` for its left edge once hung it half its width beside the
   ropes. The caret, hit-testing, pagination and print see the title in its place all the while
-  (R3, R20). The
-  carrier is drawn in the settled branch in front of the page, after the peek's hand.
+  (R3, R20). A title not wholly shown (`eggs::shown` below 1) is painted on its own with the
+  painter's opacity, and the paragraphs put back in their order. The carrier is drawn in the
+  settled branch: what of it is behind the page (`draw_carrier` with `behind`: the octopus but
+  its arm) before the paper, after the peek's body, so the page's edge hides it; the rest in
+  front of the page, after the peek's hand.
 - **None of it is printed or saved**: it is in none of `underlay`, `ink` or `furniture` (R20), and
   nothing of it is in `Doc`. Its colours are the garden's, the houses', the ships', the sea's, the
-  forest's, the balloon's and the dragon's own, like the emblem's, not the palette's: they are pictures, not chrome.
+  forest's, the reef's, the balloon's, the dragon's and the octopus's own, like the emblem's, not the palette's: they are pictures, not chrome.
 - Tests: in `eggs.rs` `the_title_is_brought_in_carried_over_its_place_lowered_and_let_go`,
   `the_balloon_and_the_dragon_bring_the_title_in_from_the_side_and_go_away_past_the_other`,
   `the_dragon_beats_its_wings_and_breathes_fire_from_its_mouth`,
@@ -1297,6 +1325,14 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   (in `eggs/forest.rs`); and
   `in_the_magic_forest_each_page_lights_a_lantern_in_the_swarm`,
   `in_the_magic_forest_a_chapter_s_swarm_becomes_a_big_lantern_in_the_trees_near_the_page`,
+  `the_sea_is_there_from_the_start_the_same_for_the_same_story`,
+  `a_coral_grows_a_branch_a_page_only_at_its_tips`,
+  `the_corals_take_turns_on_either_side_of_the_page_from_its_edge_outwards`,
+  `the_fish_swim_round_their_coral_gently`,
+  `the_octopus_comes_out_from_behind_the_page_sets_the_title_in_its_place_and_goes_back` (in `eggs/reef.rs`),
+  `in_the_magic_reef_each_page_grows_the_chapter_s_coral_a_branch_beside_the_page`,
+  `in_the_magic_reef_an_octopus_brings_each_new_chapter_title_from_behind_the_page`,
+  `in_the_magic_reef_a_chapter_s_coral_spawns_and_fish_come_to_live_about_it_when_the_next_begins`,
   `a_window_made_narrower_and_wider_again_moves_no_floor_from_one_house_to_another`,
   `a_window_made_narrower_leaves_every_ship_in_its_place_beside_the_page_and_as_big`,
   `in_the_magic_sea_a_ship_is_built_a_part_a_page_and_sails_out_whole_when_the_next_chapter_begins`,
@@ -1317,7 +1353,7 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   `now_and_then_in_the_magic_garden_a_balloon_flies_in_a_new_chapter_title_from_either_side`,
   `the_title_hangs_from_the_balloon_by_ropes_tied_to_its_ends`,
   `going_on_writing_while_a_title_is_brought_sets_it_down_at_once`,
-  `print_shows_neither_the_garden_the_houses_the_ships_the_forest_nor_what_brings_a_title`,
+  `print_shows_neither_the_garden_the_houses_the_ships_the_forest_the_reef_nor_what_brings_a_title`,
   `a_magic_theme_picked_again_shows_at_once_what_the_story_grew_meanwhile`,
   `a_story_opened_before_its_font_has_come_grows_its_garden_with_every_page_added`.
 
@@ -1820,6 +1856,16 @@ test that its limit refuses and leaves R2 alone (R33). Then `node --test web/api
   the garden's saved pages per chapter, so nothing new is saved and nothing goes out (R9, R30).
   The swarm is a wave of the time rather than a wander kept from frame to frame, so a test can
   look at any moment.
+- **2026-11-07 — The Magic Reef: a coral a chapter, a branch a page, spawning when it is done.**
+  Asked for: a magic coral reef theme in the spirit of the others. Kept to what the forest's
+  history taught, few details and a chapter an event: the page grows something in sight (a branch
+  out of a glimmer, like a floor of light in the city), and the chapter's end is the reef's own
+  event, a coral spawning, after which a shoal comes to live about it. A sunlit shallow sea rather
+  than the Lagoon's deep water, so the two do not look alike. Counted from the garden's saved pages
+  per chapter, so nothing new is saved and nothing goes away (R9, R30). Then: the fish turned too
+  abruptly, so they turn through facing the writer; and an octopus was asked for, appearing from
+  behind the page to put each new chapter title in. Behind the page rather than from beyond the
+  desk, so its head is drawn before the paper and only its arm in front.
 - **2026-10-31 — Caprice Web is a copy, not a mode of the desktop app.** The browser version was
   asked for with the desktop Caprice left unchanged, so it is an independent copy of it (at
   `5c87d3d`) that builds both ways, rather than code shared with the desktop app. Its background
