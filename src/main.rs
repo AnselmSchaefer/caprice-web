@@ -6968,6 +6968,35 @@ mod tests {
         }
     }
 
+    #[test]
+    fn zooming_in_on_the_magic_snow_brings_the_whole_hillside_nearer_not_the_trees_alone() {
+        let mut h = Harness::new();
+        h.app.doc.garden = vec![6; 6];
+        in_the_theme(&mut h, theme::Theme::Snow, 0.0);
+        let moon = |h: &Harness| h.painted.iter().find_map(|cs| match &cs.shape {
+            egui::Shape::Circle(c) if c.fill == eggs::snow::MOON => Some(c.radius),
+            _ => None,
+        }).expect("the moon");
+        let trees = |h: &Harness| h.app.eggs.snow.clone().unwrap().trees.iter().map(|t| t.0).collect::<Vec<_>>();
+        let foot = |h: &Harness| {
+            let page = h.app.last_page_rect;
+            let ground = trees(h)[0].bottom();
+            egui::pos2(page.center().x, ground)
+        };
+        let (was_moon, was_trees, was_foot) = (moon(&h), trees(&h), foot(&h));
+        for _ in 0..3 {
+            h.key(Key::Equals, Modifiers::COMMAND);
+        }
+        h.frames(30, vec![], Modifiers::NONE);
+        let z = moon(&h) / was_moon;
+        assert!(z > 1.2, "the hillside nearer: {z}");
+        for (a, b) in was_trees.iter().zip(trees(&h)) {
+            assert!((b.height() / a.height() - z).abs() < 0.02, "each tree as much bigger as the hillside: {} {z}", b.height() / a.height());
+            let (from, to) = (a.center() - was_foot, b.center() - foot(&h));
+            assert!((to - from * z).length() < 3.0, "and as much further from the foot of the page: {from:?} {to:?} {z}");
+        }
+    }
+
     /// The height the garden's first plant was drawn at, once grown.
     fn first_plant(h: &mut Harness) -> f32 {
         h.frames(200, vec![], Modifiers::NONE);

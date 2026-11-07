@@ -20,7 +20,7 @@ const HILL: Color32 = Color32::from_rgb(214, 222, 244);
 const HILL_FAR: Color32 = Color32::from_rgb(160, 172, 214);
 const PINE: Color32 = Color32::from_rgb(70, 92, 128);
 const STAR: Color32 = Color32::from_rgb(255, 250, 230);
-const MOON: Color32 = Color32::from_rgb(250, 246, 226);
+pub const MOON: Color32 = Color32::from_rgb(250, 246, 226);
 /// The dusk that pales and blues what lies further up the hill.
 const DUSK: Color32 = Color32::from_rgb(120, 130, 182);
 /// The trees: their needles in the light, in shade and deep within, their trunks, lit and shaded,
@@ -470,26 +470,30 @@ pub fn places(story: &str, page: Rect, ground: f32, u: f32) -> Vec<Place> {
     out.into_iter().map(|(_, p)| p).collect()
 }
 
-/// The hillside behind the village: stars coming out and the moon rising, hills far off and nearer
-/// with pines on them, and the snow reaching up to them.
-fn hillside(story: &str, area: Rect, ground: f32, u: f32, time: f64) -> Vec<Shape> {
+/// The hillside behind the trees: stars coming out and the moon risen, hills far off and nearer with
+/// pines on them, and the snow reaching up to them. All of it is laid out from `middle` (across) and
+/// `ground` (up), as far as `REACH` either side, whatever part of it shows in `area`: only the plain
+/// fills below the hills reach to `area`'s edges. So zooming, which shows more or less of it, only
+/// makes it bigger or smaller and never moves one hill against another.
+fn hillside(story: &str, area: Rect, middle: f32, ground: f32, u: f32, time: f64) -> Vec<Shape> {
     let t = time as f32;
     let mut out = Vec::new();
     let horizon = ground - 230.0 * u;
-    for i in 0..60 {
+    let (from, to) = (middle - REACH * u, middle + REACH * u);
+    for i in 0..160 {
         let mut s = Seeds::of(story, 96_000 + i);
-        let at = pos2(area.left() + area.width() * s.next(0.0, 1.0), area.top() + (horizon - area.top()) * s.next(0.0, 0.6));
+        let at = pos2(from + (to - from) * s.next(0.0, 1.0), horizon - s.next(40.0, 760.0) * u);
         let a = 0.5 + 0.5 * (t * s.next(0.6, 1.8) + s.next(0.0, 6.0)).sin();
         out.push(Shape::circle_filled(at, s.next(0.5, 1.4) * u, glow(STAR, 0.3 + 0.5 * a)));
     }
     let mut s = Seeds::of(story, 97_000);
     // The moon off to one side, where the page does not hide it.
-    let moon = pos2(area.left() + area.width() * if s.next(0.0, 1.0) < 0.5 { 0.12 } else { 0.88 }, area.top() + area.height() * 0.22);
+    let moon = pos2(middle + if s.next(0.0, 1.0) < 0.5 { -490.0 } else { 490.0 } * u, ground - 620.0 * u);
     out.push(radial(moon, 110.0 * u, 110.0 * u, MOON, 0.22));
     out.push(Shape::circle_filled(moon, 22.0 * u, MOON));
     for (color, y, high) in [(HILL_FAR, horizon, 90.0), (HILL, horizon + 60.0 * u, 60.0)] {
-        let mut x = area.left() - 100.0 * u;
-        while x < area.right() + 100.0 * u {
+        let mut x = from;
+        while x < to {
             let w = s.next(180.0, 360.0) * u;
             let h = s.next(0.5, 1.0) * high * u;
             // Pines on the far hills, snow on their boughs.
@@ -524,13 +528,16 @@ fn hillside(story: &str, area: Rect, ground: f32, u: f32, time: f64) -> Vec<Shap
     out
 }
 
-/// Snow falling softly over everything, each flake drifting from side to side.
+/// Snow falling softly over everything, each flake drifting from side to side. It falls in the
+/// window, not on the hillside: it is never zoomed, and how far a flake has fallen is a share of the
+/// window's height, so a window made taller only stretches its way down. (Its time multiplied by a
+/// size that changed made every flake leap.)
 fn snowfall(story: &str, area: Rect, u: f32, time: f64) -> Vec<Shape> {
     let t = time as f32;
     (0..140).map(|i| {
         let mut s = Seeds::of(story, 98_000 + i);
         let near = s.next(0.0, 1.0);
-        let y = area.top() + (area.height() * s.next(0.0, 1.0) + t * (12.0 + 26.0 * near) * u).rem_euclid(area.height());
+        let y = area.top() + area.height() * (s.next(0.0, 1.0) + t * (12.0 + 26.0 * near) / 900.0).rem_euclid(1.0);
         let x = area.left() + area.width() * s.next(0.0, 1.0) + (t * s.next(0.3, 0.8) + i as f32).sin() * 14.0 * u;
         Shape::circle_filled(pos2(x, y), (0.8 + 1.8 * near) * u, glow(SNOW, 0.5 + 0.4 * near))
     }).collect()
@@ -551,6 +558,9 @@ impl App {
         let garden = &self.doc.garden;
         let n = garden.len().max(1);
         let hidden = if self.bar.side == crate::ui::BarSide::Bottom { area.bottom() - self.bar_rect(area, self.bar.side).top() } else { 0.0 };
+        // How far the writer has zoomed in from the page fitting the view: the hillside comes
+        // nearer with the page, as through a camera, rather than the trees alone moving.
+        let z = (self.zoom / self.fitting_zoom(area)).clamp(0.5, 4.0);
         let e = &mut self.eggs;
         if e.trees.tend(&self.story_id, garden, ORNAMENTS, HANG, ARRIVE, now) {
             ctx.request_repaint();
@@ -558,11 +568,21 @@ impl App {
             // The snow falls and the lights twinkle.
             ctx.request_repaint_after(std::time::Duration::from_millis(40));
         }
-        let u = e.unit(&ctx, area, now);
+        let unzoomed = e.unit(&ctx, area, now);
+        let u = unzoomed * z;
         let story = &self.story_id;
         let painter = ui.painter();
-        let ground = area.bottom() - hidden - 14.0 * u;
-        painter.extend(hillside(story, area, ground, u, now));
+        let ground = area.bottom() - hidden - 14.0 * unzoomed;
+        // The hillside is laid out as at the fitting zoom over as much of the desk as shows once
+        // zoomed, then zoomed about the foot of the desk under the page's middle, where the trees'
+        // places are zoomed about too (their units and the page's edges).
+        let anchor = pos2(page.center().x, ground);
+        let seen_area = Rect::from_min_max(anchor + (area.min - anchor) / z, anchor + (area.max - anchor) / z);
+        let zoom = egui::emath::TSTransform::new(anchor.to_vec2() * (1.0 - z), z);
+        painter.extend(hillside(story, seen_area, anchor.x, ground, unzoomed, now).into_iter().map(|mut s| {
+            s.transform(zoom);
+            s
+        }));
         let places = places(story, page, ground, u);
         let arriving = e.trees.finishing(now, ARRIVE);
         let mut seen = Seen { trees: vec![(Rect::NOTHING, 0, 0.0, 0.0); n], ..Seen::default() };
@@ -596,7 +616,7 @@ impl App {
             seen.trees[k] = (tree.bounds(), ornaments.floor() as usize, lit, up);
             seen.lit += usize::from(lit >= 1.0);
         }
-        painter.extend(snowfall(story, area, u, now));
+        painter.extend(snowfall(story, area, unzoomed, now));
         self.eggs.snow = Some(seen);
     }
 }
@@ -634,10 +654,31 @@ mod tests {
 
     #[test]
     fn the_hillside_is_there_from_the_start_the_same_for_the_same_story() {
-        let shapes = |story: &str| [hillside(story, desk(), 880.0, 1.0, 0.0), snowfall(story, desk(), 1.0, 0.0)].concat();
+        let shapes = |story: &str| [hillside(story, desk(), 700.0, 880.0, 1.0, 0.0), snowfall(story, desk(), 1.0, 0.0)].concat();
         assert!(shapes("a story").len() > 200, "stars, hills, pines and snow: {}", shapes("a story").len());
         let at = |story: &str| shapes(story).iter().map(|s| s.visual_bounding_rect().center()).collect::<Vec<_>>();
         assert_eq!(at("a story"), at("a story"));
+    }
+
+    #[test]
+    fn the_hillside_is_laid_out_the_same_whatever_part_of_it_shows() {
+        // As when zoomed out (more of it shows) or in (less of it): the hills, pines, stars and moon
+        // are where they were, only the plain fills reaching further.
+        let laid = |area: Rect| hillside("a story", area, 700.0, 880.0, 1.0, 3.0).into_iter().filter(|s| !matches!(s, Shape::Rect(_) | Shape::Mesh(_))).map(|s| s.visual_bounding_rect()).collect::<Vec<_>>();
+        assert_eq!(laid(desk()), laid(desk().expand2(vec2(500.0, 300.0))));
+        assert_eq!(laid(desk()), laid(desk().shrink(200.0)));
+    }
+
+    #[test]
+    fn the_snow_falls_gently_whatever_the_size_of_things() {
+        // The size of things changing a little (zooming, a window resized) moves no flake far.
+        let at = |u: f32, t: f64| snowfall("a story", desk(), u, t).iter().map(|s| s.visual_bounding_rect().center()).collect::<Vec<_>>();
+        for (a, b) in at(1.0, 5000.0).iter().zip(at(1.01, 5000.0)) {
+            assert!(a.distance(b) < 3.0, "{a:?} {b:?}");
+        }
+        for (a, b) in at(1.0, 5000.0).iter().zip(at(1.0, 5000.0 + 1.0 / 60.0)) {
+            assert!(a.distance(b) < 2.0 || (a.y - b.y).abs() > 800.0, "a frame later: {a:?} {b:?}");
+        }
     }
 
     #[test]

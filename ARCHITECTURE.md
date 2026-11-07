@@ -1252,7 +1252,20 @@ Snow (`Theme::Snow`) Christmas trees and penguins. Their blurbs give nothing awa
   (`TIERS`, `Tree::edge`), each one mesh shaded from the light on the left into shade on the right
   and deeper between its tips (`light`, `needles`), each casting a soft shadow on the tier below,
   with snow on a few tips; its trunk and its baubles shaded the same way. A mesh has no soft edge,
-  so each tier's edge is also drawn as fine lines. The places (`snow::places`) are spread about rather than in rows: a grid at `DEPTHS`
+  so each tier's edge is also drawn as fine lines.
+  Zooming brings the whole hillside nearer, as through a camera: everything is zoomed by the zoom
+  over the fitting one (`App::fitting_zoom`, in `view.rs`) about the foot of the desk under the page's middle.
+  The hillside is laid out as at the fitting zoom, from that same point rather than from the
+  window's edges (`hillside`: only its plain fills reach the edges of what shows), then
+  transformed; the trees' units are zoomed, and their places are measured from the page's edges,
+  which zoom about the same point. Laid out from the window alone, the hillside first stood still
+  while the trees slid out with the page's edges, then, laid out from what showed, reshuffled as
+  the zoom changed. The snowfall is the window's and is never zoomed; a flake's way down is a share
+  of the window's height, never the time multiplied by a size, which made every flake leap as the
+  size changed. Anything that moves with the time must not multiply it by a size that can change
+  (`zooming_in_on_the_magic_snow_brings_the_whole_hillside_nearer_not_the_trees_alone`,
+  `the_hillside_is_laid_out_the_same_whatever_part_of_it_shows`,
+  `the_snow_falls_gently_whatever_the_size_of_things`). The places (`snow::places`) are spread about rather than in rows: a grid at `DEPTHS`
   depths up the hill, each place a little off it, in an order from `story_id` that comes nearer
   the page first but at every depth; further up, smaller and bluer in the dusk; drawn from the
   furthest up. They are far enough from the page that the penguins pulling a tree in stand beside
