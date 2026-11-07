@@ -401,6 +401,12 @@ impl Start {
         }
     }
 
+    /// The sheet chosen is still in the air at `now` (frame time): the desk shows no page where it
+    /// lands, for the sheet becomes the page rather than a second one over it.
+    pub fn in_air(&self, now: f64) -> bool {
+        self.flight.as_ref().is_some_and(|f| f.from.is_some() && (now - f.at) / FLIGHT <= 0.8)
+    }
+
     /// The welcome is going: it fades from over the desk from `at` (frame time).
     pub fn leave(&mut self, at: f64) {
         if self.open {
@@ -683,13 +689,9 @@ impl App {
         // First the welcome fades, leaving the sheet chosen; it flies on alone and lands on the page.
         let flying = from.is_some();
         let gone = if flying { 0.4 } else { 0.7 };
+        // Until it lands the desk has no page (`Start::in_air`); landed, it lies just over the page, so
+        // it fades white on white (fading both went grey).
         let land = ((s - 0.8) / 0.2).clamp(0.0, 1.0);
-        if flying && land == 0.0 {
-            // Until it lands, the page under it is desk: the sheet becomes the page, not a second one.
-            // Landed, it lies just over the page, so it fades white on white (fading both went grey).
-            let cover = self.last_page_rect.expand2(vec2(80.0, 30.0));
-            ui.painter().rect_filled(cover, 0.0, pal().desk);
-        }
         let layer = LayerId::new(Order::Foreground, Id::new("welcome_leaving"));
         let mut over = ui.new_child(UiBuilder::new().layer_id(layer).max_rect(screen));
         over.set_opacity(1.0 - ease((s / gone).min(1.0)));

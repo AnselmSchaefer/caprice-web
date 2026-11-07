@@ -990,7 +990,10 @@ file dialog, or a story that cannot be read, leaves the page up.
 - **Leaving it is a flight, not a cut** (`Start::flight`, `welcome_leaving`, drawn last in `frame`
   on a foreground layer): the desk is drawn as usual underneath, the welcome fades from over it,
   and the sheet chosen moves from its place on the page to `App::last_page_rect`, fading out over
-  the page itself at the end. The story takes typing from the first frame of it. Anything that
+  the page itself at the end. Until it lands (`Start::in_air`) `frame` draws no page at all, so
+  the sheet becomes the page rather than a second one: never paint something over the page to hide
+  it, for the desk is shaded, and a magic theme draws on it (a flat patch of `pal().desk` showed as
+  a block). The story takes typing from the first frame of it. Anything that
   takes the welcome away calls `Start::leave` (or sets a flight), so it never just vanishes.
 - **A `Kind` is the starting state of a story, not a setting**: its paper, margins, headers and
   footers, drop caps (`Kind::setup`), the look of its text (`Kind::body`: font from the first of
@@ -1023,6 +1026,7 @@ file dialog, or a story that cannot be read, leaves the page up.
   with `Harness::painted_texts` / `painted_at`; the kinds and stories are buttons for `click_widget`.
 - Tests: `opened_without_a_file_caprice_welcomes_with_new_stories_and_the_ones_last_opened`,
   `the_sheet_chosen_flies_to_the_desk_while_the_welcome_fades`,
+  `nothing_lies_on_the_desk_where_the_sheet_chosen_lands_until_it_lands`,
   `a_new_novel_begins_on_book_pages_at_chapter_one_and_a_journal_at_today`,
   `escape_on_the_welcome_page_begins_a_blank_story`.
 

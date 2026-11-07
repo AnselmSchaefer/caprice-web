@@ -710,7 +710,10 @@ impl App {
         let t = self.pos - base as f32;
         self.animate_held(ui);
 
-        if let Some((from, to, s, held)) = self.batch {
+        if self.start.in_air(ctx.input(|i| i.time)) {
+            // The sheet chosen on the welcome is on its way here: it becomes the page when it lands.
+            // Painting the desk over the page instead was a block of its own on a shaded desk.
+        } else if let Some((from, to, s, held)) = self.batch {
             // Pages let go of by the scrollbar, moving together.
             self.batch_pages(ui, page_rect, from, to, s, held);
         } else if self.held != 0.0 && self.pos == self.target as f32 {
@@ -5277,6 +5280,25 @@ mod tests {
         h.frames((start::FLIGHT * 60.0) as usize + 2, vec![], Modifiers::NONE);
         assert!(h.app.start.flight.is_none(), "landed");
         assert!(!h.painted_texts().contains("BEGIN SOMETHING NEW"), "the welcome is gone");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn nothing_lies_on_the_desk_where_the_sheet_chosen_lands_until_it_lands() {
+        let dir = test_dir("start-landing");
+        let mut h = started_without_a_file(&dir);
+        h.click_widget("Blank page");
+        h.frames(20, vec![], Modifiers::NONE);
+        assert!(h.app.start.flight.is_some(), "still on its way");
+        // The desk shows through: no page, and no patch of one colour hiding it (on a desk that
+        // shades from top to bottom, or has a garden, that was a block of its own).
+        let page = h.app.last_page_rect;
+        let over_page = |h: &Harness| {
+            h.painted.iter().any(|cs| matches!(&cs.shape, egui::Shape::Rect(r) if r.rect.contains_rect(page.shrink(1.0))))
+        };
+        assert!(!over_page(&h), "nothing over where the page will lie");
+        h.frames((start::FLIGHT * 60.0) as usize + 2, vec![], Modifiers::NONE);
+        assert!(over_page(&h), "the page itself, once landed");
         std::fs::remove_dir_all(dir).unwrap();
     }
 
