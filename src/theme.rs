@@ -74,10 +74,11 @@ pub enum Theme {
     Sea,
     Forest,
     Reef,
+    Snow,
 }
 
 impl Theme {
-    pub const ALL: [Theme; 12] = [
+    pub const ALL: [Theme; 13] = [
         Theme::Midnight,
         Theme::Lagoon,
         Theme::Marmalade,
@@ -90,12 +91,13 @@ impl Theme {
         Theme::Sea,
         Theme::Forest,
         Theme::Reef,
+        Theme::Snow,
     ];
 
     /// Is it one of the magic themes, which hide things to find (`eggs.rs`), rather than colours
     /// alone? The Page menu shows them apart.
     pub fn magic(self) -> bool {
-        matches!(self, Theme::Garden | Theme::City | Theme::Sea | Theme::Forest | Theme::Reef)
+        matches!(self, Theme::Garden | Theme::City | Theme::Sea | Theme::Forest | Theme::Reef | Theme::Snow)
     }
 
     pub fn name(self) -> &'static str {
@@ -112,6 +114,7 @@ impl Theme {
             Theme::Sea => "Magic Sea",
             Theme::Forest => "Magic Forest",
             Theme::Reef => "Magic Reef",
+            Theme::Snow => "Magic Snow",
         }
     }
 
@@ -130,6 +133,7 @@ impl Theme {
             Theme::Sea => "Salt air, and a story that sets sail",
             Theme::Forest => "Moss, moonlight, and a path that goes on",
             Theme::Reef => "Warm water, sunlight, and something that grows",
+            Theme::Snow => "Hush, falling flakes, and a warm light",
         }
     }
 
@@ -343,6 +347,25 @@ impl Theme {
                 caret: rgb(228, 80, 62),
                 thumb: rgb(86, 176, 190),
                 light: true,
+            },
+            // A twilight sky over snow; the hills, the snowmen and the snowfall are drawn on it
+            // (`eggs::snow`).
+            Theme::Snow => Palette {
+                desk: rgb(122, 128, 178),
+                desk_top: rgb(26, 34, 76),
+                dock: rgb(24, 32, 64),
+                dock_edge: rgb(64, 80, 130),
+                btn: rgb(36, 46, 88),
+                btn_hover: rgb(50, 62, 110),
+                text: rgb(236, 242, 255),
+                text_hot: Color32::WHITE,
+                text_dim: rgb(166, 180, 216),
+                accent: rgb(255, 196, 110),
+                on_accent: rgb(40, 24, 0),
+                field: rgb(18, 24, 52),
+                caret: rgb(255, 190, 100),
+                thumb: rgb(110, 126, 180),
+                light: false,
             },
         }
     }

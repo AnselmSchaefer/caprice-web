@@ -128,17 +128,24 @@ impl App {
     }
 
     /// Pinch / Ctrl+scroll to zoom around the pointer, two-finger scroll up and down to pan. Returns the page rectangle.
+    /// The zoom at which the page fits the view in `area`, as "Fit" shows it.
+    pub fn fitting_zoom(&self, area: Rect) -> f32 {
+        let view = self.view_area(area);
+        let size = self.doc.setup.size();
+        // Leave room on both sides for post-its sticking out of the page and the stacks; on a phone,
+        // the page's width is all there is room for.
+        if view.width() < NARROW {
+            ((view.width() - 16.0) / size.x).clamp(MIN_ZOOM, 3.0)
+        } else {
+            ((view.height() - 16.0) / size.y).min((view.width() - 48.0) / (size.x + 2.0 * crate::notes::NOTE_OUT)).clamp(MIN_ZOOM, 3.0)
+        }
+    }
+
     pub fn page_rect(&mut self, ctx: &egui::Context, area: Rect) -> Rect {
         let view = self.view_area(area);
         let size = self.doc.setup.size();
         let narrow = view.width() < NARROW;
-        // Leave room on both sides for post-its sticking out of the page and the stacks; on a phone,
-        // the page's width is all there is room for.
-        let fit = if narrow {
-            ((view.width() - 16.0) / size.x).clamp(MIN_ZOOM, 3.0)
-        } else {
-            ((view.height() - 16.0) / size.y).min((view.width() - 48.0) / (size.x + 2.0 * crate::notes::NOTE_OUT)).clamp(MIN_ZOOM, 3.0)
-        };
+        let fit = self.fitting_zoom(area);
         // Fitted, the page is in the middle; on a phone, only across: up and down it stays where it
         // was scrolled to, its top no lower than the view's and its foot no higher.
         let centered = |origin: egui::Pos2, zoom: f32| {

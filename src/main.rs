@@ -707,6 +707,7 @@ impl App {
         self.draw_sea(ui, area, page_rect);
         self.draw_forest(ui, area, page_rect);
         self.draw_reef(ui, area, page_rect);
+        self.draw_snow(ui, area, page_rect);
         let base = self.pos.floor() as usize;
         let t = self.pos - base as f32;
         self.animate_held(ui);
@@ -6281,12 +6282,18 @@ mod tests {
         chapter_one(&mut h);
         assert!(h.app.eggs.reef.is_some() && h.app.eggs.forest.is_none() && h.app.eggs.ships.is_empty());
         assert!(h.app.eggs.lift.is_some_and(|l| matches!(l.by, eggs::Carrier::Octopus { .. })), "the octopus brings it");
+        assert!(h.app.eggs.snow.is_none(), "no snow under the sea");
+        let mut h = Harness::new();
+        in_the_theme(&mut h, theme::Theme::Snow, 1.0);
+        chapter_one(&mut h);
+        assert!(h.app.eggs.snow.is_some() && h.app.eggs.reef.is_none() && h.app.eggs.plants.is_empty());
+        assert!(h.app.eggs.lift.is_none(), "nothing brings a title to the snow");
         let mut h = Harness::new();
         h.frames(3, vec![], Modifiers::NONE);
         h.app.eggs.odds = Some(1.0);
         chapter_one(&mut h);
         assert!(h.app.eggs.plants.is_empty() && h.app.eggs.houses.is_empty() && h.app.eggs.ships.is_empty() && h.app.eggs.lift.is_none());
-        assert!(h.app.eggs.forest.is_none() && h.app.eggs.reef.is_none());
+        assert!(h.app.eggs.forest.is_none() && h.app.eggs.reef.is_none() && h.app.eggs.snow.is_none());
     }
 
     #[test]
@@ -6643,18 +6650,19 @@ mod tests {
     }
 
     #[test]
-    fn print_shows_neither_the_garden_the_houses_the_ships_the_forest_the_reef_nor_what_brings_a_title() {
+    fn print_shows_nothing_the_magic_themes_hide_nor_what_brings_a_title() {
         let mut h = Harness::new();
         chapter_one(&mut h);
         let ctx = h.ctx.clone();
         let plain = h.app.pdf(&ctx, 0..=0).unwrap();
-        for t in [theme::Theme::City, theme::Theme::Garden, theme::Theme::Sea, theme::Theme::Forest, theme::Theme::Reef] {
+        for t in theme::Theme::ALL.into_iter().filter(|t| t.magic()) {
             let mut g = Harness::new();
             in_the_theme(&mut g, t, 1.0);
             chapter_one(&mut g);
             g.frames(70, vec![], Modifiers::NONE);
             let e = &g.app.eggs;
-            let drawn = !(e.plants.is_empty() && e.houses.is_empty() && e.ships.is_empty() && e.forest.is_none() && e.reef.is_none());
+            let drawn = !(e.plants.is_empty() && e.houses.is_empty() && e.ships.is_empty() && e.forest.is_none() && e.reef.is_none())
+                || e.snow.is_some();
             assert!(drawn && (g.app.eggs.lift.is_some() || eggs::Carrier::of(t).is_none()), "{t:?}");
             let ctx = g.ctx.clone();
             assert!(g.app.pdf(&ctx, 0..=0).unwrap() == plain, "{t:?}");
@@ -6861,6 +6869,132 @@ mod tests {
         h.frames(2, vec![], Modifiers::NONE);
         let reef = seen(&h);
         assert!(reef.corals.len() == 3 && reef.spawn == 0 && reef.corals[0].2 && reef.corals[0].1 == first.1);
+    }
+
+    const SENTENCE: &str = "It was nearly midnight and the Prime Minister sat alone in his office. ";
+
+    #[test]
+    fn in_the_magic_snow_each_page_hangs_an_ornament_on_the_chapter_s_tree() {
+        let mut h = Harness::new();
+        in_the_theme(&mut h, theme::Theme::Snow, 0.0);
+        let seen = |h: &Harness| h.app.eggs.snow.clone().expect("the hillside is there");
+        assert_eq!(seen(&h).trees.iter().map(|t| t.1).collect::<Vec<_>>(), [1], "an ornament for the first page");
+        h.type_text(&SENTENCE.repeat(220));
+        let pages = h.app.doc.pages();
+        assert!(pages >= 4, "pages: {pages}");
+        h.frames(20, vec![], Modifiers::NONE);
+        assert!(seen(&h).trees[0].1 < pages, "hung in sight");
+        h.frames((eggs::snow::HANG * 60.0) as usize * pages, vec![], Modifiers::NONE);
+        let tree = seen(&h).trees[0];
+        assert_eq!(tree.1, pages, "an ornament a page");
+        assert!(beside_the_page(&h, tree.0) && tree.2 == 0.0 && tree.3 == 1.0 && seen(&h).lit == 0, "standing beside the page, dark while its chapter is written: {tree:?}");
+        let fir = |h: &Harness| h.painted.iter().any(|cs| matches!(&cs.shape, egui::Shape::Mesh(m) if m.vertices.iter().any(|v| v.color.g() as i32 > v.color.r() as i32 + 20)));
+        assert!(fir(&h) && seen(&h).penguins.is_empty(), "a fir tree, no penguins about");
+
+        // Taking the pages away takes no ornament off.
+        h.key(Key::A, Modifiers::COMMAND);
+        h.key(Key::Backspace, Modifiers::NONE);
+        h.frames(60, vec![], Modifiers::NONE);
+        assert_eq!(seen(&h).trees[0].1, pages);
+    }
+
+    #[test]
+    fn in_the_magic_snow_penguins_bring_a_tree_for_each_new_chapter_and_the_one_before_is_lit() {
+        let mut h = Harness::new();
+        in_the_theme(&mut h, theme::Theme::Snow, 1.0);
+        let seen = |h: &Harness| h.app.eggs.snow.clone().unwrap();
+        chapter_one(&mut h);
+        assert!(h.app.eggs.lift.is_none(), "nothing brings the title");
+        h.key(Key::Enter, Modifiers::NONE);
+        h.type_text(&SENTENCE.repeat(100));
+        h.frames(240, vec![], Modifiers::NONE);
+        let first = seen(&h).trees[0];
+        for (n, trees) in [("Two", 2), ("Three", 3)] {
+            h.key(Key::Enter, Modifiers::NONE);
+            h.type_text(&format!("Chapter {n}"));
+            h.click_widget("Chapter");
+            assert!(h.app.eggs.lift.is_none(), "Chapter {n}: nothing brings the title");
+            h.frames((eggs::snow::ARRIVE * 60.0 * 0.25) as usize, vec![], Modifiers::NONE);
+            let hill = seen(&h);
+            assert!(hill.trees.len() == trees && hill.trees[trees - 1].3 == 0.0, "Chapter {n}: a new tree, lying as it is dragged in");
+            assert!(hill.penguins.len() == 3 && hill.pulling, "Chapter {n}: three penguins pulling it on ropes");
+            assert!(hill.trees[trees - 2].2 == 0.0, "Chapter {n}: the one before not lit yet");
+            h.frames((eggs::snow::ARRIVE * 60.0 * 0.4) as usize, vec![], Modifiers::NONE);
+            let hill = seen(&h);
+            assert!(hill.trees[trees - 1].3 == 1.0 && hill.trees[trees - 2].2 > 0.0, "Chapter {n}: raised, and the one before lighting");
+            h.frames((eggs::snow::ARRIVE * 60.0 * 0.4) as usize + 10, vec![], Modifiers::NONE);
+            let hill = seen(&h);
+            assert!(hill.penguins.is_empty() && !hill.pulling, "Chapter {n}: the penguins gone");
+            assert_eq!(hill.lit, trees - 1, "Chapter {n}: every tree before lit");
+            assert!(hill.trees[trees - 1].2 == 0.0 && hill.trees[trees - 1].3 == 1.0, "Chapter {n}: the new one standing dark: {:?}", hill.trees);
+        }
+        assert_eq!(seen(&h).trees[0].1, first.1, "the first as it was hung");
+
+        // Picked again, the theme shows it as it stands at once.
+        let ctx = h.ctx.clone();
+        h.app.themes.choose(&ctx, theme::Theme::Reef);
+        h.frames(2, vec![], Modifiers::NONE);
+        h.app.themes.choose(&ctx, theme::Theme::Snow);
+        h.frames(2, vec![], Modifiers::NONE);
+        let hill = seen(&h);
+        assert!(hill.trees.len() == 3 && hill.lit == 2 && hill.penguins.is_empty() && hill.trees[0].1 == first.1);
+    }
+
+    #[test]
+    fn a_long_story_s_trees_are_spread_beside_the_page_and_a_narrower_window_moves_none() {
+        let mut h = Harness::new();
+        // Twenty chapters, nineteen of them done.
+        h.app.doc.garden = vec![6; 20];
+        in_the_theme(&mut h, theme::Theme::Snow, 0.0);
+        let trees = |h: &Harness| h.app.eggs.snow.clone().unwrap().trees;
+        let all = trees(&h);
+        let desk = h.app.eggs.desk;
+        assert_eq!(all.len(), 20);
+        assert!(all.iter().all(|t| beside_the_page(&h, t.0) && desk.contains_rect(t.0)), "on the desk beside the page: {all:?}");
+        let mut heights: Vec<i32> = all.iter().map(|t| (t.0.height() / 10.0).round() as i32).collect();
+        heights.sort();
+        heights.dedup();
+        assert!(heights.len() >= 3, "near and far, not in a row: {heights:?}");
+        // A narrower window leaves each where it is beside the page.
+        let beside = |h: &Harness| {
+            let page = h.app.last_page_rect;
+            trees(h).iter().map(|t| t.0.center() - egui::pos2(if t.0.center().x < page.center().x { page.left() } else { page.right() }, page.bottom())).collect::<Vec<_>>()
+        };
+        let was = beside(&h);
+        h.width = 900.0;
+        h.frames(30, vec![], Modifiers::NONE);
+        for (a, b) in was.iter().zip(beside(&h)) {
+            assert!((*a - b).length() < 4.0, "where it was: {a:?} {b:?}");
+        }
+    }
+
+    #[test]
+    fn zooming_in_on_the_magic_snow_brings_the_whole_hillside_nearer_not_the_trees_alone() {
+        let mut h = Harness::new();
+        h.app.doc.garden = vec![6; 6];
+        in_the_theme(&mut h, theme::Theme::Snow, 0.0);
+        let moon = |h: &Harness| h.painted.iter().find_map(|cs| match &cs.shape {
+            egui::Shape::Circle(c) if c.fill == eggs::snow::MOON => Some(c.radius),
+            _ => None,
+        }).expect("the moon");
+        let trees = |h: &Harness| h.app.eggs.snow.clone().unwrap().trees.iter().map(|t| t.0).collect::<Vec<_>>();
+        let foot = |h: &Harness| {
+            let page = h.app.last_page_rect;
+            let ground = trees(h)[0].bottom();
+            egui::pos2(page.center().x, ground)
+        };
+        let (was_moon, was_trees, was_foot) = (moon(&h), trees(&h), foot(&h));
+        for _ in 0..3 {
+            h.key(Key::Equals, Modifiers::COMMAND);
+        }
+        h.frames(30, vec![], Modifiers::NONE);
+        let z = moon(&h) / was_moon;
+        assert!(z > 1.2, "the hillside nearer: {z}");
+        for (a, b) in was_trees.iter().zip(trees(&h)) {
+            assert!((b.height() / a.height() - z).abs() < 0.02, "each tree as much bigger as the hillside: {} {z}", b.height() / a.height());
+            let (from, to) = (a.center() - was_foot, b.center() - foot(&h));
+            assert!((to - from * z).length() < 3.0, "and as much further from the foot of the page: {from:?} {to:?} {z}");
+        }
     }
 
     /// The height the garden's first plant was drawn at, once grown.

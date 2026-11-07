@@ -15,7 +15,8 @@
 //! the Magic Forest each page lights a lantern in a swarm over an old forest, each chapter's swarm
 //! becomes a big lantern in its trees (`forest`). In the Magic Reef each chapter has a coral, a
 //! branch for each page, which spawns when the next chapter begins and a shoal of fish comes to
-//! live about (`reef`).
+//! live about (`reef`). In the Magic Snow each chapter has a Christmas tree, an ornament a page,
+//! pulled in and raised by penguins and lit when the next is (`snow`).
 //!
 //! None of it is on the page: the garden, the city and the sea lie on the desk behind the pages, and what brings a title
 //! is drawn
@@ -33,12 +34,13 @@ use crate::theme::Theme;
 
 pub mod forest;
 pub mod reef;
+pub mod snow;
 
 /// What brings a new chapter title in, in which theme.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Carrier {
-    /// In the Magic City, in the Magic Garden, and in the Magic Reef; each from the right side or
-    /// the left, the next from the other side.
+    /// In the Magic City, the Magic Garden and the Magic Reef; each from the right side or the
+    /// left, the next from the other side.
     Dragon { right: bool },
     Balloon { right: bool },
     /// Down from above, not from the side (`reef::octopus_at`).
@@ -275,6 +277,78 @@ pub struct Eggs {
     spawn: Option<(f64, usize)>,
     /// The reef drawn last frame, for tests.
     pub reef: Option<reef::Seen>,
+    /// The Magic Snow's trees as they are decorated, and the hillside drawn last frame, for tests.
+    trees: Tended,
+    pub snow: Option<snow::Seen>,
+}
+
+/// What the Magic Snow keeps while a story is shown, as the reef does: the story and the chapter
+/// whose tree is decorated, how far it has grown (a step a page, the last
+/// perhaps in part), the one before finishing when the next chapter begins (since when, and its
+/// chapter), and the place each chapter's stands in, given when it is first drawn and kept, so a
+/// window made narrower moves none.
+#[derive(Default)]
+pub struct Tended {
+    shown_for: Option<(String, usize)>,
+    places: Vec<Option<usize>>,
+    grown: f32,
+    grown_at: f64,
+    finish: Option<(f64, usize)>,
+}
+
+impl Tended {
+    /// Brought up to `now` for the story `id` whose chapters have had `garden` pages: the newest
+    /// chapter's grows to as many steps, `most` at most, `step` seconds each; the one before it
+    /// finishes over `over` seconds once the next begins. Whether anything is on the move.
+    fn tend(&mut self, id: &str, garden: &[u32], most: usize, step: f32, over: f32, now: f64) -> bool {
+        // The newest grows, not the last chapter's: a title taken away must not make one that has
+        // finished grow again.
+        let newest = garden.len().max(1) - 1;
+        let target = garden.get(newest).map_or(0, |&p| (p as usize).min(most)) as f32;
+        if self.shown_for.as_ref().is_none_or(|(was, _)| was != id) {
+            // A story just opened, or the theme just picked, comes with it all grown.
+            (self.shown_for, self.grown, self.finish) = (Some((id.to_string(), newest)), target, None);
+            self.places.clear();
+        } else if let Some(was) = self.shown_for.as_ref().map(|f| f.1).filter(|&was| was < newest) {
+            (self.shown_for, self.grown, self.finish) = (Some((id.to_string(), newest)), 0.0, Some((now, was)));
+        }
+        if self.finish.is_some_and(|(at, _)| now - at >= over as f64) {
+            self.finish = None;
+        }
+        let dt = (now - self.grown_at).clamp(0.0, 0.1) as f32;
+        self.grown_at = now;
+        if self.grown < target {
+            // A step at a time, quicker when many are waiting, like the city's floors.
+            self.grown = (self.grown + (target - self.grown).max(3.0) / 3.0 / step * dt).min(target);
+        }
+        self.finish.is_some() || self.grown < target
+    }
+
+    /// How many steps chapter `k`'s has grown, the newest's perhaps in part.
+    fn grown(&self, garden: &[u32], k: usize, most: usize) -> f32 {
+        if k + 1 >= garden.len().max(1) { self.grown } else { garden.get(k).map_or(0, |&p| (p as usize).min(most)) as f32 }
+    }
+
+    /// The chapter finishing, if one is, and how far, from 0 to 1 over `over` seconds.
+    fn finishing(&self, now: f64, over: f32) -> Option<(usize, f32)> {
+        self.finish.map(|(at, k)| (k, ((now - at) as f32 / over).clamp(0.0, 1.0)))
+    }
+
+    /// The place chapter `k`'s stands in, of `count`: the first free one `in_view` when it is first
+    /// asked for, else the first free.
+    fn place(&mut self, k: usize, count: usize, in_view: impl Fn(usize) -> bool) -> usize {
+        self.places.resize(self.places.len().max(k + 1), None);
+        if self.places[k].is_none() {
+            let free = |p: &usize| !self.places.contains(&Some(*p));
+            self.places[k] = Some((0..count).filter(free).find(|&p| in_view(p)).or_else(|| (0..count).find(free)).unwrap_or(0));
+        }
+        self.places[k].unwrap_or(0).min(count.max(1) - 1)
+    }
+
+    /// Forgotten in another theme, so picking this one again shows it all as it stands.
+    fn forget(&mut self) {
+        (self.shown_for, self.finish) = (None, None);
+    }
 }
 
 /// The dragon or the balloon bringing the chapter title that begins at `at` into place on page `page`.
@@ -294,7 +368,8 @@ impl Default for Eggs {
         Self { grown_for: None, grown: Vec::new(), grown_at: 0.0, measured: None, lift: None, place: None, desk: Rect::NOTHING, odds: None, from_right: false, rng: seed | 1, plants: Vec::new(),
             built_for: None, built: 0.0, built_at: 0.0, order: Vec::new(), scale: None, houses: Vec::new(), light: None, sailed_for: None, berths: Vec::new(), rigged: 0.0, rigged_at: 0.0,
             launch: None, ships: Vec::new(), forest_for: None, flowed: 0, born: Vec::new(), merge: None, forest: None,
-            reef_for: None, beds: Vec::new(), branched: 0.0, branched_at: 0.0, spawn: None, reef: None }
+            reef_for: None, beds: Vec::new(), branched: 0.0, branched_at: 0.0, spawn: None, reef: None,
+            trees: Tended::default(), snow: None }
     }
 }
 
@@ -2321,7 +2396,7 @@ mod tests {
         let page = Rect::from_min_size(pos2(300.0, 50.0), vec2(600.0, 800.0));
         let place = Rect::from_min_size(pos2(500.0, 400.0), vec2(200.0, 30.0));
         for by in [true, false].into_iter().flat_map(|right| [Carrier::Balloon { right }, Carrier::Dragon { right }]) {
-            let (Carrier::Balloon { right } | Carrier::Dragon { right } | Carrier::Octopus { right }) = by;
+            let (Carrier::Balloon { right } | Carrier::Dragon { right }) = by else { unreachable!() };
             let side = if right { 1.0 } else { -1.0 };
             let at = |t: f32| offset(by, pose(t, None), place, page, desk());
             let start = at(0.0);
@@ -2447,7 +2522,7 @@ mod tests {
                     let shapes = match by {
                         Carrier::Dragon { .. } => dragon(by, p, place, page, desk()),
                         Carrier::Balloon { .. } => balloon(by, p, place, page, desk()),
-                        Carrier::Octopus { .. } => unreachable!("only the balloon and the dragon"),
+                        _ => unreachable!("only the balloon and the dragon"),
                     };
                     let seen = shapes.iter().fold(Rect::NOTHING, |r, s| r | s.visual_bounding_rect());
                     assert!(!seen.intersects(desk()), "{by:?} at {t}: {seen:?}");
@@ -2473,7 +2548,7 @@ mod tests {
                 let shapes = match by {
                     Carrier::Dragon { .. } => dragon(by, p, place, page, desk()),
                     Carrier::Balloon { .. } => balloon(by, p, place, page, desk()),
-                    Carrier::Octopus { .. } => unreachable!("only the balloon and the dragon"),
+                    _ => unreachable!("only the balloon and the dragon"),
                 };
                 for shape in shapes {
                     let mut mesh = egui::epaint::Mesh::default();
