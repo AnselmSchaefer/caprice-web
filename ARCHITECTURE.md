@@ -94,7 +94,7 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `ideas.rs` | The What next window (lower left): ways the story could go on from the caret, kept in the scratchpad |
 | `fonts.rs` | Installed fonts loaded on demand, a missing one drawn with a twin of the same widths |
 | `theme.rs` | The themes (`Theme`, `Palette`): colours and egui visuals around the page, the palette in use (`pal`), fading from one to the next, the choice kept in the data folder; the page's own `PAPER` and `INK` |
-| `eggs.rs` | What is hidden in the magic themes: in the Magic Garden a plant a chapter growing on the desk and a balloon flying in each new chapter title; in the Magic City a street of houses a chapter, a floor a page, and a dragon flying a new title in held in its feet; in the Magic Sea a ship a chapter, built in a yard a part a page and launched into the bay when the next chapter begins; in the Magic Forest (`eggs/forest.rs`) an old forest at night with a swarm of lanterns, a lantern a page, each chapter's swarm becoming a big lantern on a branch near the page; in the Magic Reef (`eggs/reef.rs`) a sunlit sea with a coral a chapter, a branch a page, spawning and taking in a shoal of fish when the next chapter begins, and an octopus swimming down from above with each new title |
+| `eggs.rs` | What is hidden in the magic themes: in the Magic Garden a plant a chapter growing on the desk and a balloon flying in each new chapter title; in the Magic City a street of houses a chapter, a floor a page, and a dragon flying a new title in held in its feet; in the Magic Sea a ship a chapter, built in a yard a part a page and launched into the bay when the next chapter begins; in the Magic Forest (`eggs/forest.rs`) an old forest at night with a swarm of lanterns, a lantern a page, each chapter's swarm becoming a big lantern on a branch near the page; in the Magic Reef (`eggs/reef.rs`) a sunlit sea with a coral a chapter, a branch a page, spawning and taking in a shoal of fish when the next chapter begins, and an octopus swimming down from above with each new title; in the Magic Snow (`eggs/snow.rs`) a Christmas tree a chapter spread about a snowy hillside, an ornament a page, the new one pulled in and raised by penguins when its chapter begins and the one before then lit |
 | `platform.rs` | What the desktop and the browser do differently: background work (`spawn`, `Waker`, `keep_awake`), the time and time zone, the run's id, the data folder, file dialogs (`Dialog`), uploads and downloads, requests to Caprice's server (`send`, `go_to`) (R31, R33) |
 | `platform/fs.rs` | Files: the system's on the desktop; in the browser, kept in memory by path and mirrored to IndexedDB (R31) |
 | `platform/worker.rs` | In the browser, a Web Worker for each piece of background work, started from `web/worker.js` with nothing evaluated (R31) |
@@ -1102,7 +1102,8 @@ same in every theme, so what is printed (R20) and exported (R10) never depends o
 
 The magic themes hide things for the writer to find (`eggs.rs`): the Magic Garden (`Theme::Garden`)
 a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a dragon, the Magic Sea
-(`Theme::Sea`) ships, the Magic Forest (`Theme::Forest`) lanterns, the Magic Reef (`Theme::Reef`) corals. Their blurbs give nothing away. What a theme hides is its own: picking another theme is how to stop it.
+(`Theme::Sea`) ships, the Magic Forest (`Theme::Forest`) lanterns, the Magic Reef (`Theme::Reef`) corals, the Magic
+Snow (`Theme::Snow`) Christmas trees and penguins. Their blurbs give nothing away. What a theme hides is its own: picking another theme is how to stop it.
 
 - **The garden lies on the desk, behind every page**, in the Magic Garden only. `draw_garden` is
   called in `frame` right after `page_rect` and before any page is drawn, so the pages hide what is
@@ -1236,6 +1237,30 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   facing the writer, seen narrower, over a second or two (a side flipped it in one frame); one
   arriving turns from the way it came into its way round as it slows. An octopus brings a new
   chapter title (`Carrier::Octopus`, below).
+- **The hillside lies on the desk the same way**, in the Magic Snow only (`eggs/snow.rs`):
+  `draw_snow` is called right after `draw_reef`. The hillside itself (`hillside`: stars, the moon
+  to one side, hills with pines, the snow; `snowfall`, drawn in front of the trees) is there from
+  the start, from `story_id`. It keeps what the reef keeps, in one `Tended` (`Eggs::trees`;
+  `Tended::tend`): the story and the chapter growing, how far it has grown, the one before
+  finishing, and each chapter's place, the first free one in sight when first drawn
+  (`Tended::place`), kept while the story is shown and forgotten in another theme
+  (`Tended::forget`), so a window made narrower moves none and the theme picked again shows it all
+  as it stands. As in the reef and the forest, the newest is the last of `Doc::garden`, not of
+  `Doc::chapters`. A Christmas tree for each chapter (`Tree::of`), with an ornament for each page,
+  up to `ORNAMENTS`, each out of a glint over `HANG`: glass baubles, three garlands of gold beads,
+  the faceted star on top last. It is drawn to look round (`Tree::draw`): tiers of drooping boughs
+  (`TIERS`, `Tree::edge`), each one mesh shaded from the light on the left into shade on the right
+  and deeper between its tips (`light`, `needles`), each casting a soft shadow on the tier below,
+  with snow on a few tips; its trunk and its baubles shaded the same way. A mesh has no soft edge,
+  so each tier's edge is also drawn as fine lines. The places (`snow::places`) are spread about rather than in rows: a grid at `DEPTHS`
+  depths up the hill, each place a little off it, in an order from `story_id` that comes nearer
+  the page first but at every depth; further up, smaller and bluer in the dusk; drawn from the
+  furthest up. They are far enough from the page that the penguins pulling a tree in stand beside
+  it too. When the next chapter begins (over `ARRIVE`, `Tree::arriving`), three penguins drag its
+  tree in from beyond the desk's edge away from the page, lying on its side (`Tree::point`, its
+  top trailing), haul it upright on their ropes, wave to the writer and waddle off the way they
+  came beyond the edge (`Crew`); as it stands, the tree before is lit: fairy lights twinkling,
+  the star shining, a glow on the snow. Nothing brings a chapter title in this theme.
 - **It grows in sight.** How far each plant is drawn grown (`Eggs::grown`, by `story_id`) only goes
   up, a tenth of a second's growth a frame at most; a story opened comes with its garden grown.
   So does a theme picked: each forgets how far it had shown things (`grown_for`, `built_for`,
@@ -1301,7 +1326,7 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   carrier is drawn in the settled branch in front of the page, after the peek's hand.
 - **None of it is printed or saved**: it is in none of `underlay`, `ink` or `furniture` (R20), and
   nothing of it is in `Doc`. Its colours are the garden's, the houses', the ships', the sea's, the
-  forest's, the reef's, the balloon's, the dragon's and the octopus's own, like the emblem's, not the palette's: they are pictures, not chrome.
+  forest's, the reef's, the hillside's and its penguins', the balloon's, the dragon's and the octopus's own, like the emblem's, not the palette's: they are pictures, not chrome.
 - Tests: in `eggs.rs` `the_title_is_brought_in_carried_over_its_place_lowered_and_let_go`,
   `the_balloon_and_the_dragon_bring_the_title_in_from_the_side_and_go_away_past_the_other`,
   `the_dragon_beats_its_wings_and_breathes_fire_from_its_mouth`,
@@ -1333,31 +1358,15 @@ a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a drag
   `the_corals_fill_the_front_row_beside_the_page_then_rows_further_back_smaller`,
   `the_fish_swim_round_their_coral_gently`,
   `the_octopus_swims_down_from_above_sets_the_title_in_its_place_and_jets_back_up` (in `eggs/reef.rs`),
-  `in_the_magic_reef_each_page_grows_the_chapter_s_coral_a_branch_beside_the_page`,
-  `in_the_magic_reef_an_octopus_swims_down_from_above_with_each_new_chapter_title`,
-  `a_long_story_s_reef_grows_in_rows_further_back_and_a_narrower_window_moves_no_coral`,
-  `in_the_magic_reef_a_chapter_s_coral_spawns_and_fish_come_to_live_about_it_when_the_next_begins`,
-  `a_window_made_narrower_and_wider_again_moves_no_floor_from_one_house_to_another`,
-  `a_window_made_narrower_leaves_every_ship_in_its_place_beside_the_page_and_as_big`,
-  `in_the_magic_sea_a_ship_is_built_a_part_a_page_and_sails_out_whole_when_the_next_chapter_begins`,
-  `in_the_magic_city_each_new_page_gives_a_house_a_floor_made_of_light_from_a_window`,
-  `a_long_story_s_city_fills_the_desk_on_both_sides_and_grows_higher`,
-  `in_the_magic_garden_a_plant_grows_beside_the_pages_as_the_story_grows`,
-  `each_chapter_grows_its_own_plant_and_flowers_once_the_next_begins`,
-  `a_chapter_taken_out_keeps_its_plant_and_every_plant_stays_as_it_was`,
-  `the_garden_is_kept_with_the_story_and_does_not_shrink_when_it_is_opened_again_smaller`,
-  `dropping_the_changes_since_saving_keeps_the_garden_grown_since`,
-  `a_story_begun_is_not_unsaved_for_its_garden`,
-  `the_garden_grows_only_in_its_theme_the_houses_only_in_the_city_and_nothing_brings_a_title_elsewhere`,
-  `now_and_then_in_the_magic_city_a_dragon_flies_in_a_new_chapter_title_from_either_side`,
-  `the_dragon_holds_the_title_in_its_claws_breathing_fire`,
-  `the_dragon_flies_right_out_of_the_window_before_it_is_gone`,
-  `the_dragon_and_the_balloon_bring_every_new_chapter_title`,
-  `on_a_touch_screen_the_dragon_and_the_balloon_bring_a_title_made_with_a_tap`,
-  `now_and_then_in_the_magic_garden_a_balloon_flies_in_a_new_chapter_title_from_either_side`,
-  `the_title_hangs_from_the_balloon_by_ropes_tied_to_its_ends`,
-  `going_on_writing_while_a_title_is_brought_sets_it_down_at_once`,
-  `print_shows_neither_the_garden_the_houses_the_ships_the_forest_the_reef_nor_what_brings_a_title`,
+  `the_hillside_is_there_from_the_start_the_same_for_the_same_story`,
+  `a_tree_gets_an_ornament_a_page_its_star_last`,
+  `a_tree_lit_twinkles_with_fairy_lights_and_glows`,
+  `the_trees_are_spread_about_beside_the_page_near_and_far_up_the_hill`,
+  `the_penguins_drag_the_tree_in_lying_down_raise_it_wave_and_go` (in `eggs/snow.rs`),
+  `in_the_magic_snow_each_page_hangs_an_ornament_on_the_chapter_s_tree`,
+  `in_the_magic_snow_penguins_bring_a_tree_for_each_new_chapter_and_the_one_before_is_lit`,
+  `a_long_story_s_trees_are_spread_beside_the_page_and_a_narrower_window_moves_none`,
+  `print_shows_nothing_the_magic_themes_hide_nor_what_brings_a_title`,
   `a_magic_theme_picked_again_shows_at_once_what_the_story_grew_meanwhile`,
   `a_story_opened_before_its_font_has_come_grows_its_garden_with_every_page_added`.
 
@@ -1693,7 +1702,9 @@ from `theme::pal()` (R29).
 
 **A new hidden gem** (`eggs.rs`): only in its magic theme; on the desk before the pages, or over
 the settled page after them; a pose as a function of time that tests can look at, ending at once
-when the writer goes on; nothing moved in the layout, nothing in print or the file (R30).
+when the writer goes on; nothing moved in the layout, nothing in print or the file (R30). A theme
+whose thing grows a step a page and finishes when the next chapter begins keeps its state in a
+`Tended`, as the Magic Snow does.
 
 **Something new the Worker keeps online** (a file, a setting): keyed with `ledger::key` under the
 user, its R2 reads and writes counted by the Ledger first, deleted with the user's stories, and a
@@ -1876,6 +1887,21 @@ test that its limit refuses and leaves R2 alone (R33). Then `node --test web/api
   down from above in front of the page rather than peeking over its top edge, which lies just
   under the format bar and would have hidden it; with it went the title fading in and the
   octopus drawn behind the page.
+- **2026-11-07 — The Magic Snow.** Asked for: two more magic themes, creative, quirky and
+  imaginative. A Magic Cosmos (a planet a chapter, a moon a page, a flying saucer) and a Magic Hive
+  (a comb a chapter, a cell of honey a page, bees) were made first and not liked; of six proposals
+  then (origami, a circus, a pond, snow, a workshop, a dinosaur island) a Magic Origami (a paper
+  animal folded a fold a page, coming to life, and a paper aeroplane unfolding into each title) and
+  the Magic Snow were made, and the Origami taken out again. The Snow's snowmen (a snowball a
+  page, dressed with a lantern lit when done) were not liked either; of six alternatives (igloos,
+  gingerbread cottages, fir trees, ice sculptures, a penguin colony, a ski lodge) the cottages were
+  made; then asked for instead: Christmas trees spread about rather than in a front row, each new
+  one pulled in and raised by a few penguins, an ornament a page, the latest lit as the next is
+  brought, and no penguin sledging in each title. The penguins pull it in from the side away from
+  the page, so they never pass behind it; the tree comes lying down, its top trailing, so raising
+  it on ropes reads as hauling it up. Nothing brings a title now, as in the Magic Forest. Its state
+  is in a `Tended` rather than five fields, as the reef's is, so the next such theme can share it.
+  Counted from the garden's saved pages per chapter, so nothing new is saved (R9, R30).
 - **2026-10-31 — Caprice Web is a copy, not a mode of the desktop app.** The browser version was
   asked for with the desktop Caprice left unchanged, so it is an independent copy of it (at
   `5c87d3d`) that builds both ways, rather than code shared with the desktop app. Its background
