@@ -813,32 +813,13 @@ impl App {
             let place = layout.paras.iter().filter(|p| title(p)).map(|p| p.galley.rect.translate(content.min.to_vec2() + vec2(p.x, p.y)));
             self.eggs.place = place.reduce(|a, b| a.union(b));
             if let Some(place) = self.eggs.place {
-                let shown = crate::eggs::shown(by, pose, place, page_rect);
                 let by = crate::eggs::offset(by, pose, place, page_rect, self.eggs.desk);
                 layout.paras.iter_mut().filter(|p| title(p)).for_each(|p| (p.x, p.y) = (p.x + by.x, p.y + by.y));
-                lifted = Some((range, by, shown));
+                lifted = Some((range, by));
             }
         }
-        match &lifted {
-            // A title fading in as it is brought out (the octopus's) is drawn on its own,
-            // see-through; then the paragraphs go back in their order.
-            Some((range, _, shown)) if *shown < 1.0 => {
-                let title = |p: &crate::layout::ParaLayout| p.start >= range.start && p.end <= range.end;
-                let (held, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut layout.paras).into_iter().enumerate().partition(|(_, p)| title(p));
-                let (hi, held): (Vec<usize>, Vec<_>) = held.into_iter().unzip();
-                let (ri, rest): (Vec<usize>, Vec<_>) = rest.into_iter().unzip();
-                let (rest, held) = (PageLayout { paras: rest, ..layout }, PageLayout { paras: held, ..layout });
-                self.paint_layout(ui.painter(), &rest, content.min);
-                let mut faded = ui.painter().clone();
-                faded.multiply_opacity(*shown);
-                self.paint_layout(&faded, &held, content.min);
-                let mut all: Vec<_> = hi.into_iter().zip(held.paras).chain(ri.into_iter().zip(rest.paras)).collect();
-                all.sort_by_key(|(k, _)| *k);
-                layout.paras = all.into_iter().map(|(_, p)| p).collect();
-            }
-            _ => self.paint_layout(ui.painter(), &layout, content.min),
-        }
-        if let Some((range, by, _)) = lifted {
+        self.paint_layout(ui.painter(), &layout, content.min);
+        if let Some((range, by)) = lifted {
             let title = |p: &crate::layout::ParaLayout| p.start >= range.start && p.end <= range.end;
             layout.paras.iter_mut().filter(|p| title(p)).for_each(|p| (p.x, p.y) = (p.x - by.x, p.y - by.y));
         }

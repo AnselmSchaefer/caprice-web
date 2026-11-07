@@ -41,7 +41,7 @@ pub enum Carrier {
     /// the left, the next from the other side.
     Dragon { right: bool },
     Balloon { right: bool },
-    /// From behind the page, not from beyond the desk (`reef::octopus_at`).
+    /// Down from above, not from the side (`reef::octopus_at`).
     Octopus { right: bool },
 }
 
@@ -61,8 +61,8 @@ impl Carrier {
         match self {
             Carrier::Dragon { .. } => 1.7,
             Carrier::Balloon { .. } => 1.0,
-            // It reaches unhurried, as an octopus does.
-            Carrier::Octopus { .. } => 1.4,
+            // It drifts down unhurried, as an octopus does.
+            Carrier::Octopus { .. } => 1.5,
         }
     }
 }
@@ -267,6 +267,9 @@ pub struct Eggs {
     /// it has grown to, the last perhaps in part, and the coral spawning, if one is: since when,
     /// and its chapter.
     reef_for: Option<(String, usize)>,
+    /// The place on the reef each chapter's coral stands in, given when it is first drawn: the first
+    /// free one in sight. Kept while the story is shown, like the ships' places in the bay.
+    beds: Vec<Option<usize>>,
     branched: f32,
     branched_at: f64,
     spawn: Option<(f64, usize)>,
@@ -291,7 +294,7 @@ impl Default for Eggs {
         Self { grown_for: None, grown: Vec::new(), grown_at: 0.0, measured: None, lift: None, place: None, desk: Rect::NOTHING, odds: None, from_right: false, rng: seed | 1, plants: Vec::new(),
             built_for: None, built: 0.0, built_at: 0.0, order: Vec::new(), scale: None, houses: Vec::new(), light: None, sailed_for: None, berths: Vec::new(), rigged: 0.0, rigged_at: 0.0,
             launch: None, ships: Vec::new(), forest_for: None, flowed: 0, born: Vec::new(), merge: None, forest: None,
-            reef_for: None, branched: 0.0, branched_at: 0.0, spawn: None, reef: None }
+            reef_for: None, beds: Vec::new(), branched: 0.0, branched_at: 0.0, spawn: None, reef: None }
     }
 }
 
@@ -544,17 +547,8 @@ fn rig(by: Carrier, p: Pose, place: Rect, page: Rect, desk: Rect) -> Rig {
 /// How far the title is from its place at `p`, brought `by` that.
 pub fn offset(by: Carrier, p: Pose, place: Rect, page: Rect, desk: Rect) -> Vec2 {
     match by {
-        Carrier::Octopus { right } => reef::octopus_at(right, p, place, page).offset,
+        Carrier::Octopus { right } => reef::octopus_at(right, p, place, page, desk).offset,
         _ => rig(by, p, place, page, desk).offset,
-    }
-}
-
-/// How much of the title being brought shows, from 0 to 1: the octopus's fades in as it comes out
-/// from behind the page with it.
-pub fn shown(by: Carrier, p: Pose, place: Rect, page: Rect) -> f32 {
-    match by {
-        Carrier::Octopus { right } => reef::octopus_at(right, p, place, page).shown,
-        _ => 1.0,
     }
 }
 
@@ -2286,17 +2280,13 @@ impl App {
         Some((lift.by, p, lift.at.saturating_sub(start)..end.saturating_sub(start)))
     }
 
-    /// The dragon, the balloon or the octopus over page `i` lying at `page`, if it is at work there:
-    /// what is `behind` the page (the octopus but its arm) before the page is drawn, the rest after.
-    pub fn draw_carrier(&self, ui: &egui::Ui, page: Rect, i: usize, behind: bool) {
+    /// The dragon, the balloon or the octopus over page `i` lying at `page`, if it is at work there.
+    pub fn draw_carrier(&self, ui: &egui::Ui, page: Rect, i: usize) {
         let (Some((by, p, _)), Some(place)) = (self.lifting(ui.ctx(), i), self.eggs.place) else { return };
-        let now = ui.ctx().input(|inp| inp.time);
         ui.painter().extend(match by {
-            Carrier::Dragon { .. } if !behind => dragon(by, p, place, page, self.eggs.desk),
-            Carrier::Balloon { .. } if !behind => balloon(by, p, place, page, self.eggs.desk),
-            Carrier::Octopus { right } if behind => reef::octopus_at(right, p, place, page).behind(now),
-            Carrier::Octopus { right } => reef::octopus_at(right, p, place, page).arm(now),
-            _ => Vec::new(),
+            Carrier::Dragon { .. } => dragon(by, p, place, page, self.eggs.desk),
+            Carrier::Balloon { .. } => balloon(by, p, place, page, self.eggs.desk),
+            Carrier::Octopus { right } => reef::octopus_at(right, p, place, page, self.eggs.desk).draw(),
         });
     }
 }

@@ -748,7 +748,6 @@ impl App {
                 // Someone of the cast may be behind the page, peeking out (`peek.rs`).
                 self.update_peeks(&ctx, i);
                 self.draw_peek(ui, page_rect, i, true);
-                self.draw_carrier(ui, page_rect, i, true);
                 Self::paper(ui.painter(), page_rect);
                 ui.painter().extend(self.backdrop_shapes(&ctx, i, page_rect, &|p| p, 1.0, 1.0));
                 self.draw_bands(ui, page_rect, i);
@@ -757,7 +756,7 @@ impl App {
                 self.text_boxes(ui, page_rect, i);
                 self.draw_notes(ui, page_rect, i);
                 self.draw_peek(ui, page_rect, i, false);
-                self.draw_carrier(ui, page_rect, i, false);
+                self.draw_carrier(ui, page_rect, i);
                 self.pen_surface(ui, page_rect, i);
             }
         } else if self.slides_in(base) && self.appearance == Appearance::Book {
@@ -6757,28 +6756,64 @@ mod tests {
     }
 
     #[test]
-    fn in_the_magic_reef_an_octopus_brings_each_new_chapter_title_from_behind_the_page() {
+    fn a_long_story_s_reef_grows_in_rows_further_back_and_a_narrower_window_moves_no_coral() {
+        let mut h = Harness::new();
+        // Sixteen chapters, fifteen of them done.
+        h.app.doc.garden = vec![6; 16];
+        in_the_theme(&mut h, theme::Theme::Reef, 0.0);
+        let corals = h.app.eggs.reef.clone().unwrap().corals;
+        assert_eq!(corals.len(), 16);
+        assert!(corals.iter().all(|c| beside_the_page(&h, c.0) && c.0.left() >= 0.0 && c.0.right() <= 1240.0), "on the desk: {corals:?}");
+        let floor = |row: usize| corals.iter().filter(|c| c.3 == row).map(|c| c.0.bottom()).fold(f32::NAN, f32::max);
+        assert!(corals[0].3 == 0 && corals[15].3 > 0, "the front row first, then behind: {corals:?}");
+        assert!(floor(1) < floor(0) - 15.0, "further back, further up the sand");
+        // The rocks and seagrass are nearest the writer: painted after every coral and fish.
+        let at = |is: &dyn Fn(&egui::Shape) -> bool| h.painted.iter().enumerate().filter(|(_, cs)| is(&cs.shape)).map(|(i, _)| i).collect::<Vec<_>>();
+        let fish = at(&|s| matches!(s, egui::Shape::Circle(c) if c.fill == eggs::reef::EYE));
+        let grass = at(&|s| matches!(s, egui::Shape::LineSegment { stroke, .. } if eggs::reef::GRASS.contains(&stroke.color)));
+        assert!(!fish.is_empty() && !grass.is_empty() && fish.iter().max() < grass.iter().min(), "seagrass in front of every fish");
+
+        // A narrower window leaves each coral where it stands beside the page.
+        let beside = |h: &Harness| {
+            let page = h.app.last_page_rect;
+            h.app.eggs.reef.clone().unwrap().corals.iter().map(|c| {
+                let edge = if c.0.center().x < page.center().x { page.left() } else { page.right() };
+                (c.0.center() - egui::pos2(edge, page.bottom()), c.3)
+            }).collect::<Vec<_>>()
+        };
+        let was = beside(&h);
+        h.width = 900.0;
+        h.frames(30, vec![], Modifiers::NONE);
+        for (a, b) in was.iter().zip(beside(&h)) {
+            assert!(a.1 == b.1 && (a.0 - b.0).length() < 4.0, "where it was: {a:?} {b:?}");
+        }
+    }
+
+    #[test]
+    fn in_the_magic_reef_an_octopus_swims_down_from_above_with_each_new_chapter_title() {
         let mut h = Harness::new();
         in_the_theme(&mut h, theme::Theme::Reef, 1.0);
         let page = h.app.last_page_rect;
         let mut sides = Vec::new();
         for n in ["One", "Two"] {
+            // Some way down the page, with room above it.
+            h.type_text(&"It was nearly midnight and the Prime Minister sat alone in his office. ".repeat(20));
+            h.key(Key::Enter, Modifiers::NONE);
             h.type_text(&format!("Chapter {n}"));
             h.click_widget("Chapter");
             let lift = h.app.eggs.lift.expect("it came");
             let eggs::Carrier::Octopus { right } = lift.by else { panic!("{:?}", lift.by) };
             sides.push(right);
             let title = format!("Chapter {n}");
-            assert!(h.painted_at(&title).is_none(), "{n}: not shown before it comes out");
-            // Its head comes out past the page's edge, with the title in its arm above its place.
+            assert!(h.painted_at(&title).is_some_and(|p| p.y < 0.0), "{n}: the title comes from above the window");
             h.frames((eggs::OVER * lift.by.pace() * 60.0) as usize, vec![], Modifiers::NONE);
-            let o = eggs::reef::octopus_at(right, eggs::pose_of(lift.by, eggs::OVER * lift.by.pace(), None), h.app.eggs.place.unwrap(), page);
-            assert!(if right { o.body.x > page.right() } else { o.body.x < page.left() }, "{n}: out from behind the page: {o:?}");
+            let o = eggs::reef::octopus_at(right, eggs::pose_of(lift.by, eggs::OVER * lift.by.pace(), None), h.app.eggs.place.unwrap(), page, h.app.eggs.desk);
             let held = h.painted_at(&title).expect("the title shows");
+            assert!(o.body.y > 0.0 && o.body.y < held.y, "{n}: in sight, above the title it holds: {o:?} {held:?}");
             let skin = |h: &Harness| h.painted.iter().any(|cs| matches!(&cs.shape, egui::Shape::Circle(c) if c.fill == eggs::reef::OCTOPUS));
             assert!(skin(&h), "{n}: the octopus is drawn");
             h.frames((eggs::COURSE * lift.by.pace() * 60.0) as usize, vec![], Modifiers::NONE);
-            assert!(h.app.eggs.lift.is_none() && !skin(&h), "{n}: gone back behind the page");
+            assert!(h.app.eggs.lift.is_none() && !skin(&h), "{n}: gone back up");
             let set = h.painted_at(&title).expect("the title in its place");
             assert!(held.y < set.y - 20.0, "{n}: held up above its place: {held:?} {set:?}");
             h.key(Key::Enter, Modifiers::NONE);
