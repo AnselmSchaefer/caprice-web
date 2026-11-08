@@ -94,7 +94,7 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `ideas.rs` | The What next window (lower left): ways the story could go on from the caret, kept in the scratchpad |
 | `fonts.rs` | Installed fonts loaded on demand, a missing one drawn with a twin of the same widths |
 | `theme.rs` | The themes (`Theme`, `Palette`): colours and egui visuals around the page, the palette in use (`pal`), fading from one to the next, the choice kept in the data folder; the page's own `PAPER` and `INK` |
-| `eggs.rs` | What is hidden in the magic themes: in the Magic Garden a plant a chapter growing on the desk and a balloon flying in each new chapter title; in the Magic City a street of houses a chapter, a floor a page, and a dragon flying a new title in held in its feet; in the Magic Sea a ship a chapter, built in a yard a part a page and launched into the bay when the next chapter begins; in the Magic Forest (`eggs/forest.rs`) an old forest at night with a swarm of lanterns, a lantern a page, each chapter's swarm becoming a big lantern on a branch near the page; in the Magic Reef (`eggs/reef.rs`) a sunlit sea with a coral a chapter, a branch a page, spawning and taking in a shoal of fish when the next chapter begins, and an octopus swimming down from above with each new title; in the Magic Snow (`eggs/snow.rs`) a Christmas tree a chapter spread about a snowy hillside, an ornament a page, the new one pulled in and raised by penguins when its chapter begins and the one before then lit |
+| `eggs.rs` | What is hidden in the magic themes: in the Magic Garden a plant a chapter growing on the desk and a balloon flying in each new chapter title; in the Magic City a street of houses a chapter, a floor a page, and a dragon flying a new title in held in its feet; in the Magic Sea a ship a chapter, built in a yard a part a page and launched into the bay when the next chapter begins; in the Magic Forest (`eggs/forest.rs`) an old forest at night with a swarm of lanterns, a lantern a page, each chapter's swarm becoming a big lantern on a branch near the page; in the Magic Reef (`eggs/reef.rs`) a sunlit sea with a coral a chapter, a branch a page, spawning and taking in a shoal of fish when the next chapter begins, and an octopus swimming down from above with each new title; in the Magic Snow (`eggs/snow.rs`) a Christmas tree a chapter spread about a snowy hillside, an ornament a page, the new one pulled in and raised by penguins when its chapter begins and the one before then lit; in the Magic Vineyard (`eggs/vineyard.rs`) a vineyard on rolling hills on a golden afternoon, a stretch of vines a chapter, a bunch of grapes a page, the stretch before turning gold and red and dropping its leaves when the next chapter begins, and now and then a murmuration of starlings; the country it lies in is `eggs/country.rs` |
 | `platform.rs` | What the desktop and the browser do differently: background work (`spawn`, `Waker`, `keep_awake`), the time and time zone, the run's id, the data folder, file dialogs (`Dialog`), uploads and downloads, requests to Caprice's server (`send`, `go_to`) (R31, R33) |
 | `platform/fs.rs` | Files: the system's on the desktop; in the browser, kept in memory by path and mirrored to IndexedDB (R31) |
 | `platform/worker.rs` | In the browser, a Web Worker for each piece of background work, started from `web/worker.js` with nothing evaluated (R31) |
@@ -1103,7 +1103,7 @@ same in every theme, so what is printed (R20) and exported (R10) never depends o
 The magic themes hide things for the writer to find (`eggs.rs`): the Magic Garden (`Theme::Garden`)
 a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a dragon, the Magic Sea
 (`Theme::Sea`) ships, the Magic Forest (`Theme::Forest`) lanterns, the Magic Reef (`Theme::Reef`) corals, the Magic
-Snow (`Theme::Snow`) Christmas trees and penguins. Their blurbs give nothing away. What a theme hides is its own: picking another theme is how to stop it.
+Snow (`Theme::Snow`) Christmas trees and penguins, the Magic Vineyard (`Theme::Vineyard`) vines, grapes and starlings. Their blurbs give nothing away. What a theme hides is its own: picking another theme is how to stop it.
 
 - **The garden lies on the desk, behind every page**, in the Magic Garden only. `draw_garden` is
   called in `frame` right after `page_rect` and before any page is drawn, so the pages hide what is
@@ -1256,7 +1256,8 @@ Snow (`Theme::Snow`) Christmas trees and penguins. Their blurbs give nothing awa
   Zooming brings the whole hillside nearer, as through a camera: everything is zoomed by the zoom
   over the fitting one (`App::fitting_zoom`, in `view.rs`) about the foot of the desk under the page's middle.
   The hillside is laid out as at the fitting zoom, from that same point rather than from the
-  window's edges (`hillside`: only its plain fills reach the edges of what shows), then
+  window's edges (`hillside`: only its plain fills reach the edges of what shows, and hills of
+  their own seeds beyond `REACH` when the page is pushed to one side), then
   transformed; the trees' units are zoomed, and their places are measured from the page's edges,
   which zoom about the same point. Laid out from the window alone, the hillside first stood still
   while the trees slid out with the page's edges, then, laid out from what showed, reshuffled as
@@ -1265,6 +1266,7 @@ Snow (`Theme::Snow`) Christmas trees and penguins. Their blurbs give nothing awa
   size changed. Anything that moves with the time must not multiply it by a size that can change
   (`zooming_in_on_the_magic_snow_brings_the_whole_hillside_nearer_not_the_trees_alone`,
   `the_hillside_is_laid_out_the_same_whatever_part_of_it_shows`,
+  `the_hills_go_on_to_the_edges_of_whatever_shows_however_far_from_the_page`,
   `the_snow_falls_gently_whatever_the_size_of_things`). The places (`snow::places`) are spread about rather than in rows: a grid at `DEPTHS`
   depths up the hill, each place a little off it, in an order from `story_id` that comes nearer
   the page first but at every depth; further up, smaller and bluer in the dusk; drawn from the
@@ -1274,6 +1276,38 @@ Snow (`Theme::Snow`) Christmas trees and penguins. Their blurbs give nothing awa
   top trailing), haul it upright on their ropes, wave to the writer and waddle off the way they
   came beyond the edge (`Crew`); as it stands, the tree before is lit: fairy lights twinkling,
   the star shining, a glow on the snow. Nothing brings a chapter title in this theme.
+- **The country** (`eggs/country.rs`, `country`) is what the Magic Vineyard lies in, kept apart so
+  another theme of the countryside can share it (the Magic Wheat Field did): the sky, the low sun, the clouds, the hills, cypresses and a farmhouse, laid out
+  from the land (`Land`: its middle, its ground and its unit). What lies in it gives the lines along the nearer hills (rows
+  of vines), the colour at the foot of the nearest, and what flies over the hills (`company`: the
+  starlings), and draws its own slope in front.
+- **The vineyard lies on the desk the same way**, in the Magic Vineyard only (`eggs/vineyard.rs`):
+  `draw_vineyard` is called right after `draw_snow`. Its own `Tended` (`Eggs::vines`): the newest
+  chapter's stretch of a row grows a bunch a page up to `BUNCHES`, each swelling green and ripening
+  purple over `RIPEN` (`bunch`); the stretch before turns over `TURN` once the next chapter begins:
+  its leaves go gold and red (`vines` takes how far each place along the row has turned, `turned`),
+  fewer of them stay, `FALLING` of them drift down one after another to lie in the grass in front
+  (`falling`, each leaf by its number), and its grapes darken to the ripest purple (`bunch`'s
+  `last`). The grapes stay: every chapter's stretch keeps its count. Unlike the snow, everything is
+  laid out as at the fitting zoom, beside the page as it would be then, and the whole of it
+  transformed by the zoom at once (`draw_vineyard`: `unzoom`), so nothing in it can zoom
+  differently from the rest; `places` and `Place::in_view` take the unzoomed page and desk. The
+  country is laid out from the land's middle as far as `REACH`, never from what shows; where more
+  shows than that (the page pushed to one side and zoomed out, R32), its hills and the rows go on to
+  the edges on the same points, from seeds of their own, so what lies within `REACH` is the same
+  whatever shows (`the_hills_go_on_to_the_edges_of_whatever_shows_however_far_from_the_page`, in
+  `eggs/country.rs` and `eggs/snow.rs`; `the_rows_go_on_to_the_edges_of_whatever_shows_however_far_from_the_page`); a cloud
+  drifts by a share of the way across, never the time multiplied by a size (as the snowfall).
+  Leaves, grass and trunks are many shapes; the clouds use `puff`, a lighter `radial`, the leaves'
+  shade is in the rows' mesh, and the starlings are one mesh. Anything added to it should keep the
+  frame cheap: count its shapes against the snow's. The rows (`Rows`: `DEPTHS` of them on the slope, each waving gently)
+  are drawn from the furthest, each piece seeded by where it stands along the row; the stretches
+  (`Place`, `places`) are on the `PLOTS` nearest rows, the first free one in sight beside the page.
+  A starling murmuration (`starlings`, drawn as one mesh, `flock`) flies over the hills for `FLOCK`
+  seconds in every `FLOCK_EVERY`, its shape and course functions of the time since it came, so no
+  bird jumps; it gathers as it comes and thins as it goes. It flew above the hills first, where a
+  desk with the pages fitted shows little sky, under the toolbar. People picking were tried and not
+  liked (§7). Nothing brings a chapter title in this theme.
 - **It grows in sight.** How far each plant is drawn grown (`Eggs::grown`, by `story_id`) only goes
   up, a tenth of a second's growth a frame at most; a story opened comes with its garden grown.
   So does a theme picked: each forgets how far it had shown things (`grown_for`, `built_for`,
@@ -1379,6 +1413,17 @@ Snow (`Theme::Snow`) Christmas trees and penguins. Their blurbs give nothing awa
   `in_the_magic_snow_each_page_hangs_an_ornament_on_the_chapter_s_tree`,
   `in_the_magic_snow_penguins_bring_a_tree_for_each_new_chapter_and_the_one_before_is_lit`,
   `a_long_story_s_trees_are_spread_beside_the_page_and_a_narrower_window_moves_none`,
+  `the_clouds_drift_slowly_whatever_the_size_of_things` (in `eggs/country.rs`),
+  `the_landscape_is_laid_out_the_same_whatever_part_of_it_shows`,
+  `the_vineyard_is_there_from_the_start_the_same_for_the_same_story`,
+  `a_bunch_swells_green_then_ripens_purple_and_darkens_at_the_last`,
+  `a_turned_stretch_has_gold_and_red_leaves_and_fewer_of_them`,
+  `the_leaves_drift_down_one_after_another_and_lie_in_the_grass`,
+  `now_and_then_a_murmuration_of_starlings_swoops_across_the_sky`,
+  `the_stretches_lie_beside_the_page_nearer_first_on_the_nearest_rows` (in `eggs/vineyard.rs`),
+  `in_the_magic_vineyard_each_page_grows_a_bunch_of_grapes_on_the_chapter_s_vines`,
+  `in_the_magic_vineyard_the_stretch_before_turns_and_drops_its_leaves_when_a_chapter_begins`,
+  `a_long_story_s_vines_are_beside_the_page_and_zooming_brings_the_whole_vineyard_nearer`,
   `print_shows_nothing_the_magic_themes_hide_nor_what_brings_a_title`,
   `a_magic_theme_picked_again_shows_at_once_what_the_story_grew_meanwhile`,
   `a_story_opened_before_its_font_has_come_grows_its_garden_with_every_page_added`.
@@ -1509,6 +1554,12 @@ whole page, centred, as always.
 
 - **Narrow is the width alone**, never "taller than wide": a phone's keyboard takes half the height,
   and the page shrank to the whole-page fit when it came up.
+- **Zooming out stops at half the fitting zoom** (`view::LEAST`, not below `MIN_ZOOM`), and a
+  window grown while zoomed out brings the zoom up to it. The magic themes that zoom with the page
+  (R30: the snow, the vineyard) come no further than that; below it the page shrank alone over a
+  scene standing still, and pushed to one side it showed the land's end. Anything drawn around the
+  page that follows the zoom can count on no less than half the fit
+  (`zooming_out_stops_at_half_the_fitting_zoom_even_when_the_window_grows`).
 - **The view follows the caret** (`follow_caret`) when the caret or the text changed, or the view
   got shorter, moving the page up or down as little as keeps the caret `CARET_ROOM` inside the
   view, and leaving it wherever it was scrolled to otherwise. The caret is where the editor drew
@@ -1717,7 +1768,8 @@ from `theme::pal()` (R29).
 the settled page after them; a pose as a function of time that tests can look at, ending at once
 when the writer goes on; nothing moved in the layout, nothing in print or the file (R30). A theme
 whose thing grows a step a page and finishes when the next chapter begins keeps its state in a
-`Tended`, as the Magic Snow does.
+`Tended`, as the Magic Snow and the Magic Vineyard do. Lay it all out unzoomed and zoom it at once,
+as the vineyard does, and keep its shapes few enough for a frame (R30).
 
 **Something new the Worker keeps online** (a file, a setting): keyed with `ledger::key` under the
 user, its R2 reads and writes counted by the Ledger first, deleted with the user's stories, and a
@@ -1900,6 +1952,24 @@ test that its limit refuses and leaves R2 alone (R33). Then `node --test web/api
   down from above in front of the page rather than peeking over its top edge, which lies just
   under the format bar and would have hidden it; with it went the title fading in and the
   octopus drawn behind the page.
+- **2026-11-08 — The Magic Vineyard.** Asked for: a challenging magic theme, as realistic as
+  possible: a hilly vineyard under soft clouds, a single person harvesting slowly in the rows in
+  the first chapter, someone new with each chapter, new grapes with each page. A Magic Vineyard was
+  made (a stretch of vines a chapter, a bunch a page, pickers drawn round in three dimensions, the
+  newcomer harvesting the chapter before's grapes into its crate), in a golden autumn afternoon.
+  Every picker staying crowded the rows after a few chapters; a cart taking the old crates away
+  and only the newest picker staying was tried, and the people were still not liked. Of four
+  scenes without people (an olive grove, wheat rolled into hay bales, lavender and bees, the
+  vineyard alone) an olive grove was made (a tree a chapter, olives a page, shaken into a net) and
+  its trees not liked; then the wheat: the land, light and clouds stayed, a stretch of wheat a
+  chapter, taller a page, rolling itself up into a bale. Round bales and waving wheat are simple
+  shapes, colour and movement, which this way of drawing does well, where trees and people need a
+  detail it does not. Realism is sought in the light (the sun low to one side, haze and mist with
+  distance, long shadows towards the writer) and in the wind. Nothing brings a title, as in the
+  snow (R30). The vineyard without people was then asked back as a theme of its own beside the
+  wheat: the stretch before turns gold and red and drops its leaves, its grapes darkening and
+  staying, with starlings now and then; the country the two shared went into `eggs/country.rs`.
+  The wheat field was then taken out, the vineyard without people kept.
 - **2026-11-07 — The Magic Snow.** Asked for: two more magic themes, creative, quirky and
   imaginative. A Magic Cosmos (a planet a chapter, a moon a page, a flying saucer) and a Magic Hive
   (a comb a chapter, a cell of honey a page, bees) were made first and not liked; of six proposals

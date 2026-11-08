@@ -708,6 +708,7 @@ impl App {
         self.draw_forest(ui, area, page_rect);
         self.draw_reef(ui, area, page_rect);
         self.draw_snow(ui, area, page_rect);
+        self.draw_vineyard(ui, area, page_rect);
         let base = self.pos.floor() as usize;
         let t = self.pos - base as f32;
         self.animate_held(ui);
@@ -6288,12 +6289,17 @@ mod tests {
         chapter_one(&mut h);
         assert!(h.app.eggs.snow.is_some() && h.app.eggs.reef.is_none() && h.app.eggs.plants.is_empty());
         assert!(h.app.eggs.lift.is_none(), "nothing brings a title to the snow");
+        assert!(h.app.eggs.vineyard.is_none(), "no vines in the snow");
+        let mut h = Harness::new();
+        in_the_theme(&mut h, theme::Theme::Vineyard, 1.0);
+        chapter_one(&mut h);
+        assert!(h.app.eggs.vineyard.is_some() && h.app.eggs.snow.is_none() && h.app.eggs.plants.is_empty() && h.app.eggs.lift.is_none(), "the vineyard alone, nothing bringing the title");
         let mut h = Harness::new();
         h.frames(3, vec![], Modifiers::NONE);
         h.app.eggs.odds = Some(1.0);
         chapter_one(&mut h);
         assert!(h.app.eggs.plants.is_empty() && h.app.eggs.houses.is_empty() && h.app.eggs.ships.is_empty() && h.app.eggs.lift.is_none());
-        assert!(h.app.eggs.forest.is_none() && h.app.eggs.reef.is_none() && h.app.eggs.snow.is_none());
+        assert!(h.app.eggs.forest.is_none() && h.app.eggs.reef.is_none() && h.app.eggs.snow.is_none() && h.app.eggs.vineyard.is_none());
     }
 
     #[test]
@@ -6662,7 +6668,7 @@ mod tests {
             g.frames(70, vec![], Modifiers::NONE);
             let e = &g.app.eggs;
             let drawn = !(e.plants.is_empty() && e.houses.is_empty() && e.ships.is_empty() && e.forest.is_none() && e.reef.is_none())
-                || e.snow.is_some();
+                || e.snow.is_some() || e.vineyard.is_some();
             assert!(drawn && (g.app.eggs.lift.is_some() || eggs::Carrier::of(t).is_none()), "{t:?}");
             let ctx = g.ctx.clone();
             assert!(g.app.pdf(&ctx, 0..=0).unwrap() == plain, "{t:?}");
@@ -6969,6 +6975,27 @@ mod tests {
     }
 
     #[test]
+    fn zooming_out_stops_at_half_the_fitting_zoom_even_when_the_window_grows() {
+        let mut h = Harness::new();
+        h.frames(3, vec![], Modifiers::NONE);
+        let fit = |h: &Harness| {
+            let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(h.width, h.height));
+            h.app.fitting_zoom(area)
+        };
+        for _ in 0..40 {
+            h.key(Key::Minus, Modifiers::COMMAND);
+        }
+        h.frames(2, vec![], Modifiers::NONE);
+        let least = fit(&h) * view::LEAST;
+        assert!((h.app.zoom - least).abs() < 1e-3, "no further out than half the fit: {} {least}", h.app.zoom);
+        // A bigger window fits the page bigger: zoomed out, it stays no further out than half that.
+        h.width *= 1.6;
+        h.height *= 1.6;
+        h.frames(3, vec![], Modifiers::NONE);
+        assert!(h.app.zoom >= fit(&h) * view::LEAST - 1e-3, "{} {}", h.app.zoom, fit(&h));
+    }
+
+    #[test]
     fn zooming_in_on_the_magic_snow_brings_the_whole_hillside_nearer_not_the_trees_alone() {
         let mut h = Harness::new();
         h.app.doc.garden = vec![6; 6];
@@ -7055,6 +7082,102 @@ mod tests {
         fresh.app.doc.garden = vec![pages];
         assert_eq!(opened, first_plant(&mut fresh), "as tall as its most pages, not its one page now");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn in_the_magic_vineyard_each_page_grows_a_bunch_of_grapes_on_the_chapter_s_vines() {
+        let mut h = Harness::new();
+        in_the_theme(&mut h, theme::Theme::Vineyard, 0.0);
+        let seen = |h: &Harness| h.app.eggs.vineyard.clone().expect("the vineyard is there");
+        assert_eq!(seen(&h).plots.iter().map(|p| p.1).collect::<Vec<_>>(), [1], "a bunch for the first page");
+        h.type_text(&SENTENCE.repeat(220));
+        let pages = h.app.doc.pages();
+        assert!(pages >= 4, "pages: {pages}");
+        h.frames(20, vec![], Modifiers::NONE);
+        assert!(seen(&h).plots[0].1 < pages, "grown in sight");
+        h.frames((eggs::vineyard::RIPEN * 60.0) as usize * pages, vec![], Modifiers::NONE);
+        let plot = seen(&h).plots[0];
+        assert_eq!(plot.1, pages, "a bunch a page");
+        assert!(beside_the_page(&h, plot.0) && plot.2 == 0.0 && seen(&h).fallen == 0, "beside the page, green while its chapter is written: {plot:?}");
+
+        // Taking the pages away takes no bunch off.
+        h.key(Key::A, Modifiers::COMMAND);
+        h.key(Key::Backspace, Modifiers::NONE);
+        h.frames(60, vec![], Modifiers::NONE);
+        assert_eq!(seen(&h).plots[0].1, pages);
+    }
+
+    #[test]
+    fn in_the_magic_vineyard_the_stretch_before_turns_and_drops_its_leaves_when_a_chapter_begins() {
+        let mut h = Harness::new();
+        // Its grapes there as the theme is picked, rather than grown for a while.
+        h.app.doc.garden = vec![4];
+        in_the_theme(&mut h, theme::Theme::Vineyard, 1.0);
+        let seen = |h: &Harness| h.app.eggs.vineyard.clone().unwrap();
+        chapter_one(&mut h);
+        h.key(Key::Enter, Modifiers::NONE);
+        h.type_text(&SENTENCE.repeat(30));
+        for (n, plots) in [("Two", 2), ("Three", 3)] {
+            h.key(Key::Enter, Modifiers::NONE);
+            h.type_text(&format!("Chapter {n}"));
+            h.click_widget("Chapter");
+            h.frames(10, vec![], Modifiers::NONE);
+            let v = seen(&h);
+            let grapes = v.plots[plots - 2].1;
+            assert!(grapes >= 2 && v.turning == Some(plots - 2) && v.plots[plots - 2].2 < 0.1, "Chapter {n}: the stretch before full, about to turn: {v:?}");
+            assert!(v.plots.len() == plots && v.plots[plots - 1].2 == 0.0, "Chapter {n}: a new stretch, green");
+            let (mut was, mut fell) = (0.0, false);
+            for _ in 0..(eggs::vineyard::TURN * 4.0) as usize {
+                h.wait(0.25);
+                let v = seen(&h);
+                assert!(v.plots[plots - 2].2 >= was && v.plots[plots - 2].1 == grapes, "Chapter {n}: turning, its grapes kept");
+                fell |= v.falling > 0;
+                was = v.plots[plots - 2].2;
+            }
+            assert!(fell, "Chapter {n}: leaves falling");
+            h.wait(1.0);
+            let v = seen(&h);
+            assert!(v.turning.is_none() && v.falling == 0 && v.plots[..plots - 1].iter().all(|p| p.2 == 1.0 && p.1 >= 2), "Chapter {n}: every stretch before turned, its grapes kept: {v:?}");
+            assert!(v.fallen > 0 && v.plots[plots - 1].1 >= 1, "Chapter {n}: leaves in the grass, grapes growing on the new stretch");
+            h.type_text(&SENTENCE.repeat(100));
+            h.frames(300, vec![], Modifiers::NONE);
+        }
+
+        // Picked again, the theme shows it as it stands at once.
+        let ctx = h.ctx.clone();
+        h.app.themes.choose(&ctx, theme::Theme::Snow);
+        h.frames(2, vec![], Modifiers::NONE);
+        h.app.themes.choose(&ctx, theme::Theme::Vineyard);
+        h.frames(2, vec![], Modifiers::NONE);
+        let v = seen(&h);
+        assert!(v.turning.is_none() && v.falling == 0 && v.plots.len() == 3 && v.plots[0].2 == 1.0 && v.plots[1].2 == 1.0 && v.plots[2].2 == 0.0, "{v:?}");
+    }
+
+    #[test]
+    fn a_long_story_s_vines_are_beside_the_page_and_zooming_brings_the_whole_vineyard_nearer() {
+        let mut h = Harness::new();
+        h.app.doc.garden = vec![6; 12];
+        in_the_theme(&mut h, theme::Theme::Vineyard, 0.0);
+        let plots = |h: &Harness| h.app.eggs.vineyard.clone().unwrap().plots.iter().map(|p| p.0).collect::<Vec<_>>();
+        let all = plots(&h);
+        let desk = h.app.eggs.desk;
+        assert_eq!(all.len(), 12);
+        assert!(all.iter().all(|p| beside_the_page(&h, *p)), "beside the page: {all:?}");
+        assert!(all.iter().filter(|p| desk.contains_rect(**p)).count() >= 6, "most on the desk: {all:?}");
+        let sun = |h: &Harness| h.painted.iter().find_map(|cs| match &cs.shape {
+            egui::Shape::Circle(c) if c.fill == eggs::country::SUN => Some(c.radius),
+            _ => None,
+        }).expect("the sun");
+        let was = sun(&h);
+        for _ in 0..3 {
+            h.key(Key::Equals, Modifiers::COMMAND);
+        }
+        h.frames(30, vec![], Modifiers::NONE);
+        let z = sun(&h) / was;
+        assert!(z > 1.2, "the vineyard nearer: {z}");
+        for (a, b) in all.iter().zip(plots(&h)) {
+            assert!((b.height() / a.height() - z).abs() < 0.02, "each stretch as much bigger: {} {z}", b.height() / a.height());
+        }
     }
 
     #[test]

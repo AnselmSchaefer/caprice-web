@@ -7,6 +7,10 @@ use crate::ui::{BarSide, DOCK_GAP, RESERVED};
 
 pub const MIN_ZOOM: f32 = 0.3;
 pub const MAX_ZOOM: f32 = 4.0;
+/// How far below the fitting zoom zooming out goes: half of it. The magic themes' scenes come no
+/// further with the page (`eggs/snow.rs`, `eggs/vineyard.rs`), so beyond it the page shrank alone
+/// over a scene standing still, and its land ran out at the window's edge.
+pub const LEAST: f32 = 0.5;
 /// How far two fingers swipe sideways to flip one page, in points.
 const SWIPE_PAGE: f32 = 50.0;
 /// Narrower than this (a phone held upright), the whole page is too small to read: fitting fills
@@ -193,9 +197,16 @@ impl App {
             }
         }
         let z = pinch * keys;
+        let least = (fit * LEAST).max(MIN_ZOOM);
+        if self.zoom < least {
+            // The window grew while zoomed out: no further out than the least it now allows.
+            let anchor = view.center();
+            self.origin = anchor + (self.origin - anchor) * (least / self.zoom);
+            self.zoom = least;
+        }
         if (z - 1.0).abs() > 1e-4 {
             let anchor = hover.filter(|p| view.contains(*p)).unwrap_or(view.center());
-            let mut new = (self.zoom * z).clamp(MIN_ZOOM, MAX_ZOOM);
+            let mut new = (self.zoom * z).clamp(least, MAX_ZOOM);
             // Stop at the fitting size on the way through. Not whenever near it: a slow pinch moves
             // by a hair each frame, and would never get away from it.
             if (self.zoom < fit) != (new < fit) && self.zoom != fit {

@@ -491,12 +491,10 @@ fn hillside(story: &str, area: Rect, middle: f32, ground: f32, u: f32, time: f64
     let moon = pos2(middle + if s.next(0.0, 1.0) < 0.5 { -490.0 } else { 490.0 } * u, ground - 620.0 * u);
     out.push(radial(moon, 110.0 * u, 110.0 * u, MOON, 0.22));
     out.push(Shape::circle_filled(moon, 22.0 * u, MOON));
-    for (color, y, high) in [(HILL_FAR, horizon, 90.0), (HILL, horizon + 60.0 * u, 60.0)] {
-        let mut x = from;
-        while x < to {
-            let w = s.next(180.0, 360.0) * u;
+    for (layer, (color, y, high)) in [(HILL_FAR, horizon, 90.0), (HILL, horizon + 60.0 * u, 60.0)].into_iter().enumerate() {
+        // A hill at `x`, `w` wide, with pines on the far ones, snow on their boughs.
+        let hill = |out: &mut Vec<Shape>, s: &mut Seeds, x: f32, w: f32| {
             let h = s.next(0.5, 1.0) * high * u;
-            // Pines on the far hills, snow on their boughs.
             if color == HILL_FAR {
                 for _ in 0..(s.next(2.0, 6.0) as usize) {
                     let base = pos2(x + s.next(-0.6, 0.6) * w, y - h * s.next(0.2, 0.7));
@@ -510,7 +508,27 @@ fn hillside(story: &str, area: Rect, middle: f32, ground: f32, u: f32, time: f64
                 }
             }
             out.push(oval(pos2(x, y), vec2(1.0, 0.0), w * 0.6, h, color));
+        };
+        let mut x = from;
+        while x < to {
+            let w = s.next(180.0, 360.0) * u;
+            hill(&mut out, &mut s, x, w);
             x += w * s.next(0.6, 0.9);
+        }
+        // Beyond `REACH`, if more shows (the page pushed to one side), more hills, from seeds of their
+        // own, so those within it are the same whatever shows.
+        let mut more = Seeds::of(story, 97_100 + layer);
+        while x < area.right() + 200.0 * u {
+            let w = more.next(180.0, 360.0) * u;
+            hill(&mut out, &mut more, x, w);
+            x += w * more.next(0.6, 0.9);
+        }
+        let mut more = Seeds::of(story, 97_200 + layer);
+        let mut x = from;
+        while x > area.left() - 200.0 * u {
+            let w = more.next(180.0, 360.0) * u;
+            x -= w * more.next(0.6, 0.9);
+            hill(&mut out, &mut more, x, w);
         }
         out.push(Shape::rect_filled(Rect::from_min_max(pos2(area.left(), y), pos2(area.right(), area.bottom())), 0.0, color));
     }
@@ -658,6 +676,15 @@ mod tests {
         assert!(shapes("a story").len() > 200, "stars, hills, pines and snow: {}", shapes("a story").len());
         let at = |story: &str| shapes(story).iter().map(|s| s.visual_bounding_rect().center()).collect::<Vec<_>>();
         assert_eq!(at("a story"), at("a story"));
+    }
+
+    #[test]
+    fn the_hills_go_on_to_the_edges_of_whatever_shows_however_far_from_the_page() {
+        for far in [-4000.0, 4000.0] {
+            let area = desk().translate(vec2(far, 0.0));
+            let ovals = hillside("a story", area, 700.0, 880.0, 1.0, 0.0).into_iter().filter(|s| matches!(s, Shape::Path(_))).map(|s| s.visual_bounding_rect()).filter(|r| r.x_range().intersects(area.x_range())).fold(Rect::NOTHING, |a, r| a | r);
+            assert!(ovals.left() <= area.left() && ovals.right() >= area.right(), "{far}: {ovals:?}");
+        }
     }
 
     #[test]
