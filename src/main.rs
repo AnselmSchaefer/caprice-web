@@ -7489,6 +7489,27 @@ mod tests {
     }
 
     #[test]
+    fn the_welcome_s_line_on_stories_kept_online_is_readable_in_every_theme() {
+        let dir = test_dir("online-readable");
+        let mut h = started_without_a_file(&dir);
+        h.app.shelf.dir = Some(dir.clone());
+        let server = online(&mut h, &dir, false);
+        server.0.borrow_mut().signed_in = Some(("Ada Lovelace".into(), "ada".into()));
+        std::fs::write(dir.join("cloud.json"), r#"{"signing_in":true}"#).unwrap();
+        h.app.cloud = cloud::Cloud::with(Some(server.clone()), Some(dir.join("cloud.json")));
+        h.app.cloud.clock = Some(1000.0);
+        h.frames(12, vec![], Modifiers::NONE);
+        for t in theme::Theme::ALL {
+            let ctx = h.ctx.clone();
+            h.app.themes.choose(&ctx, t);
+            h.wait(1.0);
+            let c = painted_contrast(&h, "Your stories are kept online too, as Ada Lovelace.");
+            assert!(c >= 3.5, "{t:?}: {c:.1}, quiet but readable, like the page bar");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn the_welcome_s_google_button_goes_straight_to_google_s_sign_in() {
         let dir = test_dir("online-welcome-button");
         let mut h = started_without_a_file(&dir);

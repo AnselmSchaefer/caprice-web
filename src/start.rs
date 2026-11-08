@@ -662,9 +662,14 @@ impl App {
             {
                 ui.add_space(14.0);
                 let (r, _) = ui.allocate_exact_size(vec2(full, 26.0), Sense::hover());
-                let at = Rect::from_min_size(pos2(left, r.top()), vec2(col, 26.0));
                 let say = format!("Your stories are kept online too, as {}.", who.name);
-                let line = ui.put(at, egui::Button::new(egui::RichText::new(say).color(pal().text_dim)).frame(false));
+                // On the dock's colour, like the stories above it: where the desk fades it can be the
+                // text's own colour (the Magic Reef's deep water, the Magic Snow's twilight).
+                let font = egui::TextStyle::Button.resolve(ui.style());
+                let wide = galley(ui, say.clone(), font, pal().text_dim, col - 24.0, 1, false).size().x + 24.0;
+                let at = Rect::from_min_size(pos2(left, r.top()), vec2(wide, 26.0));
+                ui.painter().rect_filled(at, CornerRadius::same(13), pal().dock);
+                let line = ui.put(at, egui::Button::new(egui::RichText::new(say).color(pal().text_dim)).frame(false).truncate());
                 if line.on_hover_text("Find your stories in any browser").clicked() && live {
                     self.cloud.open = true;
                 }
