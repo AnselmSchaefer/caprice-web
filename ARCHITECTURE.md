@@ -1286,20 +1286,34 @@ Snow (`Theme::Snow`) Christmas trees and penguins, the Magic Vineyard (`Theme::V
   chapter's stretch of a row grows a bunch a page up to `BUNCHES`, each swelling green and ripening
   purple over `RIPEN` (`bunch`); the stretch before turns over `TURN` once the next chapter begins:
   its leaves go gold and red (`vines` takes how far each place along the row has turned, `turned`),
-  fewer of them stay, `FALLING` of them drift down one after another to lie in the grass in front
+  each leaf slowly and in its own moment (`turned_leaf`), from its green through gold to one of the
+  clear `TURNED` colours (`turning`: a straight mix of green and red, or a turned colour darkened
+  towards a dark green, made them brown; `shade` darkens a colour in its own hue), and the vine's
+  depths go a warm rust, never all but black. A leaf's colour changes only by how far it has turned:
+  every seed it takes is taken whether it has turned or not, or the leaves after it would jump. Most
+  leaves stay, so the stretch is never bare: only a few of them, `FALLING`, drift down one after another to lie in the grass in front
   (`falling`, each leaf by its number), and its grapes darken to the ripest purple (`bunch`'s
   `last`). The grapes stay: every chapter's stretch keeps its count. Unlike the snow, everything is
   laid out as at the fitting zoom, beside the page as it would be then, and the whole of it
   transformed by the zoom at once (`draw_vineyard`: `unzoom`), so nothing in it can zoom
   differently from the rest; `places` and `Place::in_view` take the unzoomed page and desk. The
-  country is laid out from the land's middle as far as `REACH`, never from what shows; where more
+  country is laid out from the land's middle as far as `REACH`, never from what shows, and anything
+  chosen by where it stands (a leaf's autumn colour, `autumn`) takes its place from that middle, never
+  from the screen: the middle is the page's, which moves as the zoom changes, and a turned leaf
+  measured from the screen changed colour while zooming; where more
   shows than that (the page pushed to one side and zoomed out, R32), its hills and the rows go on to
   the edges on the same points, from seeds of their own, so what lies within `REACH` is the same
   whatever shows (`the_hills_go_on_to_the_edges_of_whatever_shows_however_far_from_the_page`, in
   `eggs/country.rs` and `eggs/snow.rs`; `the_rows_go_on_to_the_edges_of_whatever_shows_however_far_from_the_page`); a cloud
   drifts by a share of the way across, never the time multiplied by a size (as the snowfall).
-  Leaves, grass and trunks are many shapes; the clouds use `puff`, a lighter `radial`, the leaves'
-  shade is in the rows' mesh, and the starlings are one mesh. Anything added to it should keep the
+  A row is built as a vine is (`vines`): trunks up to the wire, a woody cordon along it, shoots
+  rising from it, and real leaves along each shoot on short stalks (`vine_leaf`: five pointed
+  lobes, rounded bays, a notch at the stalk, lighter on the sun's side, veins on the nearest row),
+  of every size and way, some further in and darker, over the vine's dark depths. Its foot is ragged:
+  leaves hang over the wire and below it along every stretch, the depths fade out at a wavy hem, and
+  the wood along the wire bends (drawn straight, they ruled a clean line under every row). The leaves, the
+  wood and the starlings are meshes, the clouds `puff`, a lighter `radial`, and the far rows have
+  fewer leaves. Anything added to it should keep the
   frame cheap: count its shapes against the snow's. The rows (`Rows`: `DEPTHS` of them on the slope, each waving gently)
   are drawn from the furthest, each piece seeded by where it stands along the row; the stretches
   (`Place`, `places`) are on the `PLOTS` nearest rows, the first free one in sight beside the page.
@@ -1417,7 +1431,11 @@ Snow (`Theme::Snow`) Christmas trees and penguins, the Magic Vineyard (`Theme::V
   `the_landscape_is_laid_out_the_same_whatever_part_of_it_shows`,
   `the_vineyard_is_there_from_the_start_the_same_for_the_same_story`,
   `a_bunch_swells_green_then_ripens_purple_and_darkens_at_the_last`,
-  `a_turned_stretch_has_gold_and_red_leaves_and_fewer_of_them`,
+  `a_turned_stretch_has_red_and_gold_leaves_not_brown_and_keeps_most_of_them`,
+  `a_leaf_turns_slowly_through_gold_never_brown`,
+  `a_turned_leaf_keeps_its_colour_wherever_the_page_lies`,
+  `a_vine_leaf_has_five_lobes_and_lies_flat_when_fallen`,
+  `the_vines_hang_over_the_wire_raggedly_never_ending_in_a_straight_line`,
   `the_leaves_drift_down_one_after_another_and_lie_in_the_grass`,
   `now_and_then_a_murmuration_of_starlings_swoops_across_the_sky`,
   `the_stretches_lie_beside_the_page_nearer_first_on_the_nearest_rows` (in `eggs/vineyard.rs`),

@@ -20,13 +20,20 @@ use super::country::*;
 const FIELD: Color32 = Color32::from_rgb(164, 140, 80);
 const FIELD_LOW: Color32 = Color32::from_rgb(150, 124, 70);
 const ROWS_FAR: Color32 = Color32::from_rgb(96, 102, 56);
-/// The vines: their leaves turning, and turned, their old wood, the posts and the wire.
-const LEAF_GREEN: Color32 = Color32::from_rgb(98, 124, 46);
-const LEAF_YELLOW: Color32 = Color32::from_rgb(208, 172, 62);
-const LEAF_RUST: Color32 = Color32::from_rgb(178, 92, 42);
-const LEAF_DARK: Color32 = Color32::from_rgb(46, 60, 28);
-const AUTUMN_RED: Color32 = Color32::from_rgb(178, 50, 36);
-const AUTUMN_GOLD: Color32 = Color32::from_rgb(230, 168, 48);
+/// The vines: their leaves, a fresh green going yellow here and there, lit by the sun and deep in
+/// shade; the clear colours they turn, each leaf one of them; their shoots and old wood; the posts
+/// and the wire.
+const LEAF_GREEN: Color32 = Color32::from_rgb(76, 124, 40);
+const LEAF_LIT: Color32 = Color32::from_rgb(150, 184, 62);
+const LEAF_YELLOW: Color32 = Color32::from_rgb(214, 198, 78);
+const TURNED: [Color32; 4] = [
+    Color32::from_rgb(170, 26, 46),
+    Color32::from_rgb(212, 56, 34),
+    Color32::from_rgb(234, 120, 30),
+    Color32::from_rgb(242, 188, 50),
+];
+const CANE: Color32 = Color32::from_rgb(132, 120, 60);
+const CORDON: Color32 = Color32::from_rgb(104, 78, 52);
 const TRUNK: Color32 = Color32::from_rgb(92, 68, 48);
 const POST: Color32 = Color32::from_rgb(128, 104, 78);
 const WIRE: Color32 = Color32::from_rgb(150, 146, 136);
@@ -34,10 +41,10 @@ const WIRE: Color32 = Color32::from_rgb(150, 146, 136);
 /// on them.
 const UNRIPE: Color32 = Color32::from_rgb(150, 172, 84);
 const UNRIPE_DARK: Color32 = Color32::from_rgb(92, 116, 48);
-pub const GRAPE: Color32 = Color32::from_rgb(88, 38, 82);
+pub const GRAPE: Color32 = Color32::from_rgb(92, 34, 92);
 const GRAPE_DARK: Color32 = Color32::from_rgb(40, 18, 44);
 const RIPEST: Color32 = Color32::from_rgb(56, 18, 58);
-const BLOOM: Color32 = Color32::from_rgb(178, 160, 192);
+const BLOOM: Color32 = Color32::from_rgb(188, 172, 210);
 const STALK: Color32 = Color32::from_rgb(110, 96, 50);
 /// The starlings, far off against the sky.
 pub const STARLING: Color32 = Color32::from_rgb(52, 46, 54);
@@ -47,7 +54,7 @@ pub const BUNCHES: usize = 12;
 /// Seconds a bunch takes to swell and ripen; and from a chapter beginning until the stretch before
 /// has turned and its leaves have fallen.
 pub const RIPEN: f32 = 2.5;
-pub const TURN: f32 = 10.0;
+pub const TURN: f32 = 16.0;
 /// How many rows there are on the slope, and on how many of the nearest the chapters' stretches lie.
 const DEPTHS: usize = 5;
 const PLOTS: usize = 3;
@@ -57,7 +64,7 @@ const SPACE: f32 = 150.0;
 /// The order the bunches come in along a stretch, spread over it rather than from one end.
 const ORDER: [usize; BUNCHES] = [5, 2, 9, 0, 7, 3, 11, 1, 6, 10, 4, 8];
 /// How many leaves fall from a stretch as it turns.
-const FALLING: usize = 40;
+const FALLING: usize = 12;
 /// Seconds between one murmuration of starlings and the next, how long one lasts, and how many birds.
 pub const FLOCK_EVERY: f32 = 90.0;
 pub const FLOCK: f32 = 24.0;
@@ -204,20 +211,77 @@ pub fn bunch(top: Pos2, size: f32, grown: f32, last: f32, seed: u64, haze: f32) 
     out
 }
 
-/// A vine leaf at `at`, `r` across, turned `turn`: a broad middle lobe and two at its sides.
-fn leaf(at: Pos2, r: f32, turn: f32, color: Color32) -> Vec<Shape> {
-    let lobe = |a: f32| at + Vec2::angled(a + turn) * r * 0.75;
-    vec![
-        Shape::circle_filled(lobe(-2.4), r * 0.75, color.lerp_to_gamma(LEAF_DARK, 0.12)),
-        Shape::circle_filled(lobe(-0.7), r * 0.75, color.lerp_to_gamma(LEAF_DARK, 0.12)),
-        Shape::circle_filled(at + Vec2::angled(-PI / 2.0 + turn) * r * 0.35, r, color.lerp_to_gamma(SUNLIT, 0.08)),
-    ]
+/// `c` made lighter (above 1) or darker (below), its hue kept: shade darkens a turned leaf to a
+/// deeper red, where mixing in a dark green made it brown.
+fn shade(c: Color32, f: f32) -> Color32 {
+    let [r, g, b, a] = c.to_array();
+    let m = |v: u8| (v as f32 * f).round().clamp(0.0, 255.0) as u8;
+    Color32::from_rgba_premultiplied(m(r), m(g), m(b), a)
 }
 
-/// A leaf turned, gold or red, from where it falls along a row.
-fn autumn(x: f32, u: f32) -> Color32 {
+/// A vine leaf added to `mesh`: its stalk at `at`, `r` from there to the tip of its middle lobe,
+/// pointing `towards`, coloured `color`, and squashed to `flat` of its height when it lies on the
+/// ground: five pointed lobes with rounded bays between them and a notch where the stalk meets it,
+/// lighter on the sun's side, darker at its heart; and its veins, if `veins`.
+fn vine_leaf(mesh: &mut egui::epaint::Mesh, at: Pos2, r: f32, towards: f32, color: Color32, flat: f32, veins: bool) {
+    // Each lobe's way from the heart, from the middle one, and how long it is.
+    const LOBES: [(f32, f32); 5] = [(-1.8, 0.5), (-0.95, 0.82), (0.0, 1.0), (0.95, 0.82), (1.8, 0.5)];
+    let place = |a: f32, d: f32| {
+        let v = Vec2::angled(towards + a) * d;
+        let heart = Vec2::angled(towards) * r * 0.36;
+        at + vec2(heart.x + v.x, (heart.y + v.y) * flat)
+    };
+    let light = vec2(-0.55, -0.83);
+    let lit = |a: f32| shade(color, 0.9 + 0.24 * Vec2::angled(towards + a).dot(light));
+    let heart = mesh.vertices.len() as u32;
+    mesh.colored_vertex(place(0.0, 0.0), shade(color, 0.74));
+    let mut rim = vec![(PI, 0.16 * r)];
+    for (i, &(a, long)) in LOBES.iter().enumerate() {
+        let bay = if i == 0 { a - 0.55 } else { (a + LOBES[i - 1].0) / 2.0 };
+        rim.push((bay, if i == 0 { 0.3 } else { 0.42 } * r));
+        let reach = long * 0.64 * r;
+        rim.extend([(a - 0.15, reach * 0.76), (a, reach), (a + 0.15, reach * 0.76)]);
+    }
+    rim.push((LOBES[4].0 + 0.55, 0.3 * r));
+    for &(a, d) in &rim {
+        mesh.colored_vertex(place(a, d), lit(a));
+    }
+    let n = rim.len() as u32;
+    for i in 0..n {
+        mesh.add_triangle(heart, heart + 1 + i, heart + 1 + (i + 1) % n);
+    }
+    if veins {
+        let vein = color.lerp_to_gamma(LEAF_YELLOW, 0.3);
+        for &(a, long) in &LOBES {
+            let (from, to) = (place(a, 0.0), place(a, long * 0.55 * r));
+            let side = (to - from).normalized().rot90() * r * 0.025;
+            let i = mesh.vertices.len() as u32;
+            mesh.colored_vertex(from + side, vein);
+            mesh.colored_vertex(from - side, vein);
+            mesh.colored_vertex(to, vein);
+            mesh.add_triangle(i, i + 1, i + 2);
+        }
+    }
+}
+
+/// The colour a leaf turns, one of the clear autumn colours, by where it hangs (`x` from the land's
+/// middle, as the page moves when zooming) and a number of its own.
+fn autumn(x: f32, u: f32, own: f32) -> Color32 {
     let m = 0.5 + 0.5 * (x / (37.0 * u)).sin() * (x / (11.0 * u) + 1.0).cos();
-    AUTUMN_GOLD.lerp_to_gamma(AUTUMN_RED, m).lerp_to_gamma(LEAF_RUST, 0.2)
+    TURNED[((m * 3.0 + own) as usize).min(TURNED.len() - 1)]
+}
+
+/// A leaf `p` of the way from its `green` to the autumn colour it turns, `to`: through gold, as a
+/// leaf goes, never through the brown a straight mix of green and red passes.
+fn turning(green: Color32, to: Color32, p: f32) -> Color32 {
+    let p = p.clamp(0.0, 1.0);
+    if p < 0.5 { green.lerp_to_gamma(LEAF_YELLOW, p * 2.0) } else { LEAF_YELLOW.lerp_to_gamma(to, p * 2.0 - 1.0) }
+}
+
+/// How far a leaf has turned, when its row has turned `turn`: each in its own moment, `own` from 0
+/// to 1, slowly, rather than all at once or each in an instant.
+fn turned_leaf(turn: f32, own: f32) -> f32 {
+    ((turn - own * 0.6) / 0.4).clamp(0.0, 1.0)
 }
 
 /// A row of vines `l`, across what shows of `area`: its shadow on the ground towards the writer, the
@@ -244,26 +308,25 @@ fn vines(story: &str, l: usize, rows: &Rows, area: Rect, turned: &dyn Fn(f32) ->
         let at = if i >= 0 { i as usize } else { 50_000_000 + i.unsigned_abs() as usize };
         Seeds::of(story, 140_000 + l * 100_000 + at * 4 + what)
     };
+    // Here and there along a row the leaves are going yellow.
     let colour = |x: f32| {
         let m = 0.5 + 0.5 * ((x - middle) / (130.0 * u) + l as f32).sin() * ((x - middle) / (53.0 * u) + 2.0 * l as f32).cos();
-        let c = LEAF_GREEN.lerp_to_gamma(LEAF_YELLOW, 0.2 + 0.7 * m);
-        let c = if m > 0.82 { c.lerp_to_gamma(LEAF_RUST, (m - 0.82) * 4.0) } else { c };
-        c.lerp_to_gamma(autumn(x, u), turned(x))
+        LEAF_GREEN.lerp_to_gamma(LEAF_YELLOW, 0.1 + 0.6 * m)
     };
     // The shadow, falling towards the writer.
-    let mut shade = egui::epaint::Mesh::default();
+    let mut dusk = egui::epaint::Mesh::default();
     for i in first..=last {
         let x = x_of(i);
         let y = rows.row(l, x);
-        shade.colored_vertex(pos2(x, y - 0.04 * h), glow(hz(SHADOW), 0.34));
-        shade.colored_vertex(pos2(x, y + 0.16 * h), glow(hz(SHADOW), 0.0));
+        dusk.colored_vertex(pos2(x, y - 0.04 * h), glow(hz(SHADOW), 0.34));
+        dusk.colored_vertex(pos2(x, y + 0.16 * h), glow(hz(SHADOW), 0.0));
     }
     for j in 0..(last - first) as u32 {
         let (a, b) = (2 * j, 2 * j + 2);
-        shade.add_triangle(a, a + 1, b);
-        shade.add_triangle(b, a + 1, b + 1);
+        dusk.add_triangle(a, a + 1, b);
+        dusk.add_triangle(b, a + 1, b + 1);
     }
-    out.push(Shape::mesh(shade));
+    out.push(Shape::mesh(dusk));
     // The trunks, gnarled, and the wire they are tied to.
     for i in first..=last {
         let mut s = seeds(i, 0);
@@ -274,7 +337,7 @@ fn vines(story: &str, l: usize, rows: &Rows, area: Rect, turned: &dyn Fn(f32) ->
     }
     let wire: Vec<Pos2> = (first..=last).map(|i| pos2(x_of(i), rows.row(l, x_of(i)) - 0.42 * h)).collect();
     out.push(Shape::line(wire, Stroke::new((0.8 * k * u).max(0.5), hz(WIRE))));
-    // The leaves: one soft body lit on top and shaded deep within, its edges leafy, then leaves over it.
+    // Behind the leaves, the shade deep within the vine, so it is dense where they overlap.
     let mut body = egui::epaint::Mesh::default();
     let fine = 3;
     let n = (last - first) * fine;
@@ -282,14 +345,15 @@ fn vines(story: &str, l: usize, rows: &Rows, area: Rect, turned: &dyn Fn(f32) ->
         let x = x_of(first) + j as f32 * step / fine as f32;
         let y = rows.row(l, x);
         let d = x - middle;
-        let thin = 0.12 * turned(x);
-        let lump = 0.07 * (d / (14.0 * k * u)).sin() + 0.05 * (d / (37.0 * k * u) + 1.0).sin() + 0.03 * (d / (5.0 * k * u) + 2.0).sin() - thin;
-        let hem = 0.05 * (d / (11.0 * k * u)).sin() + 0.03 * (d / (4.3 * k * u) + 1.0).sin();
-        let c = colour(x);
-        let deep = 0.55 + 0.25 * (d / (7.0 * k * u) + 0.5).sin() * (d / (19.0 * k * u)).sin();
-        body.colored_vertex(pos2(x, y - (0.84 + lump) * h), hz(c.lerp_to_gamma(SUNLIT, 0.3)));
-        body.colored_vertex(pos2(x, y - (0.6 + 0.3 * hem) * h), hz(c.lerp_to_gamma(LEAF_DARK, deep)));
-        body.colored_vertex(pos2(x, y - (0.4 - hem) * h), hz(c.lerp_to_gamma(LEAF_DARK, 0.6)));
+        let lump = 0.06 * (d / (14.0 * k * u)).sin() + 0.04 * (d / (37.0 * k * u) + 1.0).sin() - 0.04 * turned(x);
+        // Its foot hangs lower here and there, and fades: a straight dark edge looked cut.
+        let hem = 0.05 * (d / (9.0 * k * u) + 0.7).sin() + 0.03 * (d / (3.7 * k * u) + l as f32).sin() + 0.02;
+        // Where it has turned, its depths are a warm rust, lit through the thinner leaves: darkening
+        // a deep red made them all but black.
+        let (c, lit) = (turning(colour(x), TURNED[2], 0.75 * turned(x)), 1.0 + 0.45 * turned(x));
+        body.colored_vertex(pos2(x, y - (0.78 + lump) * h), hz(shade(c, 0.62 * lit)));
+        body.colored_vertex(pos2(x, y - 0.56 * h), hz(shade(c, 0.4 * lit)));
+        body.colored_vertex(pos2(x, y - (0.42 - hem) * h), glow(hz(shade(c, 0.36 * lit)), 0.3));
     }
     for j in 0..n as u32 {
         let (a, b) = (3 * j, 3 * j + 3);
@@ -299,26 +363,94 @@ fn vines(story: &str, l: usize, rows: &Rows, area: Rect, turned: &dyn Fn(f32) ->
         }
     }
     out.push(Shape::mesh(body));
+    // The vine itself: its cordon along the wire, shoots rising from it, and leaves along each shoot
+    // on short stalks, turning one by one where it has turned and fewer of them left; some further
+    // in, in shade. Meshes, as there are thousands of leaves.
+    // Veins on the nearest row only, and fewer, smaller-seeming leaves further up, where a leaf is a
+    // few points across: the same look for far less to draw.
+    let (near, far) = (l == 0, k < 0.75);
+    let (mut wood, mut back, mut front) = (egui::epaint::Mesh::default(), egui::epaint::Mesh::default(), egui::epaint::Mesh::default());
+    let stick = |mesh: &mut egui::epaint::Mesh, a: Pos2, b: Pos2, wa: f32, wb: f32, c: Color32| {
+        let side = (b - a).normalized().rot90();
+        let i = mesh.vertices.len() as u32;
+        mesh.colored_vertex(a + side * wa, c);
+        mesh.colored_vertex(a - side * wa, shade(c, 0.75));
+        mesh.colored_vertex(b - side * wb, shade(c, 0.75));
+        mesh.colored_vertex(b + side * wb, c);
+        mesh.add_triangle(i, i + 1, i + 2);
+        mesh.add_triangle(i, i + 2, i + 3);
+    };
     for i in first..=last {
         let mut s = seeds(i, 1);
-        // Most of them at its edges, so its outline is of leaves; fewer where it has turned.
-        for j in 0..6 {
-            let x = x_of(i) + s.next(-0.5, 0.5) * step;
-            let y = rows.row(l, x);
-            let up = match j % 3 {
-                0 => s.next(0.82, 1.0),
-                1 => s.next(0.0, 0.15),
-                _ => s.next(0.1, 0.9),
-            };
-            let at = pos2(x, y - (0.36 + 0.52 * up) * h);
-            let c = colour(x + s.next(-30.0, 30.0) * u).lerp_to_gamma(LEAF_DARK, 0.45 * (1.0 - up) + s.next(0.0, 0.15));
-            let c = if up > 0.7 { c.lerp_to_gamma(SUNLIT, 0.3 * (up - 0.7) / 0.3) } else { c };
-            let (r, turn, gone) = (s.next(0.03, 0.045) * h, s.next(-0.5, 0.5), s.next(0.0, 1.0));
-            if gone >= 0.45 * turned(x) {
-                out.extend(leaf(at, r, turn, hz(c)));
+        let x0 = x_of(i);
+        let wire = |x: f32| pos2(x, rows.row(l, x) - 0.42 * h);
+        // The old wood along the wire sags and bends between the trunks; drawn straight, it ruled a line.
+        let bend = |x: f32| wire(x) + vec2(0.0, 0.012 * h * ((x - middle) / (0.23 * step)).sin() * ((x - middle) / (0.71 * step) + 1.0).sin());
+        for q in 0..3 {
+            let (a, b) = (x0 + step * q as f32 / 3.0, x0 + step * (q + 1) as f32 / 3.0);
+            stick(&mut wood, bend(a), bend(b), 0.013 * h, 0.013 * h, hz(CORDON));
+        }
+        let shoots = if far { 2 } else { 4 };
+        for j in 0..shoots {
+            let bx = x0 + (j as f32 + s.next(0.1, 0.9)) / shoots as f32 * step;
+            let base = wire(bx);
+            let (tall, lean, droop) = (s.next(0.36, 0.5) * h, s.next(-0.08, 0.08) * h, s.next(-0.06, 0.06) * h);
+            let at = |t: f32| base + vec2(lean * t + droop * t * t, -tall * t);
+            stick(&mut wood, at(0.0), at(0.5), 0.008 * h, 0.006 * h, hz(CANE));
+            stick(&mut wood, at(0.5), at(1.0), 0.006 * h, 0.004 * h, hz(CANE));
+            let leaves = if far { 3 } else { 5 };
+            for q in 0..leaves {
+                let t = 0.18 + 0.82 * (q as f32 + s.next(0.0, 0.6)) / leaves as f32;
+                let side = if q % 2 == 0 { -1.0 } else { 1.0 };
+                let leaf = at(t) + vec2(side * s.next(0.03, 0.07) * h, s.next(-0.02, 0.03) * h);
+                // Of every size and every way, a few hanging down, as leaves are.
+                let droops = s.next(0.0, 1.0) < 0.15;
+                let towards = if droops { PI / 2.0 + s.next(-0.6, 0.6) } else { -PI / 2.0 + side * s.next(0.0, 1.3) + s.next(-0.3, 0.3) };
+                let (r, gone, flips, own) = (s.next(0.1, 0.17) * h, s.next(0.0, 1.0), s.next(0.0, 1.0), s.next(0.0, 1.2));
+                let (inside, yellow) = (s.next(0.0, 1.0) < 0.4, s.next(0.0, 1.0));
+                let turn = turned(leaf.x);
+                // Lighter at the top where the sun is, each leaf a green of its own.
+                let green = LEAF_GREEN.lerp_to_gamma(LEAF_LIT, (0.15 + 0.35 * t + s.next(-0.2, 0.25)).clamp(0.0, 0.75));
+                // A few fall as the row turns; most stay on, so it is never bare.
+                if gone < 0.12 * turn {
+                    continue;
+                }
+                let green = green.lerp_to_gamma(LEAF_YELLOW, (colour(leaf.x).r() as f32 / 255.0 - 0.45).max(0.0) * yellow);
+                let c = turning(green, autumn(leaf.x - middle, u, own), turned_leaf(turn, flips));
+                stick(&mut wood, at(t), leaf, 0.004 * h, 0.003 * h, hz(CANE));
+                if inside {
+                    vine_leaf(&mut back, leaf, r * 0.9, towards, hz(shade(c, 0.68)), 1.0, false);
+                } else {
+                    vine_leaf(&mut front, leaf, r, towards, hz(c), 1.0, near);
+                }
+            }
+        }
+        // Leaves hang over the wire and below it, a few here and none there, so the vine's foot is
+        // ragged, as a real one's is, and never a clean line along the wire.
+        let mut s = seeds(i, 3);
+        for _ in 0..if far { 3 } else { 6 } {
+            let x = x0 + s.next(0.0, 1.0) * step;
+            let leaf = wire(x) + vec2(s.next(-0.03, 0.03) * h, s.next(-0.07, 0.03) * h);
+            let towards = PI / 2.0 + s.next(-1.0, 1.0);
+            let (r, gone, flips, own, inside, bare) = (s.next(0.08, 0.15) * h, s.next(0.0, 1.0), s.next(0.0, 1.0), s.next(0.0, 1.2), s.next(0.0, 1.0) < 0.4, s.next(0.0, 1.0) < 0.3);
+            let turn = turned(x);
+            // In the vine's shade, a darker green than the leaves the sun reaches.
+            let green = LEAF_GREEN.lerp_to_gamma(LEAF_LIT, s.next(0.0, 0.25));
+            if bare || gone < 0.12 * turn {
+                continue;
+            }
+            let c = turning(green, autumn(x - middle, u, own), turned_leaf(turn, flips));
+            stick(&mut wood, bend(x), leaf, 0.004 * h, 0.003 * h, hz(CANE));
+            if inside {
+                vine_leaf(&mut back, leaf, r * 0.9, towards, hz(shade(c, 0.68)), 1.0, false);
+            } else {
+                vine_leaf(&mut front, leaf, r, towards, hz(shade(c, 0.85)), 1.0, near);
             }
         }
     }
+    out.push(Shape::mesh(back));
+    out.push(Shape::mesh(wood));
+    out.push(Shape::mesh(front));
     // The posts, every few trunks, in front of the leaves.
     for i in (first..=last).filter(|i| i.rem_euclid(6) == 3) {
         let x = x_of(i) + 0.5 * step;
@@ -514,15 +646,15 @@ impl App {
                         _ => TURN,
                     };
                     let leaves = falling(story, k, place, &rows, t);
-                    let r = 0.04 * rows.tall(l);
-                    for &(_, at, turn, lying) in &leaves {
-                        let c = autumn(at.x * 3.0, u).lerp_to_gamma(HAZE, Rows::haze(l));
-                        if lying {
-                            shapes.push(oval(at, Vec2::angled(turn), r * 1.1, r * 0.45, c.lerp_to_gamma(SHADOW, 0.15)));
-                        } else {
-                            shapes.push(oval(at, Vec2::angled(turn), r * 1.1, r * (0.3 + 0.6 * (turn * 1.7).sin().abs()), c));
-                        }
+                    let r = 0.065 * rows.tall(l);
+                    let mut mesh = egui::epaint::Mesh::default();
+                    for &(i, at, turn, lying) in &leaves {
+                        let c = autumn(at.x - land.middle, u, (i % 4) as f32 * 0.3).lerp_to_gamma(HAZE, Rows::haze(l));
+                        // Turning over as it falls, it shows narrower; lying, it is flat on the grass.
+                        let (flat, c) = if lying { (0.4, shade(c, 0.85)) } else { (0.25 + 0.75 * (turn * 1.7).sin().abs(), c) };
+                        vine_leaf(&mut mesh, at, r, turn, c, flat, false);
                     }
+                    shapes.push(Shape::mesh(mesh));
                     seen.falling += leaves.iter().filter(|f| !f.3).count();
                     seen.fallen += leaves.iter().filter(|f| f.3).count();
                 }
@@ -609,15 +741,105 @@ mod tests {
     }
 
     #[test]
-    fn a_turned_stretch_has_gold_and_red_leaves_and_fewer_of_them() {
+    fn a_turned_stretch_has_red_and_gold_leaves_not_brown_and_keeps_most_of_them() {
         let place = places("a story", page(), &rows())[0];
         let r = rows();
         let area = Rect::from_x_y_ranges(place.from..=place.to, 0.0..=900.0);
-        let leaves = |a: f32| vines("a story", place.level, &r, area, &|x| a * place.within(x, 1.0)).into_iter().filter(|s| matches!(s, Shape::Circle(_))).collect::<Vec<_>>();
-        let red = |s: &[Shape]| s.iter().filter(|s| matches!(s, Shape::Circle(c) if c.fill.r() > c.fill.g() + 40)).count();
+        // The leaves' meshes, and in them the colours of the leaves' edges.
+        // The whole row as far as it shows turned, as a stretch is.
+        // Its meshes are its shadow, its depths, the leaves further in, its wood and the leaves in front.
+        let meshes = |a: f32| -> Vec<Vec<Color32>> {
+            vines("a story", place.level, &r, area, &|_| a).into_iter().filter_map(|s| match s {
+                Shape::Mesh(m) => Some(m.vertices.iter().map(|v| v.color).collect()),
+                _ => None,
+            }).collect()
+        };
+        let leaves = |a: f32| [meshes(a)[2].clone(), meshes(a)[4].clone()].concat();
         let (green, turned) = (leaves(0.0), leaves(1.0));
-        assert!(turned.len() < green.len() * 9 / 10, "fewer: {} then {}", green.len(), turned.len());
-        assert!(red(&turned) > red(&green) + 20, "gold and red: {} then {}", red(&green), red(&turned));
+        // Its depths a warm rust, as light as when green, never all but black.
+        let light = |cs: &[Color32]| cs.iter().map(|c| c.r().max(c.g()) as f32).sum::<f32>() / cs.len() as f32;
+        assert!(light(&meshes(1.0)[1]) > light(&meshes(0.0)[1]), "depths: {} then {}", light(&meshes(0.0)[1]), light(&meshes(1.0)[1]));
+        // Red and gold have more red than green; brown is dull and dark besides.
+        let warm = |c: &Color32| c.r() > c.g() + 20 && c.r() > 110;
+        let brown = |c: &Color32| c.r() > c.g() && c.r() < 110 && c.r() as i32 - (c.b() as i32) < 60;
+        assert!(turned.len() < green.len() && turned.len() * 5 > green.len() * 4, "a few fewer: {} then {}", green.len(), turned.len());
+        assert!(green.iter().filter(|c| warm(c)).count() * 10 < green.len(), "green before");
+        assert!(turned.iter().filter(|c| warm(c)).count() * 3 > turned.len(), "red and gold after: {}", turned.iter().filter(|c| warm(c)).count());
+        assert!(turned.iter().filter(|c| brown(c)).count() * 10 < turned.len(), "not brown: {}", turned.iter().filter(|c| brown(c)).count());
+    }
+
+    #[test]
+    fn a_turned_leaf_keeps_its_colour_wherever_the_page_lies() {
+        // Zooming moves the page, and the land is laid out from its middle: the same leaves, moved.
+        let leaves = |middle: f32| {
+            let r = Rows::new("a story", Land { middle, ..land() });
+            let area = Rect::from_x_y_ranges(middle - 700.0..=middle + 700.0, 0.0..=900.0);
+            vines("a story", 0, &r, area, &|_| 1.0).into_iter().filter_map(|s| match s {
+                Shape::Mesh(m) => Some(m.vertices.iter().map(|v| (v.pos.x - middle, v.color)).collect::<Vec<_>>()),
+                _ => None,
+            }).nth(4).unwrap()
+        };
+        let (here, there) = (leaves(700.0), leaves(913.0));
+        let x = |a: &[(f32, Color32)]| a.iter().map(|v| v.0).sum::<f32>() / a.len() as f32;
+        assert!((x(&here) - x(&there)).abs() < 1.0, "the same leaves");
+        let colours = |a: &[(f32, Color32)]| a.iter().map(|v| v.1).collect::<Vec<_>>();
+        assert_eq!(colours(&here), colours(&there));
+    }
+
+    #[test]
+    fn a_leaf_turns_slowly_through_gold_never_brown() {
+        for own in [0.0, 0.3, 0.7, 0.99] {
+            for to in TURNED {
+                let at = |turn: f32| turning(LEAF_GREEN, to, turned_leaf(turn, own));
+                assert_eq!((at(0.0), at(1.0)), (LEAF_GREEN, to));
+                let steps: Vec<Color32> = (0..=100).map(|i| at(i as f32 / 100.0)).collect();
+                // Over a good part of the row's turning, and never a jump from one colour to another.
+                assert!(steps.iter().filter(|&&c| c != LEAF_GREEN && c != to).count() > 30, "{own} {to:?}");
+                for w in steps.windows(2) {
+                    let jump = w[0].to_array().iter().zip(w[1].to_array()).map(|(a, b)| a.abs_diff(b)).max().unwrap();
+                    assert!(jump < 16, "{own} {to:?}: {w:?}");
+                    let c = w[1];
+                    assert!(!(c.r() > c.g() && c.r() < 110), "brown on the way: {c:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_vines_hang_over_the_wire_raggedly_never_ending_in_a_straight_line() {
+        let r = rows();
+        let h = r.tall(0);
+        let area = Rect::from_x_y_ranges(0.0..=1400.0, 0.0..=900.0);
+        let meshes: Vec<Vec<Pos2>> = vines("a story", 0, &r, area, &|_| 0.0).into_iter().filter_map(|s| match s {
+            Shape::Mesh(m) => Some(m.vertices.iter().map(|v| v.pos).collect()),
+            _ => None,
+        }).collect();
+        // How far below the wire the lowest leaf hangs, along each stretch between two trunks.
+        let below = |p: &Pos2| p.y - (r.row(0, p.x) - 0.42 * h);
+        let feet: Vec<f32> = (0..20).map(|i| {
+            let (from, to) = (100.0 + i as f32 * 0.5 * h, 100.0 + (i + 1) as f32 * 0.5 * h);
+            meshes[2].iter().chain(&meshes[4]).filter(|p| (from..to).contains(&p.x)).map(below).fold(f32::MIN, f32::max)
+        }).collect();
+        let (low, high) = feet.iter().fold((f32::MAX, f32::MIN), |(a, b), &f| (a.min(f), b.max(f)));
+        assert!(low > 0.05 * h, "leaves below the wire along every stretch: {feet:?}");
+        assert!(high - low > 0.05 * h, "lower in some places than others: {feet:?}");
+    }
+
+    #[test]
+    fn a_vine_leaf_has_five_lobes_and_lies_flat_when_fallen() {
+        let mut m = egui::epaint::Mesh::default();
+        vine_leaf(&mut m, pos2(100.0, 100.0), 20.0, -PI / 2.0, LEAF_GREEN, 1.0, true);
+        let rim: Vec<Pos2> = m.vertices[1..].iter().map(|v| v.pos).collect();
+        let around = |m: &egui::epaint::Mesh| m.vertices.iter().fold(Rect::NOTHING, |r, v| r.union(Rect::from_center_size(v.pos, Vec2::ZERO)));
+        assert!(around(&m).height() > 15.0 && around(&m).width() > 15.0, "{:?}", around(&m));
+        // Five tips standing out from the bays between them.
+        let heart = m.vertices[0].pos;
+        let far: Vec<f32> = rim.iter().map(|p| p.distance(heart)).collect();
+        let tips = (1..far.len() - 1).filter(|&i| far[i] > far[i - 1] && far[i] > far[i + 1] && far[i] > 6.0).count();
+        assert!(tips >= 5, "{tips} tips");
+        let mut flat = egui::epaint::Mesh::default();
+        vine_leaf(&mut flat, pos2(100.0, 100.0), 20.0, -PI / 2.0, LEAF_GREEN, 0.4, false);
+        assert!(around(&flat).height() < around(&m).height() * 0.5);
     }
 
     #[test]
