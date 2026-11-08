@@ -7095,7 +7095,10 @@ mod tests {
         assert!(pages >= 4, "pages: {pages}");
         h.frames(20, vec![], Modifiers::NONE);
         assert!(seen(&h).plots[0].1 < pages, "grown in sight");
-        h.frames((eggs::vineyard::RIPEN * 60.0) as usize * pages, vec![], Modifiers::NONE);
+        // A tenth of a second's growth a frame at most: two frames a wait, fewer frames than a 60th each.
+        for _ in 0..(eggs::vineyard::RIPEN * 10.0) as usize * pages {
+            h.wait(0.1);
+        }
         let plot = seen(&h).plots[0];
         assert_eq!(plot.1, pages, "a bunch a page");
         assert!(beside_the_page(&h, plot.0) && plot.2 == 0.0 && seen(&h).fallen == 0, "beside the page, green while its chapter is written: {plot:?}");
@@ -7140,7 +7143,9 @@ mod tests {
             assert!(v.turning.is_none() && v.falling == 0 && v.plots[..plots - 1].iter().all(|p| p.2 == 1.0 && p.1 >= 2), "Chapter {n}: every stretch before turned, its grapes kept: {v:?}");
             assert!(v.fallen > 0 && v.plots[plots - 1].1 >= 1, "Chapter {n}: leaves in the grass, grapes growing on the new stretch");
             h.type_text(&SENTENCE.repeat(100));
-            h.frames(300, vec![], Modifiers::NONE);
+            for _ in 0..30 {
+                h.wait(0.1);
+            }
         }
 
         // Picked again, the theme shows it as it stands at once.
