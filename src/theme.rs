@@ -75,10 +75,11 @@ pub enum Theme {
     Forest,
     Reef,
     Snow,
+    Vineyard,
 }
 
 impl Theme {
-    pub const ALL: [Theme; 13] = [
+    pub const ALL: [Theme; 14] = [
         Theme::Midnight,
         Theme::Lagoon,
         Theme::Marmalade,
@@ -92,12 +93,13 @@ impl Theme {
         Theme::Forest,
         Theme::Reef,
         Theme::Snow,
+        Theme::Vineyard,
     ];
 
     /// Is it one of the magic themes, which hide things to find (`eggs.rs`), rather than colours
     /// alone? The Page menu shows them apart.
     pub fn magic(self) -> bool {
-        matches!(self, Theme::Garden | Theme::City | Theme::Sea | Theme::Forest | Theme::Reef | Theme::Snow)
+        matches!(self, Theme::Garden | Theme::City | Theme::Sea | Theme::Forest | Theme::Reef | Theme::Snow | Theme::Vineyard)
     }
 
     pub fn name(self) -> &'static str {
@@ -115,6 +117,7 @@ impl Theme {
             Theme::Forest => "Magic Forest",
             Theme::Reef => "Magic Reef",
             Theme::Snow => "Magic Snow",
+            Theme::Vineyard => "Magic Vineyard",
         }
     }
 
@@ -134,6 +137,7 @@ impl Theme {
             Theme::Forest => "Moss, moonlight, and a path that goes on",
             Theme::Reef => "Warm water, sunlight, and something that grows",
             Theme::Snow => "Hush, falling flakes, and a warm light",
+            Theme::Vineyard => "Turning leaves, ripe grapes, and the year's last light",
         }
     }
 
@@ -366,6 +370,24 @@ impl Theme {
                 caret: rgb(255, 190, 100),
                 thumb: rgb(110, 126, 180),
                 light: false,
+            },
+            // A golden afternoon over the hills; the vineyard is drawn on it (`eggs::vineyard`).
+            Theme::Vineyard => Palette {
+                desk: rgb(214, 188, 134),
+                desk_top: rgb(150, 188, 222),
+                dock: rgb(250, 244, 230),
+                dock_edge: rgb(222, 204, 172),
+                btn: rgb(240, 228, 206),
+                btn_hover: rgb(232, 214, 182),
+                text: rgb(62, 38, 32),
+                text_hot: rgb(36, 18, 14),
+                text_dim: rgb(120, 90, 72),
+                accent: rgb(126, 36, 64),
+                on_accent: Color32::WHITE,
+                field: rgb(255, 252, 244),
+                caret: rgb(138, 40, 70),
+                thumb: rgb(192, 162, 120),
+                light: true,
             },
         }
     }

@@ -16,7 +16,9 @@
 //! becomes a big lantern in its trees (`forest`). In the Magic Reef each chapter has a coral, a
 //! branch for each page, which spawns when the next chapter begins and a shoal of fish comes to
 //! live about (`reef`). In the Magic Snow each chapter has a Christmas tree, an ornament a page,
-//! pulled in and raised by penguins and lit when the next is (`snow`).
+//! pulled in and raised by penguins and lit when the next is (`snow`). In the Magic Vineyard each
+//! chapter has a stretch of vines, a bunch of grapes a page, its leaves
+//! turning and falling when the next begins (`vineyard`).
 //!
 //! None of it is on the page: the garden, the city and the sea lie on the desk behind the pages, and what brings a title
 //! is drawn
@@ -35,6 +37,8 @@ use crate::theme::Theme;
 pub mod forest;
 pub mod reef;
 pub mod snow;
+pub mod country;
+pub mod vineyard;
 
 /// What brings a new chapter title in, in which theme.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -280,6 +284,9 @@ pub struct Eggs {
     /// The Magic Snow's trees as they are decorated, and the hillside drawn last frame, for tests.
     trees: Tended,
     pub snow: Option<snow::Seen>,
+    /// The Magic Vineyard's stretches as their grapes grow, and the vineyard drawn last frame, for tests.
+    vines: Tended,
+    pub vineyard: Option<vineyard::Seen>,
 }
 
 /// What the Magic Snow keeps while a story is shown, as the reef does: the story and the chapter
@@ -369,7 +376,7 @@ impl Default for Eggs {
             built_for: None, built: 0.0, built_at: 0.0, order: Vec::new(), scale: None, houses: Vec::new(), light: None, sailed_for: None, berths: Vec::new(), rigged: 0.0, rigged_at: 0.0,
             launch: None, ships: Vec::new(), forest_for: None, flowed: 0, born: Vec::new(), merge: None, forest: None,
             reef_for: None, beds: Vec::new(), branched: 0.0, branched_at: 0.0, spawn: None, reef: None,
-            trees: Tended::default(), snow: None }
+            trees: Tended::default(), snow: None, vines: Tended::default(), vineyard: None }
     }
 }
 
