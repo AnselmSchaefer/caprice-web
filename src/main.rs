@@ -7591,6 +7591,81 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    /// The Scene menu's "Describe the scene", the description typed, and Draw, then frames until
+    /// the painting is over.
+    fn describe_scene(h: &mut Harness, what: &str) {
+        h.click_widget("Scene");
+        h.click_widget("Describe the scene\u{2026}");
+        h.frames(2, vec![], Modifiers::NONE);
+        h.type_text(what);
+        h.click_widget("Draw");
+        for _ in 0..300 {
+            h.frames(1, vec![], Modifiers::NONE);
+            if !h.app.backdrop.drawing() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        panic!("the painting never ended");
+    }
+
+    #[test]
+    fn in_the_browser_a_scene_described_is_painted_by_caprice_s_server() {
+        let mut h = Harness::new();
+        h.app.claude = false;
+        let dir = with_shelf(&mut h, "online-scene");
+        let server = online(&mut h, &dir, true);
+        h.frames(12, vec![], Modifiers::NONE);
+        h.type_text("The lighthouse stood alone.");
+        h.click_widget("Scene");
+        h.click_widget("Describe the scene\u{2026}");
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.labels().contains("goes to Claude (Anthropic)"), "the writer is told what leaves the browser first");
+        h.key(Key::Escape, Modifiers::NONE);
+        h.app.backdrop.panel = false;
+        describe_scene(&mut h, "A lighthouse at dusk");
+        assert!(server.0.borrow().asked.contains(&"POST /api/scene".to_owned()), "{:?}", server.0.borrow().asked);
+        let scene = h.app.doc.scenes.iter().find(|s| !s.versions.is_empty()).expect("a scene is painted");
+        assert!(scene.versions[0].contains("#a52"), "with the server's picture");
+        assert!(h.app.backdrop.asked().contains("A lighthouse at dusk"));
+        h.click_widget("Scene");
+        assert!(h.labels().contains("49 scenes left today"), "the menu says how many are left");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn in_the_browser_signed_out_no_scene_is_painted_and_nothing_is_asked() {
+        let mut h = Harness::new();
+        h.app.claude = false;
+        let dir = with_shelf(&mut h, "online-scene-out");
+        let server = online(&mut h, &dir, false);
+        h.frames(3, vec![], Modifiers::NONE);
+        h.type_text("The lighthouse stood alone.");
+        h.click_widget("Scene");
+        assert!(h.labels().contains("Describe the scene"), "the Scene menu is there");
+        h.click_widget("Describe the scene\u{2026}");
+        assert!(!h.app.backdrop.panel, "but painting waits for signing in");
+        assert!(server.0.borrow().asked.is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn when_the_day_s_scenes_are_used_up_the_writer_is_told_and_nothing_is_painted() {
+        let mut h = Harness::new();
+        h.app.claude = false;
+        let dir = with_shelf(&mut h, "online-scene-none");
+        let server = online(&mut h, &dir, true);
+        server.0.borrow_mut().no_painting = Some((503, "No more scenes today: Caprice paints 50 a day for everyone. More tomorrow.".into()));
+        h.frames(12, vec![], Modifiers::NONE);
+        h.type_text("The lighthouse stood alone.");
+        describe_scene(&mut h, "A lighthouse at dusk");
+        assert!(h.app.shown_status.contains("No more scenes today"), "the writer is told why: {}", h.app.shown_status);
+        assert!(h.app.doc.scenes.iter().all(|s| s.versions.is_empty()), "no picture");
+        h.click_widget("Scene");
+        assert!(h.labels().contains("No more scenes today"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn signed_in_the_welcome_greets_the_writer_by_their_first_name() {
         let dir = test_dir("online-greeting");

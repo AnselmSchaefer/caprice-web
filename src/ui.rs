@@ -660,7 +660,14 @@ impl App {
                     self.claude_menu(ui);
                     self.scene_menu(ui);
                 }
-                // In the browser, until Claude can be asked there: shown, so nothing seems lost.
+                // In the browser Claude is not asked from the page, but Caprice's server paints
+                // scenes (R33): the Scene menu is there, and Claude's shown, so nothing seems lost.
+                _ if self.cloud.server.is_some() => {
+                    let later = "Comes to the browser version later";
+                    ui.add_enabled(false, egui::Button::new("Claude")).on_disabled_hover_text(later);
+                    self.scene_menu(ui);
+                }
+                // Nowhere to send a painting either (tests without a server).
                 _ => {
                     let later = "Comes to the browser version later";
                     ui.add_enabled(false, egui::Button::new("Claude")).on_disabled_hover_text(later);

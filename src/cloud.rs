@@ -868,6 +868,9 @@ pub mod stand_in {
         pub went_to: Vec<String>,
         /// An answer to give every story request instead: its status, Retry-After, and what it says.
         pub refuse: Option<(u16, u32, String)>,
+        /// Scenes painted, of the day's 50, and an answer to give instead of a painting.
+        pub painted: u32,
+        pub no_painting: Option<(u16, String)>,
         versions: u32,
     }
 
@@ -899,6 +902,14 @@ pub mod stand_in {
             let Some((name, user)) = o.signed_in.clone() else { return status(401) };
             if r.path == "/api/me" {
                 return json(serde_json::json!({ "name": name, "provider": "google", "user": user }));
+            }
+            if r.path == "/api/scene" {
+                if let Some((code, said)) = &o.no_painting {
+                    return Answer { status: *code, headers: Vec::new(), body: said.clone().into_bytes() };
+                }
+                o.painted += 1;
+                let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 3"><rect width="4" height="3" fill="#a52"/></svg>"##;
+                return Answer { status: 200, headers: vec![("X-Caprice-Scenes-Left".into(), (50 - o.painted).to_string())], body: svg.into() };
             }
             if let Some((code, retry, said)) = &o.refuse {
                 return Answer { status: *code, headers: vec![("Retry-After".into(), retry.to_string())], body: said.clone().into_bytes() };

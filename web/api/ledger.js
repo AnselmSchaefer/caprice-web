@@ -23,6 +23,12 @@ const DEFAULTS = {
   FILE_BYTES: 25e6,
   HISTORY: 3,
   HISTORY_APART_HOURS: 6,
+  // Claude bills every scene it paints: this is the most it paints in a day, for everyone together.
+  SITE_SCENES_PER_DAY: 50,
+  // And the most one scene can cost: what is sent (about 90 KB of it the cast's model sheets),
+  // and what Claude writes, its thinking counted.
+  SCENE_PROMPT_BYTES: 160_000,
+  SCENE_TOKENS: 32_000,
 };
 
 export function limits(env) {
@@ -63,6 +69,7 @@ export class Ledger extends DurableObject {
         PRIMARY KEY (user, id));
       CREATE TABLE IF NOT EXISTS counts (key TEXT PRIMARY KEY, n INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS recent (user TEXT, at INTEGER);
+      CREATE TABLE IF NOT EXISTS painting (user TEXT PRIMARY KEY, until INTEGER);
     `);
   }
 
@@ -192,6 +199,30 @@ export class Ledger extends DurableObject {
   // The upload failed: its room is given back (the write still counts: R2 may have been reached).
   abort(user, id, version) {
     this.sql.exec("DELETE FROM pending WHERE user = ? AND id = ? AND version = ?", user, id, version);
+  }
+
+  // Before Claude is asked for a scene: one of the day's, while they last, and one at a time for
+  // each writer (a second click would cost another). It counts whether or not a picture comes of
+  // it, since Claude bills the asking: so the day's limit is a limit on what is billed.
+  paint(user, now = Date.now()) {
+    if (!this.known(user)) return { error: 401, message: "Not signed in" };
+    this.sql.exec("DELETE FROM painting WHERE until <= ?", now);
+    if (this.rows("SELECT 1 FROM painting WHERE user = ?", user).length) {
+      return { error: 409, message: "A scene is being painted for you already", retry: 30 };
+    }
+    const most = this.limits.SITE_SCENES_PER_DAY;
+    const done = this.count(now, "scenes");
+    if (done >= most) {
+      return { error: 503, message: `No more scenes today: Caprice paints ${most} a day for everyone. More tomorrow.`, retry: untilTomorrow(now) };
+    }
+    this.bump(now, "scenes");
+    this.sql.exec("INSERT INTO painting VALUES (?, ?)", user, now + 10 * MINUTE);
+    return { ok: true, left: most - done - 1 };
+  }
+
+  // The painting is over, however it went: the writer may ask for the next.
+  painted(user) {
+    this.sql.exec("DELETE FROM painting WHERE user = ?", user);
   }
 
   remove(user, id, ifMatch) {

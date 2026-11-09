@@ -1,6 +1,7 @@
 // The Worker's own requests: /api/* only (`run_worker_first`); every other path is a static file
-// from web/dist, served without it. It signs writers in with Google or GitHub and keeps their
-// stories in R2, one private bucket. See CLOUD_PLAN.md for why, and ARCHITECTURE.md R33.
+// from web/dist, served without it. It signs writers in with Google or GitHub, keeps their
+// stories in R2, one private bucket, and has Claude paint scenes for them. See CLOUD_PLAN.md for
+// why, and ARCHITECTURE.md R33.
 //
 // Who is asking comes only from the session cookie, signed here; where a story is kept comes only
 // from that and the story's checked id. Before anything reaches R2 the Ledger (ledger.js) says
@@ -76,6 +77,7 @@ async function route(request, env) {
   if (!session) return text(401, "Not signed in");
   // The user's id is no secret of theirs (a hash), and tells the app when someone else signs in.
   if (path === "/api/me") return json({ name: session.n, provider: session.p, user: session.u });
+  if (path === "/api/scene") return method === "POST" ? scene(request, env, session.u) : text(405, "POST only");
 
   if (env.SYNC_OFF === "1") return text(503, "Stories online are switched off for now", { "Retry-After": "3600" });
   const ledger = env.LEDGER.get(env.LEDGER.idFromName("ledger"));
@@ -154,6 +156,75 @@ async function put(request, env, ledger, user, id) {
   }
   await forget(env, done.drop);
   return json({ version: begun.version }, { "ETag": `"${begun.version}"` });
+}
+
+// Painting a scene. The app sends what to paint (backdrop.rs builds it, as on the desktop); Claude
+// paints it with our key, which never leaves the Worker. The Ledger counts the scene before Claude
+// is asked, and the request fixes the most it can cost, so the day's scenes bound the bill. Only
+// the SVG goes back, so the key is of no use for anything but painting.
+const PAINTER = "claude-opus-5-5";
+const PAINTING = "You are a skilled illustrator who paints with SVG code. You make detailed, \
+atmospheric illustrations for the pages of a story, in the manner of a classic book \
+illustration: believable light, depth and texture rather than cartoon shapes.";
+// Said in the picture itself, for anyone who finds it outside Caprice: it was made by an AI.
+const MADE_BY = "<metadata>Made with AI: painted by Claude (Anthropic) for Caprice</metadata>";
+
+async function scene(request, env, user) {
+  if (env.SCENES_OFF === "1") return text(503, "Painting scenes is switched off for now", { "Retry-After": "3600" });
+  if (!env.ANTHROPIC_API_KEY) return text(503, "Painting scenes is not set up", { "Retry-After": "3600" });
+  const l = limits(env);
+  const length = Number(request.headers.get("Content-Length"));
+  if (!request.headers.has("Content-Length") || !Number.isInteger(length)) return text(411, "Say how long the request is");
+  if (length > l.SCENE_PROMPT_BYTES) return text(413, "There is too much to paint at once");
+  const prompt = await request.text();
+  if (!prompt.trim() || new TextEncoder().encode(prompt).length > l.SCENE_PROMPT_BYTES) return text(413, "There is too much to paint at once");
+
+  const ledger = env.LEDGER.get(env.LEDGER.idFromName("ledger"));
+  const allowed = await ledger.paint(user);
+  if (!allowed.ok) return refused(allowed);
+  const left = { "X-Caprice-Scenes-Left": String(allowed.left) };
+  try {
+    const painted = await paint(prompt, env, l.SCENE_TOKENS);
+    if (painted.error) return text(painted.error, painted.message, painted.retry ? { ...left, "Retry-After": String(painted.retry) } : left);
+    return new Response(painted.svg, { headers: { "Content-Type": "image/svg+xml; charset=utf-8", ...left } });
+  } finally {
+    await ledger.painted(user);
+  }
+}
+
+// Claude's answer in one piece, not streamed: the Worker waits for it without using its CPU
+// time (10 ms a request on the free plan), where reading thousands of streamed events would not.
+// Thinking is adaptive (Opus cannot paint without it), at the effort the desktop paints with.
+async function paint(prompt, env, most) {
+  const asked = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    body: JSON.stringify({
+      model: PAINTER, max_tokens: most, system: PAINTING,
+      output_config: { effort: "medium" },
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  if (!asked.ok) {
+    // The reason only: never anything of the story.
+    const said = await asked.text();
+    console.error("scene: Claude answered", asked.status, said.slice(0, 200));
+    // The prepaid credit is used up (it is not reloaded by itself): painting waits until it is
+    // topped up, and the writer is told so rather than that something broke.
+    if (asked.status === 402 || /credit balance/i.test(said)) return { error: 503, message: "Painting is paused for now", retry: 3600 };
+    return [429, 529].includes(asked.status)
+      ? { error: 503, message: "Claude is busy: try again in a minute" }
+      : { error: 502, message: "Claude could not be asked" };
+  }
+  const message = await asked.json();
+  const stop = message.stop_reason;
+  const reply = (message.content ?? []).filter(b => b.type === "text").map(b => b.text).join("");
+  if (stop === "refusal") return { error: 422, message: "Claude declined to draw this scene" };
+  const start = reply.indexOf("<svg");
+  const end = reply.lastIndexOf("</svg>");
+  if (start < 0 || end < start) return { error: 502, message: stop === "max_tokens" ? "The picture grew too big to finish" : "Claude's reply held no picture" };
+  const svg = reply.slice(start, end + "</svg>".length).replace(/<svg\b[^>]*>/, open => open + MADE_BY);
+  return { svg };
 }
 
 // Deleting costs nothing in R2; it takes up to a thousand keys at once.
