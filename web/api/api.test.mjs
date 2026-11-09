@@ -513,3 +513,29 @@ test("when the credit is used up, painting is paused, and claude being down is s
   assert.equal(down.status, 502);
   assert.equal(await down.text(), "Claude could not be asked");
 });
+
+test("the site's owner sees the scenes of each day by hashed id, and nobody else does", async t => {
+  const token = "the owner's token, long enough to be one";
+  const mf = await start(t, { ADMIN_TOKEN: token });
+  const ada = await writer(mf, "1", "Ada");
+  const bob = await writer(mf, "2", "Bob");
+  await paint(ada);
+  await paint(ada);
+  await paint(bob);
+  const ask = authorization => mf.dispatchFetch(`${SITE}/api/admin/scenes`, { headers: authorization ? { Authorization: authorization } : {} });
+  assert.equal((await ask()).status, 401);
+  assert.equal((await ask("Bearer not it")).status, 401);
+  const seen = await ask(`Bearer ${token}`);
+  assert.equal(seen.status, 200);
+  const { limit, days } = await seen.json();
+  assert.equal(limit, 50);
+  assert.equal(days.length, 1);
+  assert.deepEqual([days[0].scenes, days[0].writers], [3, 2]);
+  assert.deepEqual(days[0].by.map(w => w.scenes), [2, 1], "most first");
+  const me = await (await ada("/api/me")).json();
+  assert.equal(days[0].by[0].user, me.user, "by the same hashed id the writer has");
+  assert.ok(!JSON.stringify(days).includes("Ada"), "and no name");
+
+  const without = await start(t);
+  assert.equal((await without.dispatchFetch(`${SITE}/api/admin/scenes`, { headers: { Authorization: "Bearer " } })).status, 404, "no token, no such request");
+});

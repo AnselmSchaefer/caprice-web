@@ -61,6 +61,9 @@ async function route(request, env) {
     return signIn[1] === "login" ? login(signIn[2], url, env) : callback(signIn[2], url, request, env);
   }
 
+  // For the site's owner, with ADMIN_TOKEN, from a terminal: not the app, and no session.
+  if (path === "/api/admin/scenes") return admin(request, env);
+
   // Everything else is asked by the app itself: a link or a form on another site sends no such
   // header, and the browser will not let another site's script add it without CORS, which we never allow.
   if (request.headers.get("X-Caprice") !== "1") return text(403, "Not from Caprice");
@@ -225,6 +228,20 @@ async function paint(prompt, env, most) {
   if (start < 0 || end < start) return { error: 502, message: stop === "max_tokens" ? "The picture grew too big to finish" : "Claude's reply held no picture" };
   const svg = reply.slice(start, end + "</svg>".length).replace(/<svg\b[^>]*>/, open => open + MADE_BY);
   return { svg };
+}
+
+// The scenes painted lately, by hashed id: `curl -H "Authorization: Bearer $TOKEN" <site>/api/admin/scenes`.
+// Without a long enough ADMIN_TOKEN (a secret) there is no such request at all.
+async function admin(request, env) {
+  const token = env.ADMIN_TOKEN ?? "";
+  if (token.length < 32) return text(404, "No such request");
+  if (request.method !== "GET") return text(405, "GET only");
+  const given = request.headers.get("Authorization")?.match(/^Bearer (.+)$/)?.[1] ?? "";
+  // Compared as hashes, in time that does not depend on how much of it was right.
+  const [a, b] = await Promise.all([given, token].map(t => crypto.subtle.digest("SHA-256", new TextEncoder().encode(t))));
+  if (!crypto.subtle.timingSafeEqual(a, b)) return text(401, "Not the site's owner");
+  const ledger = env.LEDGER.get(env.LEDGER.idFromName("ledger"));
+  return json(await ledger.sceneDays());
 }
 
 // Deleting costs nothing in R2; it takes up to a thousand keys at once.

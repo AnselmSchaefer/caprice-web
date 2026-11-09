@@ -9,6 +9,7 @@ import { DurableObject } from "cloudflare:workers";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
 
 // What the limits are when wrangler.jsonc does not say. They keep R2 inside its free amounts
 // (10 GB stored, a million writes and ten million reads a month): see CLOUD_PLAN.md.
@@ -29,6 +30,8 @@ const DEFAULTS = {
   // and what Claude writes, its thinking counted.
   SCENE_PROMPT_BYTES: 160_000,
   SCENE_TOKENS: 32_000,
+  // How many days the scenes painted, by hashed id, are kept for /api/admin/scenes.
+  SCENE_DAYS: 30,
 };
 
 export function limits(env) {
@@ -70,6 +73,7 @@ export class Ledger extends DurableObject {
       CREATE TABLE IF NOT EXISTS counts (key TEXT PRIMARY KEY, n INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS recent (user TEXT, at INTEGER);
       CREATE TABLE IF NOT EXISTS painting (user TEXT PRIMARY KEY, until INTEGER);
+      CREATE TABLE IF NOT EXISTS scene_days (day TEXT, user TEXT, n INTEGER NOT NULL, PRIMARY KEY (day, user));
     `);
   }
 
@@ -216,8 +220,28 @@ export class Ledger extends DurableObject {
       return { error: 503, message: `No more scenes today: Caprice paints ${most} a day for everyone. More tomorrow.`, retry: untilTomorrow(now) };
     }
     this.bump(now, "scenes");
+    // Who painted how many, by the hashed id only (no name is kept anywhere), for SCENE_DAYS: so
+    // one account using up the day's scenes can be seen, without knowing who it is.
+    this.sql.exec("DELETE FROM scene_days WHERE day < ?", day(now - this.limits.SCENE_DAYS * DAY));
+    this.sql.exec("INSERT INTO scene_days VALUES (?, ?, 1) ON CONFLICT (day, user) DO UPDATE SET n = n + 1", day(now), user);
     this.sql.exec("INSERT INTO painting VALUES (?, ?)", user, now + 10 * MINUTE);
     return { ok: true, left: most - done - 1 };
+  }
+
+  // The scenes of the days kept, newest first: each day's total, how many writers, and each
+  // writer's count by hashed id, most first.
+  sceneDays(now = Date.now()) {
+    this.sql.exec("DELETE FROM scene_days WHERE day < ?", day(now - this.limits.SCENE_DAYS * DAY));
+    const rows = this.rows("SELECT day, user, n FROM scene_days ORDER BY day DESC, n DESC, user");
+    const days = [];
+    for (const r of rows) {
+      if (days.at(-1)?.day !== r.day) days.push({ day: r.day, scenes: 0, writers: 0, by: [] });
+      const d = days.at(-1);
+      d.scenes += r.n;
+      d.writers += 1;
+      d.by.push({ user: r.user, scenes: r.n });
+    }
+    return { ok: true, limit: this.limits.SITE_SCENES_PER_DAY, days };
   }
 
   // The painting is over, however it went: the writer may ask for the next.
@@ -239,7 +263,8 @@ export class Ledger extends DurableObject {
   removeAll(user) {
     if (!this.known(user)) return { error: 401, message: "Not signed in" };
     const gone = this.rows("SELECT id, version FROM versions WHERE user = ?", user);
-    for (const table of ["versions", "stories", "pending"]) this.sql.exec(`DELETE FROM ${table} WHERE user = ?`, user);
+    // Who painted how many goes too; the day's total for the site stays, so it is no way round the limit.
+    for (const table of ["versions", "stories", "pending", "scene_days"]) this.sql.exec(`DELETE FROM ${table} WHERE user = ?`, user);
     return { ok: true, drop: gone.map(v => key(user, v.id, v.version)) };
   }
 }

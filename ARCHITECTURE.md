@@ -1730,6 +1730,11 @@ that costs money as it is asked:
 - **The prepaid credit used up pauses painting** ("Painting is paused for now", 503): Anthropic's
   answer (402, or "credit balance") is told apart from Claude being busy or failing, and is
   logged with its reason. The day's limit is 10 while the credit is small; 50 later.
+- **Who painted how many is kept by hashed id only** (`scene_days`, `SCENE_DAYS` days), for the
+  site's owner to see whether one account uses up the scenes: `GET /api/admin/scenes` with
+  `Authorization: Bearer <ADMIN_TOKEN>` (a secret of 32 characters or more; without it there is no
+  such request). It names no one: no name or email is kept anywhere. Deleting a writer's stories
+  online deletes their counts too, but not the day's total.
 - `SCENES_OFF = "1"` stops painting at once; without a key nothing is painted. Neither touches
   stories online, nor `SYNC_OFF` painting.
 - The app reads `X-Caprice-Scenes-Left` (`platform::READ` names it, or the page cannot see it) and
@@ -1745,7 +1750,9 @@ kept", "the off switch stops stories online at once", "a scene is painted for a 
 the picture comes back", "the site's scenes for the day run out for everyone, and claude is not
 asked again", "a painting that fails or is declined still counts, since claude was asked", "a
 writer paints one scene at a time", "too much to paint is refused before anything is counted",
-"without a key, or switched off, no scene is painted". In the app: the `cloud::tests` (`decide`, names,
+"without a key, or switched off, no scene is painted", "when the credit is used up, painting is
+paused, and claude being down is said so", "the site's owner sees the scenes of each day by hashed
+id, and nobody else does". In the app: the `cloud::tests` (`decide`, names,
 keys), `in_the_browser_nothing_is_asked_of_the_server_until_the_writer_signs_in`,
 `a_story_saved_goes_online_a_little_later`, `a_story_newer_online_comes_down_onto_the_shelf_and_opens`,
 `the_open_story_changed_in_another_browser_is_shown_as_it_is_there`,
