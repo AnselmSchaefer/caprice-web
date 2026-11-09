@@ -539,3 +539,22 @@ test("the site's owner sees the scenes of each day by hashed id, and nobody else
   const without = await start(t);
   assert.equal((await without.dispatchFetch(`${SITE}/api/admin/scenes`, { headers: { Authorization: "Bearer " } })).status, 404, "no token, no such request");
 });
+
+test("a picture comes back without anything that could run or reach outside it", async t => {
+  const mf = await start(t);
+  const api = await writer(mf, "1", "Ada");
+  claude.writes = `<svg viewBox="0 0 4 3" onload="alert(1)"><defs><linearGradient id="g"/></defs>
+    <script>alert(2)</script><scr<script></script>ipt>alert(3)</script>
+    <foreignObject><iframe src="https://elsewhere.test"></iframe></foreignObject>
+    <style>@import url(https://elsewhere.test/a.css); rect { fill: url(https://elsewhere.test/x) }</style>
+    <a href="javascript:alert(4)"><rect fill="url(#g)" onclick='alert(5)'/></a>
+    <image href="https://elsewhere.test/track.png"/><use xlink:href="#g"/>
+    <image href="data:image/png;base64,iVBORw0KGgo="/></svg>`;
+  const svg = await (await paint(api)).text();
+  for (const gone of ["alert", "<script", "foreignObject", "iframe", "elsewhere.test", "javascript", "@import", "onload", "onclick"]) {
+    assert.ok(!svg.toLowerCase().includes(gone.toLowerCase()), `${gone} is gone: ${svg}`);
+  }
+  for (const kept of ['fill="url(#g)"', 'xlink:href="#g"', 'href="data:image/png;base64,', "<linearGradient", "<rect"]) {
+    assert.ok(svg.includes(kept), `${kept} is kept: ${svg}`);
+  }
+});

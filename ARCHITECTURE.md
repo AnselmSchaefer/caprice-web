@@ -1733,6 +1733,10 @@ that costs money as it is asked:
   it is of no use but for painting. The prompt is the app's (`scene_prompt`), the system prompt the
   Worker's own (`PAINTING`, kept the same as `backdrop::SYSTEM`). The picture says in its
   `<metadata>` that an AI made it, and the panel says what goes to Claude before it goes.
+- **A picture comes back able only to draw** (`clean`): scripts, HTML inside it
+  (`foreignObject`), `on...` handlers, `javascript:`, `@import` and links outside the picture
+  are taken out, again until nothing changes. resvg runs none of them, but a scene saved as
+  `.svg` and opened in a browser would, and the story's text in the prompt could ask for them.
 - **Claude's answer comes in one piece, not streamed**: waiting costs the Worker no CPU time (10 ms
   a request on the free plan), reading thousands of streamed events would.
 - **The prepaid credit used up pauses painting** ("Painting is paused for now", 503): Anthropic's
@@ -1760,7 +1764,8 @@ asked again", "a painting that fails or is declined still counts, since claude w
 writer paints one scene at a time", "too much to paint is refused before anything is counted",
 "without a key, or switched off, no scene is painted", "when the credit is used up, painting is
 paused, and claude being down is said so", "the site's owner sees the scenes of each day by hashed
-id, and nobody else does". In the app: the `cloud::tests` (`decide`, names,
+id, and nobody else does", "a picture comes back without anything that could run or reach outside
+it". In the app: the `cloud::tests` (`decide`, names,
 keys), `in_the_browser_nothing_is_asked_of_the_server_until_the_writer_signs_in`,
 `a_story_saved_goes_online_a_little_later`, `a_story_newer_online_comes_down_onto_the_shelf_and_opens`,
 `the_open_story_changed_in_another_browser_is_shown_as_it_is_there`,

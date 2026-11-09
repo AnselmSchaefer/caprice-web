@@ -226,8 +226,30 @@ async function paint(prompt, env, most) {
   const start = reply.indexOf("<svg");
   const end = reply.lastIndexOf("</svg>");
   if (start < 0 || end < start) return { error: 502, message: stop === "max_tokens" ? "The picture grew too big to finish" : "Claude's reply held no picture" };
-  const svg = reply.slice(start, end + "</svg>".length).replace(/<svg\b[^>]*>/, open => open + MADE_BY);
+  const svg = clean(reply.slice(start, end + "</svg>".length)).replace(/<svg\b[^>]*>/, open => open + MADE_BY);
   return { svg };
+}
+
+// What of an SVG could do more than draw, taken out. Caprice draws it with resvg, which runs no
+// script, but a picture saved as .svg and opened in a browser would run them, and a story's text
+// is in the prompt, so it could ask for one. Out go scripts, HTML inside the picture, `on...`
+// handlers, `javascript:` and links to anything outside the picture (a browser would fetch them).
+// Again until nothing changes, so that taking one out cannot join the pieces of another.
+function clean(svg) {
+  let before;
+  do {
+    before = svg;
+    svg = svg
+      .replace(/<(script|foreignObject)\b[\s\S]*?<\/\1\s*>/gi, "")
+      .replace(/\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+      .replace(/\s+(?:xlink:)?href\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, (all, value) =>
+        /^["']?\s*(#|data:image\/(png|jpeg|gif|webp))/i.test(value) ? all : "")
+      .replace(/javascript\s*:/gi, "")
+      .replace(/@import\b[^;]*;?/gi, "")
+      .replace(/url\(\s*["']?\s*(?!#)[^)]*\)/gi, "none");
+  } while (svg !== before);
+  // A tag left open or closed alone: no script can follow it, but it goes too.
+  return svg.replace(/<\/?(script|foreignObject)\b[^>]*>/gi, "");
 }
 
 // The scenes painted lately, by hashed id: `curl -H "Authorization: Bearer $TOKEN" <site>/api/admin/scenes`.
