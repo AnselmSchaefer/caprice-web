@@ -306,7 +306,7 @@ impl Answer {
 
 /// The headers of an answer that Caprice reads (the page can see only those it names).
 #[cfg(target_arch = "wasm32")]
-const READ: [&str; 3] = ["ETag", "X-Caprice-Name", "Retry-After"];
+const READ: [&str; 4] = ["ETag", "X-Caprice-Name", "Retry-After", "X-Caprice-Scenes-Left"];
 
 /// In the browser: send `request` to the page's own server, and its answer to `tx`. It is the
 /// page's `fetch`, waited for on the main thread, so it shares nothing with the workers.

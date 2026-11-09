@@ -16,8 +16,23 @@ const DATE = readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8")
 // The challenge of the last sign-in begun, which the stand-in providers check the verifier against.
 let challenge;
 
+// The stand-in Claude: every request it was sent, what it answers (the text it writes and why it
+// stops), and a promise it waits for first, when a test wants it still painting.
+const claude = { asked: [], writes: "Here it is:\n<svg viewBox=\"0 0 4 3\"><rect/></svg>", stop: "end_turn", hold: null, broke: null };
+
+async function painted(request) {
+  const body = await request.json();
+  claude.asked.push({ key: request.headers.get("x-api-key"), body });
+  if (claude.hold) await claude.hold;
+  if (claude.broke) return Response.json({ type: "error", error: { type: "invalid_request_error", message: claude.broke.said } }, { status: claude.broke.status });
+  // Thinking first, as Opus answers, then the text in two blocks.
+  const content = [{ type: "thinking", thinking: "" }, { type: "text", text: claude.writes.slice(0, 9) }, { type: "text", text: claude.writes.slice(9) }];
+  return Response.json({ type: "message", role: "assistant", content, stop_reason: claude.stop, usage: { input_tokens: 10, output_tokens: 20 } });
+}
+
 function providers(request) {
   const url = new URL(request.url);
+  if (url.href === "https://api.anthropic.com/v1/messages") return painted(request);
   const form = request.text().then(t => new URLSearchParams(t));
   const verified = f => createHash("sha256").update(f.get("code_verifier")).digest("base64url") === challenge;
   // A code is "who:<id>:<name>", so a test can sign in as anyone.
@@ -54,11 +69,13 @@ async function start(t, vars = {}) {
       SESSION_SECRET: "a test's own secret, long enough to sign with",
       GOOGLE_CLIENT_ID: "google-app", GOOGLE_CLIENT_SECRET: "google-secret",
       GITHUB_CLIENT_ID: "github-app", GITHUB_CLIENT_SECRET: "github-secret",
+      ANTHROPIC_API_KEY: "a test's key",
       ...vars,
     },
     outboundService: providers,
   }));
   t.after(() => mf.dispose());
+  Object.assign(claude, { asked: [], writes: "Here it is:\n<svg viewBox=\"0 0 4 3\"><rect/></svg>", stop: "end_turn", hold: null, broke: null });
   return mf;
 }
 
@@ -388,4 +405,137 @@ test("signing out clears the session", async t => {
   const out = await api("/api/logout", { method: "POST" });
   assert.equal(out.status, 204);
   assert.ok(out.headers.getSetCookie().some(c => c.startsWith("__Host-caprice=;") && c.includes("Max-Age=0")));
+});
+
+const paint = (api, prompt = "<scene>\nA lighthouse at dusk\n</scene>\n\nPaint one illustration of this scene") =>
+  api("/api/scene", { method: "POST", body: prompt, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+
+test("a scene is painted for a writer signed in, and only the picture comes back", async t => {
+  const mf = await start(t);
+  const api = await writer(mf, "1", "Ada");
+  const got = await paint(api);
+  assert.equal(got.status, 200);
+  assert.match(got.headers.get("Content-Type"), /^image\/svg\+xml/);
+  const svg = await got.text();
+  assert.ok(svg.startsWith("<svg") && svg.endsWith("</svg>"), `nothing of Claude's but the picture: ${svg}`);
+  assert.ok(svg.includes("<metadata>Made with AI"), "it says in itself that an AI made it");
+  assert.equal(got.headers.get("X-Caprice-Scenes-Left"), "49");
+
+  const [{ key, body }] = claude.asked;
+  assert.equal(key, "a test's key");
+  assert.equal(body.model, "claude-opus-5-5");
+  assert.equal(body.max_tokens, 32000, "the most a scene can cost is the Worker's, not the app's");
+  assert.equal(body.messages[0].content, "<scene>\nA lighthouse at dusk\n</scene>\n\nPaint one illustration of this scene");
+
+  const headers = { "X-Caprice": "1", Origin: SITE };
+  assert.equal((await mf.dispatchFetch(`${SITE}/api/scene`, { method: "POST", body: "x", headers })).status, 401, "not signed in");
+  assert.equal((await mf.dispatchFetch(`${SITE}/api/scene`, { method: "POST", body: "x", headers: { Cookie: (await signIn(mf)).session } })).status, 403, "not from Caprice");
+  assert.equal(claude.asked.length, 1, "neither reached Claude");
+});
+
+test("the site's scenes for the day run out for everyone, and claude is not asked again", async t => {
+  const mf = await start(t, { SITE_SCENES_PER_DAY: "2" });
+  const ada = await writer(mf, "1", "Ada");
+  const bob = await writer(mf, "2", "Bob");
+  assert.equal((await paint(ada)).headers.get("X-Caprice-Scenes-Left"), "1");
+  assert.equal((await paint(ada)).headers.get("X-Caprice-Scenes-Left"), "0", "one writer may take them all");
+  const refused = await paint(bob);
+  assert.equal(refused.status, 503);
+  assert.match(await refused.text(), /No more scenes today/);
+  assert.ok(Number(refused.headers.get("Retry-After")) <= 86_400, "until tomorrow");
+  assert.equal(claude.asked.length, 2);
+  assert.equal((await saveNew(bob, "b", story("two"))).status, 200, "stories online go on");
+});
+
+test("a painting that fails or is declined still counts, since claude was asked", async t => {
+  const mf = await start(t, { SITE_SCENES_PER_DAY: "3" });
+  const api = await writer(mf, "1", "Ada");
+  claude.stop = "refusal";
+  claude.writes = "";
+  const declined = await paint(api);
+  assert.equal(declined.status, 422);
+  assert.equal(declined.headers.get("X-Caprice-Scenes-Left"), "2");
+  claude.stop = "max_tokens";
+  claude.writes = "<svg viewBox=\"0 0 4 3\"><rect/>";
+  const unfinished = await paint(api);
+  assert.equal(unfinished.status, 502);
+  assert.match(await unfinished.text(), /too big to finish/);
+  claude.stop = "end_turn";
+  claude.writes = "<svg viewBox=\"0 0 4 3\"><rect/></svg>";
+  assert.equal((await paint(api)).headers.get("X-Caprice-Scenes-Left"), "0");
+  assert.equal((await paint(api)).status, 503);
+});
+
+test("a writer paints one scene at a time", async t => {
+  const mf = await start(t);
+  const api = await writer(mf, "1", "Ada");
+  let release;
+  claude.hold = new Promise(r => { release = r; });
+  const first = paint(api);
+  while (claude.asked.length === 0) await new Promise(r => setTimeout(r, 10));
+  const second = await paint(api);
+  assert.equal(second.status, 409, "a second click costs nothing");
+  release();
+  assert.equal((await first).status, 200);
+  assert.equal((await paint(api)).status, 200, "and once it is done, the next may go");
+  assert.equal(claude.asked.length, 2);
+});
+
+test("too much to paint is refused before anything is counted", async t => {
+  const mf = await start(t, { SITE_SCENES_PER_DAY: "1" });
+  const api = await writer(mf, "1", "Ada");
+  assert.equal((await paint(api, "x".repeat(160_001))).status, 413);
+  assert.equal((await paint(api, "  ")).status, 413);
+  assert.equal(claude.asked.length, 0);
+  assert.equal((await paint(api)).status, 200, "the day's one scene is still there");
+});
+
+test("without a key, or switched off, no scene is painted", async t => {
+  for (const vars of [{ ANTHROPIC_API_KEY: "" }, { SCENES_OFF: "1" }]) {
+    const mf = await start(t, vars);
+    const api = await writer(mf, "1", "Ada");
+    assert.equal((await paint(api)).status, 503, JSON.stringify(vars));
+    assert.equal((await api("/api/me")).status, 200, "the rest goes on");
+    assert.equal(claude.asked.length, 0);
+  }
+});
+
+test("when the credit is used up, painting is paused, and claude being down is said so", async t => {
+  const mf = await start(t);
+  const api = await writer(mf, "1", "Ada");
+  claude.broke = { status: 400, said: "Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits." };
+  const paused = await paint(api);
+  assert.equal(paused.status, 503);
+  assert.equal(await paused.text(), "Painting is paused for now");
+  assert.ok(Number(paused.headers.get("Retry-After")) > 0, "the app may try again later");
+  claude.broke = { status: 500, said: "Internal server error" };
+  const down = await paint(api);
+  assert.equal(down.status, 502);
+  assert.equal(await down.text(), "Claude could not be asked");
+});
+
+test("the site's owner sees the scenes of each day by hashed id, and nobody else does", async t => {
+  const token = "the owner's token, long enough to be one";
+  const mf = await start(t, { ADMIN_TOKEN: token });
+  const ada = await writer(mf, "1", "Ada");
+  const bob = await writer(mf, "2", "Bob");
+  await paint(ada);
+  await paint(ada);
+  await paint(bob);
+  const ask = authorization => mf.dispatchFetch(`${SITE}/api/admin/scenes`, { headers: authorization ? { Authorization: authorization } : {} });
+  assert.equal((await ask()).status, 401);
+  assert.equal((await ask("Bearer not it")).status, 401);
+  const seen = await ask(`Bearer ${token}`);
+  assert.equal(seen.status, 200);
+  const { limit, days } = await seen.json();
+  assert.equal(limit, 50);
+  assert.equal(days.length, 1);
+  assert.deepEqual([days[0].scenes, days[0].writers], [3, 2]);
+  assert.deepEqual(days[0].by.map(w => w.scenes), [2, 1], "most first");
+  const me = await (await ada("/api/me")).json();
+  assert.equal(days[0].by[0].user, me.user, "by the same hashed id the writer has");
+  assert.ok(!JSON.stringify(days).includes("Ada"), "and no name");
+
+  const without = await start(t);
+  assert.equal((await without.dispatchFetch(`${SITE}/api/admin/scenes`, { headers: { Authorization: "Bearer " } })).status, 404, "no token, no such request");
 });

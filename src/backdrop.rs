@@ -8,6 +8,9 @@
 //! Painting again for the same scene adds a version to it rather than replacing it. The list of
 //! scenes shows them all, to go to, show again, step through versions, hide or delete.
 //!
+//! In the browser, where Claude Code cannot run, Caprice's server has Claude paint the scene
+//! instead (`/api/scene`, R33), for writers signed in, while the day's scenes last.
+//!
 //! Drawings are rendered on a background thread when a page near the one shown needs them, and
 //! only those near are kept as textures.
 
@@ -22,7 +25,7 @@ use crate::App;
 use crate::claude::{Outcome, run_claude};
 use crate::model::{Character, Doc, IMAGE_CHAR, PAGE_BREAK, Scene, is_terminator};
 use crate::theme::pal;
-use crate::platform::fs;
+use crate::platform::{Answer, Request, fs};
 
 /// How strongly a scene shows through the paper.
 pub const OPACITY: f32 = 0.2;
@@ -48,6 +51,9 @@ pub const SYSTEM: &str = "You are a skilled illustrator who paints with SVG code
 /// A painted scene: its drawing, and the drawing rendered.
 pub type Painted = (String, ColorImage);
 
+/// Where a painting goes once it is done, or why there is none.
+type Easel = Sender<Result<Painted, String>>;
+
 /// One drawing of one scene: the scene's id and which of its versions.
 pub type DrawingKey = (u64, usize);
 
@@ -58,6 +64,9 @@ struct Job {
     scene: u64,
     /// The people of the cast it is painted with, for the scene once it is painted.
     people: Vec<String>,
+    /// Painted by Caprice's server: its answer, still to come, and where the picture goes once
+    /// it is rendered.
+    online: Option<(Receiver<Answer>, Easel)>,
 }
 
 impl Drop for Job {
@@ -145,6 +154,8 @@ pub struct Backdrop {
     job: Option<Job>,
     /// What Claude was last asked to paint.
     asked: String,
+    /// How many scenes Caprice's server can still paint today, as it last said.
+    pub left: Option<u32>,
     /// Put the keyboard on the description when the dialog opens.
     focus_field: bool,
     /// Following the writing: the document version last seen and when it changed (only edits
@@ -175,6 +186,7 @@ impl Default for Backdrop {
             fade: None,
             job: None,
             asked: String::new(),
+            left: None,
             focus_field: false,
             seen: None,
             edited_at: 0.0,
@@ -435,6 +447,17 @@ impl App {
         }
         self.backdrop.asked = prompt.clone();
         let wake = crate::platform::Waker::new(ctx);
+        if !self.claude
+            && let Some(server) = self.cloud.server.clone()
+        {
+            let (answer_tx, answer_rx) = channel();
+            if let Some(job) = &mut self.backdrop.job {
+                job.online = Some((answer_rx, tx));
+            }
+            let headers = vec![("Content-Type", "text/plain; charset=utf-8".to_owned())];
+            server.send(Request { method: "POST", path: "/api/scene".into(), headers, body: Some(prompt.into_bytes()) }, answer_tx, wake);
+            return;
+        }
         crate::platform::spawn(move || {
             if let Some(result) = draw_scene(&prompt, &cancel).transpose() {
                 let _ = tx.send(result);
@@ -476,7 +499,7 @@ impl App {
         };
         let (tx, rx) = channel();
         let cancel = Arc::new(AtomicBool::new(false));
-        self.backdrop.job = Some(Job { rx, cancel: cancel.clone(), scene: id, people: Vec::new() });
+        self.backdrop.job = Some(Job { rx, cancel: cancel.clone(), scene: id, people: Vec::new(), online: None });
         (tx, cancel)
     }
 
@@ -818,8 +841,51 @@ impl App {
         }
     }
 
+    /// Can scenes be painted here: by Claude Code, or by Caprice's server for a writer signed in.
+    pub fn can_paint(&self) -> bool {
+        self.claude || self.cloud.who.is_some()
+    }
+
+    /// Caprice's server answered a painting: the picture is rendered as Claude's would be, or the
+    /// server's reason goes to the writer.
+    fn painted_online(&mut self, ctx: &egui::Context, answer: Answer, tx: Easel) {
+        if let Some(left) = answer.header("X-Caprice-Scenes-Left").and_then(|n| n.parse().ok()) {
+            self.backdrop.left = Some(left);
+        }
+        let said = String::from_utf8_lossy(&answer.body).trim().to_owned();
+        let failed = match answer.status {
+            200 => {
+                let wake = crate::platform::Waker::new(ctx);
+                crate::platform::spawn(move || {
+                    let _ = tx.send(rasterize(&said, RENDER_WIDTH).map(|image| (said, image)));
+                    wake.wake();
+                });
+                return;
+            }
+            0 => "no connection to Caprice's server".to_owned(),
+            401 => "signed out: sign in again to paint scenes".to_owned(),
+            503 if said.starts_with("No more scenes") => {
+                self.backdrop.left = Some(0);
+                said
+            }
+            _ if said.is_empty() => format!("Caprice's server answered {}", answer.status),
+            _ => said,
+        };
+        let _ = tx.send(Err(failed));
+    }
+
     /// A painting finished: it becomes its scene's newest version, shown.
     fn take_painting(&mut self, ctx: &egui::Context) {
+        let answer = self.backdrop.job.as_ref().and_then(|j| j.online.as_ref()).and_then(|(rx, _)| match rx.try_recv() {
+            Ok(answer) => Some(answer),
+            Err(std::sync::mpsc::TryRecvError::Empty) => None,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(Answer::default()),
+        });
+        if let Some(answer) = answer
+            && let Some((_, tx)) = self.backdrop.job.as_mut().and_then(|j| j.online.take())
+        {
+            self.painted_online(ctx, answer, tx);
+        }
         let Some(job) = &self.backdrop.job else { return };
         let id = job.scene;
         match job.rx.try_recv() {
@@ -854,6 +920,7 @@ impl App {
         let mut peeks = self.doc.peeks;
         // The switch shows once someone can peek out: until then it would only give the surprise away.
         let can_peek = self.doc.cast.iter().any(|c| c.looks.iter().any(|l| l.peek.is_some()));
+        let (can_paint, online) = (self.can_paint(), !self.claude);
         let b = &mut self.backdrop;
         let title = if b.job.is_some() { "Scene \u{b7} painting\u{2026}" } else { "Scene" };
         let (mut mode, mut describe, mut stop, mut save, mut cast) = (b.mode, false, false, false, false);
@@ -868,9 +935,19 @@ impl App {
                     mode = if follow { Mode::Writing } else { Mode::Described };
                 }
             }
-            if ui.add(egui::Button::new("Describe the scene\u{2026}").frame(false)).clicked() {
+            let sign_in = "Sign in (File \u{203a} Stories online) to have Claude paint scenes";
+            if ui.add_enabled(can_paint, egui::Button::new("Describe the scene\u{2026}").frame(false)).on_disabled_hover_text(sign_in).clicked() {
                 describe = true;
                 ui.close();
+            }
+            // Caprice's server paints so many a day, for everyone together.
+            if online && can_paint && let Some(left) = b.left {
+                let left = match left {
+                    0 => "No more scenes today".to_owned(),
+                    1 => "1 scene left today".to_owned(),
+                    n => format!("{n} scenes left today"),
+                };
+                ui.label(egui::RichText::new(left).small().color(pal().text_dim));
             }
             let list_tip = "Every scene painted, by where it is in the story";
             if ui.add_enabled(count > 0, egui::Button::new(format!("All scenes ({count})\u{2026}")).frame(false)).on_hover_text(list_tip).clicked() {
@@ -958,6 +1035,7 @@ impl App {
             return;
         }
         let (mut open, mut draw) = (true, false);
+        let (can_paint, online) = (self.can_paint(), !self.claude);
         let b = &mut self.backdrop;
         egui::Window::new("Describe the scene")
             .id(Id::new("scene_panel"))
@@ -975,18 +1053,23 @@ impl App {
                 if std::mem::take(&mut b.focus_field) {
                     field.request_focus();
                 }
-                if field.has_focus() && ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Enter)) {
+                if can_paint && field.has_focus() && ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Enter)) {
                     draw = true;
                 }
                 ui.add_space(4.0);
-                let can = !b.description.trim().is_empty();
+                let can = can_paint && !b.description.trim().is_empty();
+                // What leaves the browser, said before it does.
+                if online {
+                    let sent = "What you describe, and how the people it names look, goes to Claude (Anthropic) to be painted.";
+                    ui.label(egui::RichText::new(sent).small().color(pal().text_dim));
+                }
                 let tip = "Have Claude paint this scene, from the caret's paragraph on (Ctrl+Enter)";
                 draw |= ui.add_enabled(can, egui::Button::new("Draw")).on_hover_text(tip).clicked();
             });
         if !open || draw {
             b.panel = false;
         }
-        if draw && !b.description.trim().is_empty() {
+        if draw && can_paint && !b.description.trim().is_empty() {
             self.set_scene_mode(Mode::Described);
             self.draw_backdrop(ctx);
         }
@@ -999,6 +1082,7 @@ impl App {
         if !self.backdrop.list {
             return;
         }
+        let can_paint = self.can_paint();
         enum Do {
             GoTo(usize),
             PinHere(u64),
@@ -1078,7 +1162,8 @@ impl App {
                                     if ui.checkbox(&mut shows, "Show").changed() {
                                         action = Some(Do::Hidden(s.id, !shows));
                                     }
-                                    if ui.small_button("Paint again").on_hover_text("Paint it again, as another version").clicked() {
+                                    let again = ui.add_enabled(can_paint, egui::Button::new("Paint again").small());
+                                    if again.on_hover_text("Paint it again, as another version").clicked() {
                                         action = Some(Do::PaintAgain(s.id));
                                     }
                                     if ui.small_button("Delete").on_hover_text("Delete this scene and all its versions").clicked() {

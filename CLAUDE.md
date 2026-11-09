@@ -23,7 +23,9 @@ behaviour**: its rules (§4) say what depends on what, and which tests guard eac
   https://caprice-web.caprice-web-checks.workers.dev; check it with
   `CAPRICE_URL=<that address> node web/smoke.mjs <dir>`. Never deploy without being asked.
 - Stories API (`web/api`, R33): `cd web && node --test api/api.test.mjs` (Miniflare: the Workers runtime, R2 and
-  the Durable Object in memory; about 16 s). Its limits are `vars` in `web/wrangler.jsonc`.
+  the Durable Object in memory; about 16 s). Its limits are `vars` in `web/wrangler.jsonc`, among them the
+  scenes a day (10 for now) Claude paints for the browser (`/api/scene`, with the secret `ANTHROPIC_API_KEY`; tests
+  answer with a stand-in Claude).
 - `cargo mutants` for untested code. `/tmp` is a small tmpfs here: set `TMPDIR` to a dir on disk.
 - Word output check: `CAPRICE_SAMPLE_OUT=out.docx cargo test sample_docx`, then
   `soffice --headless --convert-to pdf out.docx`

@@ -100,8 +100,8 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `platform/worker.rs` | In the browser, a Web Worker for each piece of background work, started from `web/worker.js` with nothing evaluated (R31) |
 | `shelf.rs` | Stories kept in the browser: saving asks for a name, opening lists them (with an upload), each answering the waiting file dialog with a path (R31) |
 | `cloud.rs` | Stories online: signing in and out, what to do with each story (`decide`), one request at a time, `cloud.json`, the Stories online window; a stand-in server for tests (R33) |
-| `web/api/worker.js` | The Worker's own requests, `/api/*` only: signing in with Google or GitHub, the session cookie, stories online in R2 (R33) |
-| `web/api/ledger.js` | The Durable Object `Ledger`: who has signed up, the current version and history of each story online, every limit (R33) |
+| `web/api/worker.js` | The Worker's own requests, `/api/*` only: signing in with Google or GitHub, the session cookie, stories online in R2, scenes Claude paints for the browser (R33) |
+| `web/api/ledger.js` | The Durable Object `Ledger`: who has signed up, the current version and history of each story online, the day's scenes, every limit (R33) |
 
 ---
 
@@ -464,6 +464,11 @@ is; callers that paint for a paragraph pass `para_start` themselves.
   version, hidden) fades.
 - **A painting carries the people its subject names** (R17), their look and model sheet before
   the passage in the prompt (`scene_prompt`), kept in `Backdrop::asked`.
+- **In the browser Caprice's server paints** (`/api/scene`, R33): `paint_with` sends the same
+  prompt there instead of to Claude Code, when `App::claude` is false and there is a server; the
+  answer, an SVG, is rendered and taken like Claude's (`painted_online`, then `take_painting`).
+  `App::can_paint` says whether painting is possible at all (Claude Code, or signed in): every way
+  into painting (Describe the scene, Draw, Paint again) is off without it.
 - Moving, hiding, deleting and stepping versions change `Doc::scenes` directly: like page
   settings, they are not undoable (R1) and do not paginate.
 - Tests: `the_picture_follows_the_caret_from_one_part_of_the_story_to_the_next`,
@@ -1500,11 +1505,15 @@ them; it asks `platform` instead, whose desktop half does what Caprice always di
   Ctrl shortcut in `editor.rs` or `App::frame` goes into that list too. Leaving with changes not
   saved, the browser asks (R22). Hidden, the page draws no frame, so what must happen then is in
   `App::logic`; the page asks for one on `visibilitychange` (`frame_on_visibility_change`).
-- **Claude cannot be asked in the browser yet** (it needs a server, `WEB_PLAN.md` step 6):
-  `platform::CLAUDE` is false there, and so `App::claude`. The Claude and Scene menus are then
-  shown greyed ("Comes to the browser version later"), and Ctrl+Shift+P takes up no pen. Scenes
-  already in a story still show behind its pages. When step 6 comes, `CLAUDE` turns true there.
-  Test: `where_claude_cannot_be_asked_its_menus_and_the_pen_are_off`.
+- **Claude cannot be asked from the browser itself** (it needs a server, `WEB_PLAN.md` step 6):
+  `platform::CLAUDE` is false there, and so `App::claude`. The Claude menu is then shown greyed
+  ("Comes to the browser version later"), and Ctrl+Shift+P takes up no pen. Scenes are the
+  exception: with Caprice's server (`App::cloud.server`) the Scene menu is there, and Caprice's
+  server paints them for writers signed in (R14, R33); signed out, painting is off and scenes
+  already in a story still show. Without a server (tests) both menus are greyed. The cast's model
+  sheets are still drawn only by Claude Code. When step 6 comes, `CLAUDE` turns true there.
+  Tests: `where_claude_cannot_be_asked_its_menus_and_the_pen_are_off`,
+  `in_the_browser_signed_out_no_scene_is_painted_and_nothing_is_asked`.
 - **Nothing is evaluated from a string in the browser**, so the Content-Security-Policy forbids
   it: `script-src 'self' 'wasm-unsafe-eval'` and the hashes of the page's inline scripts and
   style, which `web/csp.mjs` works out after each build and writes into `dist/_headers` (they
@@ -1640,7 +1649,7 @@ whole page, centred, as always.
 
 ---
 
-### R33 — Stories online: who comes only from the session, and nothing reaches R2 the limits forbid
+### R33 — Stories online and scenes: who comes only from the session, and nothing reaches R2 or Claude the limits forbid
 
 Signing in and keeping stories online are the Worker's (`web/api/worker.js`); every other path is
 a static file, served without it (`run_worker_first: ["/api/*"]`). Plan and reasons: `CLOUD_PLAN.md`.
@@ -1698,13 +1707,52 @@ In the app (`cloud.rs`) **the shelf is where a story is; online is a copy, and n
 - **Requests go through `cloud::Server`**: `platform::send` (the page's `fetch`) in the browser, a
   stand-in (`cloud::stand_in`) in tests; tests never reach a server, as they never reach printers.
 
+**Scenes are painted for the browser by the Worker, and the day's scenes bound the bill**
+(`/api/scene`, `scene` in `worker.js`). Claude bills each painting, so this is the one request
+that costs money as it is asked:
+
+- **The Ledger counts a scene before Claude is asked** (`Ledger::paint`): `SITE_SCENES_PER_DAY`
+  (10 for now in `wrangler.jsonc`, 50 later) for the whole site together, however many a single writer takes, and one at a time for each
+  writer (a second click would cost another). A painting counts whether or not a picture comes of
+  it (declined, cut off, no SVG): Claude bills the asking, so the count is a count of what is
+  billed. The Ledger is one object, so two writers asking for the last scene at once cannot both
+  have it. A new request that has Claude do something needs its own count there, before the call.
+- **The most one scene costs is the Worker's, never the app's**: `SCENE_PROMPT_BYTES` refuses a
+  bigger request before anything is counted, and `SCENE_TOKENS` is `max_tokens` (thinking counts
+  in it). With Opus 5.5 ($4 and $20 a million tokens in and out) that is at most about $1.30 a
+  scene and $64 a day; the Anthropic Console's spending limit is the net under a bug.
+- **The key stays in the Worker** (`ANTHROPIC_API_KEY`, a secret), and only the SVG goes back, so
+  it is of no use but for painting. The prompt is the app's (`scene_prompt`), the system prompt the
+  Worker's own (`PAINTING`, kept the same as `backdrop::SYSTEM`). The picture says in its
+  `<metadata>` that an AI made it, and the panel says what goes to Claude before it goes.
+- **Claude's answer comes in one piece, not streamed**: waiting costs the Worker no CPU time (10 ms
+  a request on the free plan), reading thousands of streamed events would.
+- **The prepaid credit used up pauses painting** ("Painting is paused for now", 503): Anthropic's
+  answer (402, or "credit balance") is told apart from Claude being busy or failing, and is
+  logged with its reason. The day's limit is 10 while the credit is small; 50 later.
+- **Who painted how many is kept by hashed id only** (`scene_days`, `SCENE_DAYS` days), for the
+  site's owner to see whether one account uses up the scenes: `GET /api/admin/scenes` with
+  `Authorization: Bearer <ADMIN_TOKEN>` (a secret of 32 characters or more; without it there is no
+  such request). It names no one: no name or email is kept anywhere. Deleting a writer's stories
+  online deletes their counts too, but not the day's total.
+- `SCENES_OFF = "1"` stops painting at once; without a key nothing is painted. Neither touches
+  stories online, nor `SYNC_OFF` painting.
+- The app reads `X-Caprice-Scenes-Left` (`platform::READ` names it, or the page cannot see it) and
+  the Scene menu says how many are left today.
+
 Tests (`node --test web/api/api.test.mjs`): "without a session, or with a forged one,
 nothing is answered", "one writer cannot reach another's stories", "ids that could reach elsewhere
 are refused", "requests from another site are refused", "a sign-in not started here is refused",
 "a save must say which copy it replaces, and a stale one is refused", "the site's writes for the
 day pause everyone, and leave r2 alone", "the site's room is shared by everyone", "a writer's room
 drops their oldest history first, then refuses", "only caprice stories, within the size limit, are
-kept", "the off switch stops stories online at once". In the app: the `cloud::tests` (`decide`, names,
+kept", "the off switch stops stories online at once", "a scene is painted for a writer signed in, and only
+the picture comes back", "the site's scenes for the day run out for everyone, and claude is not
+asked again", "a painting that fails or is declined still counts, since claude was asked", "a
+writer paints one scene at a time", "too much to paint is refused before anything is counted",
+"without a key, or switched off, no scene is painted", "when the credit is used up, painting is
+paused, and claude being down is said so", "the site's owner sees the scenes of each day by hashed
+id, and nobody else does". In the app: the `cloud::tests` (`decide`, names,
 keys), `in_the_browser_nothing_is_asked_of_the_server_until_the_writer_signs_in`,
 `a_story_saved_goes_online_a_little_later`, `a_story_newer_online_comes_down_onto_the_shelf_and_opens`,
 `the_open_story_changed_in_another_browser_is_shown_as_it_is_there`,
@@ -1715,7 +1763,10 @@ keys), `in_the_browser_nothing_is_asked_of_the_server_until_the_writer_signs_in`
 `deleting_the_stories_online_signs_out_and_leaves_them_here`,
 `in_a_new_browser_the_stories_from_online_are_on_the_welcome_page`,
 `signed_in_the_welcome_greets_the_writer_by_their_first_name`,
-`the_welcome_s_google_button_goes_straight_to_google_s_sign_in`; and in `web/smoke.mjs`, that nothing
+`the_welcome_s_google_button_goes_straight_to_google_s_sign_in`,
+`in_the_browser_a_scene_described_is_painted_by_caprice_s_server`,
+`in_the_browser_signed_out_no_scene_is_painted_and_nothing_is_asked`,
+`when_the_day_s_scenes_are_used_up_the_writer_is_told_and_nothing_is_painted`; and in `web/smoke.mjs`, that nothing
 is asked signed out, and the app's header on what is.
 
 ---
@@ -1792,6 +1843,10 @@ as the vineyard does, and keep its shapes few enough for a frame (R30).
 **Something new the Worker keeps online** (a file, a setting): keyed with `ledger::key` under the
 user, its R2 reads and writes counted by the Ledger first, deleted with the user's stories, and a
 test that its limit refuses and leaves R2 alone (R33). Then `node --test web/api/api.test.mjs`.
+
+**Something new the Worker asks Claude for** (like the scenes): a count in the Ledger that says yes
+before the call and is never given back, its size and `max_tokens` fixed in the Worker, only the
+result sent back, a stand-in answer in `api.test.mjs` and in `cloud::stand_in` (R33).
 
 **Something new pinned to the text** (like notes and scenes): move it in `apply_raw` and in
 `into_doc` (R7), save it (R9), decide its Word mapping (R10).
@@ -2025,5 +2080,12 @@ test that its limit refuses and leaves R2 alone (R33). Then `node --test web/api
   Worker signs in with Google and GitHub itself (redirects only), keeps files in R2 and every
   count in one Durable Object, with limits that keep R2 inside its free amounts. The browser
   stays where a story is written; online is a copy (R33).
+- **2026-11-09 — Scenes in the browser: Claude through the Worker, 50 a day.** Asked for: painting
+  scenes in the browser, with a hard limit of 50 pictures a day in all, any writer taking as many as
+  are left. Claude's SVGs, as on the desktop, rather than an image service traced to vectors
+  (`SCENES_PLAN.md`), because the prompt, the cast and the look were there. The writer must be
+  signed in (Google), the count is in the Ledger before Claude is asked and counts failures too,
+  and each request's cost is fixed in the Worker, so 50 scenes are a ceiling on the bill. "Follow
+  my writing" stays off in the browser: it would use the day's scenes in minutes (R33).
 - **No `.docx` import.** Export only.
 - **Contents heading is "Contents"** (English), in the app and in Word.
