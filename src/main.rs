@@ -7634,6 +7634,32 @@ mod tests {
     }
 
     #[test]
+    fn a_scene_painted_is_saved_at_once_and_a_new_story_goes_on_the_shelf_with_it() {
+        let mut h = Harness::new();
+        h.app.claude = false;
+        let dir = with_shelf(&mut h, "online-scene-kept");
+        let server = online(&mut h, &dir, true);
+        h.app.keep.autosave = true;
+        h.frames(12, vec![], Modifiers::NONE);
+        h.type_text("The lighthouse stood alone.");
+        assert!(h.app.path.is_none(), "a new story, never saved");
+        describe_scene(&mut h, "A lighthouse at dusk");
+        let path = h.app.path.clone().expect("put on the shelf when the painting came");
+        assert!(!h.app.unsaved(), "nothing left to save");
+        assert!(std::fs::read_to_string(&path).unwrap().contains("#a52"), "the file holds the picture");
+
+        // A story with a file is saved at once too, not when it would save itself.
+        h.type_text(" Night fell.");
+        describe_scene(&mut h, "The lamp lit");
+        assert!(!h.app.unsaved(), "saved as the painting came");
+        assert_eq!(std::fs::read_to_string(&path).unwrap().matches("#a52").count(), 2, "with both pictures");
+        h.later(cloud::UP_AFTER + 1.0);
+        let online = stories_online(&server);
+        assert!(online.iter().any(|(_, file)| file.matches("#a52").count() == 2), "and online soon after");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn in_the_browser_signed_out_no_scene_is_painted_and_nothing_is_asked() {
         let mut h = Harness::new();
         h.app.claude = false;

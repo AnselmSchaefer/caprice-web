@@ -469,6 +469,14 @@ is; callers that paint for a paragraph pass `para_start` themselves.
   answer, an SVG, is rendered and taken like Claude's (`painted_online`, then `take_painting`).
   `App::can_paint` says whether painting is possible at all (Claude Code, or signed in): every way
   into painting (Describe the scene, Draw, Paint again) is off without it.
+- **A painting is kept the moment it arrives** (`keep_painting`), not when the story would save
+  itself: it was paid for, and Claude never paints the same one twice. A story with a file is
+  saved, so it goes online soon after (R33); a new story without one goes on the shelf under the
+  name it suggests (in the browser; on the desktop there is no shelf to put it on); and a version
+  is kept, so dropping the changes since saving (R22) can bring it back. Autosave off, only the
+  version is kept. Still lost: a painting under way when the page is reloaded or another story
+  is opened (`open_scene` starts the backdrop afresh). Test:
+  `a_scene_painted_is_saved_at_once_and_a_new_story_goes_on_the_shelf_with_it`.
 - Moving, hiding, deleting and stepping versions change `Doc::scenes` directly: like page
   settings, they are not undoable (R1) and do not paginate.
 - Tests: `the_picture_follows_the_caret_from_one_part_of_the_story_to_the_next`,

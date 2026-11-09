@@ -900,6 +900,7 @@ impl App {
                     let texture = ctx.load_texture("scene", image, TextureOptions::LINEAR);
                     self.backdrop.textures.insert((id, scene.shown), texture);
                     self.backdrop.visible = true;
+                    self.keep_painting();
                 }
             }
             Ok(Err(e)) => {
@@ -910,6 +911,27 @@ impl App {
             Err(std::sync::mpsc::TryRecvError::Empty) => return,
         }
         self.drop_unpainted_scenes();
+    }
+
+    /// A painting is kept at once, not when the story would save itself: it was paid for, and
+    /// Claude never paints the same one twice. A story with a file is saved (so it goes online
+    /// soon after, R33); one without, in the browser, goes on the shelf under the name it
+    /// suggests. A version is kept as well, so dropping the changes since saving can bring it back.
+    fn keep_painting(&mut self) {
+        if self.keep.autosave {
+            match (self.path.is_some(), self.shelf.dir.clone()) {
+                (true, _) => self.save_quietly(),
+                (false, Some(dir)) => {
+                    let path = crate::platform::free_name(&dir, &format!("{}.caprice", crate::shelf::file_name(&self.suggested_name())));
+                    self.save_to(path);
+                    if self.path.is_some() {
+                        self.status = format!("- kept on the shelf as \u{201c}{}\u{201d}, with its scene", self.story_name());
+                    }
+                }
+                (false, None) => {}
+            }
+        }
+        self.keep_now();
     }
 
     /// The toolbar's Scene menu: follow the writing, describe a scene, the list of scenes, show or
