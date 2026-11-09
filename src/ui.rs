@@ -1363,6 +1363,9 @@ impl App {
             if self.appearance == Appearance::Paperstack {
                 let ctx = ui.ctx().clone();
                 self.let_go_to(&ctx, to);
+                // Drawn where the pages now go: from where they were before, it jumped back to
+                // where the drag began for the frame of letting go.
+                f = if last > 0.0 { (self.pos + going) / last } else { 0.0 };
             }
         }
 

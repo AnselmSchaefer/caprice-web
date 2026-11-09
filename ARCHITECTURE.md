@@ -609,6 +609,11 @@ scratchpad's text is the document's (`Doc::scratchpad`, saved, R9); whether it s
   page was there before its slide was, and the thumb jumped back for a frame, then on. Anything
   in the bar that adds or takes away pages must keep the thumb in step the same way. Guarded by
   `a_new_page_slides_the_thumb_on_without_a_jump_back_lying_or_standing` (frame by frame).
+- **The thumb let go of is drawn where the pages go, in the very frame of letting go**: in the
+  paperstack, letting go moves `pos` (`let_go_to`) after the thumb's place was worked out from it,
+  so `page_track` works it out again. Without, the thumb jumped back to where the drag began for
+  that frame. Guarded by `in_the_paperstack_the_thumb_let_go_stays_where_it_was_let_go` (frame by
+  frame).
 - **An item marked as chosen in a menu is `Button::selectable` (or `selectable_label`), never
   `.selected(true)` with `.frame(false)`**: the theme gives chosen items dark text meant for the
   accent highlight, and without a frame there is none, so it was dark on the dark menu (the text

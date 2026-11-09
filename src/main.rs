@@ -1408,6 +1408,37 @@ mod tests {
     }
 
     #[test]
+    fn in_the_paperstack_the_thumb_let_go_stays_where_it_was_let_go() {
+        let mut h = Harness::new();
+        h.app.appearance = Appearance::Paperstack;
+        h.frames(3, vec![], Modifiers::NONE);
+        for _ in 0..6 {
+            h.type_text("page");
+            h.key(Key::Enter, Modifiers::COMMAND);
+        }
+        h.frames(120, vec![], Modifiers::NONE);
+        let ctx = h.ctx.clone();
+        h.app.go_to_page(&ctx, 1);
+        h.frames(60, vec![], Modifiers::NONE);
+        let (a, b) = h.app.last_track;
+        let at = |page: f32| a + (b - a) * page / 6.0;
+        let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+        h.frames(1, vec![egui::Event::PointerMoved(at(1.0)), button(at(1.0), true)], Modifiers::NONE);
+        h.frames(1, vec![egui::Event::PointerMoved(at(5.0))], Modifiers::NONE);
+        h.frames(30, vec![], Modifiers::NONE);
+        let held = thumb(&h).unwrap().center().x;
+        assert!((held - at(5.0).x).abs() < 2.0, "the thumb follows the pointer");
+        // Let go, and every frame after: never back where the drag began, even for one frame.
+        h.frames(1, vec![button(at(5.0), false)], Modifiers::NONE);
+        for frame in 0..40 {
+            let x = thumb(&h).unwrap().center().x;
+            assert!((x - held).abs() < 2.0, "frame {frame} after letting go: the thumb at {x}, let go at {held}");
+            h.frames(1, vec![], Modifiers::NONE);
+        }
+        assert_eq!(h.app.target, 5);
+    }
+
+    #[test]
     fn in_a_book_the_scrollbar_turns_the_pages_along_with_it() {
         let mut h = Harness::new();
         assert_eq!(h.app.appearance, Appearance::Book, "a book is the default");
