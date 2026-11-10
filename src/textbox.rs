@@ -169,6 +169,10 @@ impl App {
     /// Put a new text box in this look on the page shown, beside the caret if it is on it. It is
     /// selected, for its text to be typed.
     pub fn insert_text_box(&mut self, ctx: &egui::Context, look: BoxLook) {
+        // Another device holds the pen (R34).
+        if !self.can_edit() {
+            return;
+        }
         let caret_page = self.doc.page_of(self.caret);
         let shown = self.target.min(self.last());
         let i = if self.doc.spans[shown].contents.is_none() { shown } else { caret_page };
@@ -324,7 +328,8 @@ impl App {
                 }
             }
             let dragged = self.boxes.drag.as_ref().is_some_and(|d| d.id == id);
-            if !self.takes_pointer(&b, on_text) && !dragged {
+            // Another device holds the pen (R34): boxes are seen, not written in, moved or resized.
+            if !self.takes_pointer(&b, on_text) && !dragged || !self.can_edit() {
                 continue;
             }
 

@@ -843,7 +843,7 @@ impl App {
 
     /// Can scenes be painted here: by Claude Code, or by Caprice's server for a writer signed in.
     pub fn can_paint(&self) -> bool {
-        self.claude || self.cloud.who.is_some()
+        (self.claude || self.cloud.who.is_some()) && self.can_edit()
     }
 
     /// Caprice's server answered a painting: the picture is rendered as Claude's would be, or the
@@ -942,7 +942,7 @@ impl App {
         let mut peeks = self.doc.peeks;
         // The switch shows once someone can peek out: until then it would only give the surprise away.
         let can_peek = self.doc.cast.iter().any(|c| c.looks.iter().any(|l| l.peek.is_some()));
-        let (can_paint, online) = (self.can_paint(), !self.claude);
+        let (can_paint, online, can_edit) = (self.can_paint(), !self.claude, self.can_edit());
         let b = &mut self.backdrop;
         let title = if b.job.is_some() { "Scene \u{b7} painting\u{2026}" } else { "Scene" };
         let (mut mode, mut describe, mut stop, mut save, mut cast) = (b.mode, false, false, false, false);
@@ -981,7 +981,7 @@ impl App {
                 cast = true;
                 ui.close();
             }
-            if can_peek {
+            if can_peek && can_edit {
                 let peek_tip = "Those of the cast with a peek drawn look out from behind the page every minute or two, while you are not writing";
                 ui.checkbox(&mut peeks, "Cast peeks out").on_hover_text(peek_tip);
             }
@@ -1199,6 +1199,10 @@ impl App {
                 });
             });
         self.backdrop.list = open;
+        // Another device holds the pen (R34): the list only goes to a scene.
+        if !self.can_edit() && !matches!(action, Some(Do::GoTo(_))) {
+            action = None;
+        }
         let caret_para = self.doc.para_start(self.caret).0;
         match action {
             Some(Do::GoTo(at)) => self.set_caret(ctx, at, false),

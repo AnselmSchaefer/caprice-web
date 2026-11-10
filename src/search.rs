@@ -138,6 +138,10 @@ impl App {
 
     /// Replace the current match, and go on to the next.
     pub fn replace_current(&mut self, ctx: &egui::Context) {
+        // Another device holds the pen (R34).
+        if !self.can_edit() {
+            return;
+        }
         self.refresh_matches();
         let Some(&(a, b)) = self.search.matches.get(self.search.current) else { return };
         let edit = self.replacement(a, b);
@@ -149,6 +153,10 @@ impl App {
 
     /// Replace every match, as one undo step.
     pub fn replace_all(&mut self, ctx: &egui::Context) {
+        // Another device holds the pen (R34).
+        if !self.can_edit() {
+            return;
+        }
         self.refresh_matches();
         let found = self.search.matches.clone();
         let Some(&(first, _)) = found.first() else { return };

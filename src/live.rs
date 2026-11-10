@@ -362,7 +362,8 @@ impl App {
                 return self.ask_whole();
             }
         }
-        if format!("{:016x}", self.live_hash()) != batch.hash {
+        self.live.hash = self.live_hash();
+        if format!("{:016x}", self.live.hash) != batch.hash {
             self.ask_whole();
         }
         // The story here only follows: there is nothing of its own to save.
@@ -407,6 +408,7 @@ impl App {
         let (caret, page) = (self.caret, self.target);
         self.adopt(ctx, file);
         self.saved_hash = self.content_hash();
+        self.live.hash = self.live_hash();
         let caret = caret.min(self.max_caret());
         self.set_caret(ctx, caret, false);
         self.go_to_page(ctx, page.min(self.last()));
@@ -415,6 +417,19 @@ impl App {
         waiting.sort_by_key(|b| b.seq);
         for batch in waiting {
             self.follow(ctx, batch);
+        }
+    }
+
+    /// Following, after a frame with a click or a key in it: if anything changed the story here
+    /// all the same (a way of editing not yet kept from it, R34), the holder's story is fetched to
+    /// replace it. Only then, as working out the hash takes a moment on a long story.
+    pub fn live_check(&mut self, ctx: &egui::Context) {
+        if !self.live.following() || self.live.fetching.is_some() {
+            return;
+        }
+        let touched = ctx.input(|i| i.pointer.any_released() || i.events.iter().any(|e| matches!(e, egui::Event::Key { .. } | egui::Event::Text(_) | egui::Event::Paste(_))));
+        if touched && self.live_hash() != self.live.hash {
+            self.ask_whole();
         }
     }
 

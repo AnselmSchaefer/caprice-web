@@ -642,22 +642,32 @@ impl App {
             let (rect, _) = ui.allocate_exact_size(vec2(LINE_W, 30.0), Sense::hover());
             ui.painter().vline(rect.center().x, rect.y_range(), ui.visuals().widgets.noninteractive.bg_stroke);
         }
+        // Following another device (R34), the tools that change the story are greyed.
+        let can = self.can_edit();
         let r = ui.scope(|ui| {
             match g {
                 0 => self.file_tools(ui, out),
-                1 => self.font_tools(ui, out),
-                2 => self.letter_tools(ui, out),
-                3 => self.paragraph_tools(ui, out),
+                1 => {
+                    ui.add_enabled_ui(can, |ui| self.font_tools(ui, out));
+                }
+                2 => {
+                    ui.add_enabled_ui(can, |ui| self.letter_tools(ui, out));
+                }
+                3 => {
+                    ui.add_enabled_ui(can, |ui| self.paragraph_tools(ui, out));
+                }
                 4 => {
-                    out.setup = self.page_menu(ui, out);
-                    self.insert_menu(ui, out);
+                    ui.add_enabled_ui(can, |ui| {
+                        out.setup = self.page_menu(ui, out);
+                        self.insert_menu(ui, out);
+                    });
                 }
                 5 => {
-                    out.add_note |= ui.button("Note").on_hover_text("Attach a note to the selection or line (Ctrl+Alt+N)").clicked();
+                    out.add_note |= ui.add_enabled(can, egui::Button::new("Note")).on_hover_text("Attach a note to the selection or line (Ctrl+Alt+N)").clicked();
                     out.find |= ui.button("Find").on_hover_text("Search (Ctrl+F)").clicked();
                 }
                 _ if self.claude => {
-                    self.claude_menu(ui);
+                    ui.add_enabled_ui(can, |ui| self.claude_menu(ui));
                     self.scene_menu(ui);
                 }
                 // In the browser Claude is not asked from the page, but Caprice's server paints
@@ -899,6 +909,12 @@ impl App {
 
     /// Do what was clicked in the tools, after they are all drawn.
     fn apply_tools(&mut self, ctx: &egui::Context, mut out: Tools) {
+        // Another device holds the pen (R34): only what reads, turns pages, finds, prints or
+        // goes to another story.
+        if !self.can_edit() {
+            let file = out.file.filter(|f| !matches!(f, FileAction::Save | FileAction::SaveAs | FileAction::Revert));
+            out = Tools { file, turn_to: out.turn_to, find: out.find, ..Tools::default() };
+        }
         if self.boxes.selected.is_some() {
             self.format_box(ctx, &mut out);
         }

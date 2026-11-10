@@ -1811,12 +1811,21 @@ Plan and reasons: `LIVE_PLAN.md`.
   followers that way. `live_hash` is the document only (`DocFile::from_doc`, no garden): what
   is one device's own (the scene being described, Show pictures) must stay out of it, or the
   devices would never agree.
-- **Following, the story is the holder's**: editing is off (`App::can_edit`; `process_input`
-  keeps only events that read, `reads_only`), and nothing is saved, kept as a version or sent
-  online from here (`keep_safe`, `save_before_leaving`, `page_hidden`, and `Cloud::skip` in
-  `plan`). Its `saved_hash` follows each batch, so it is never "unsaved" and leaving asks nothing.
-  Anything new that changes the story must check `can_edit` (still to do: the toolbar, menus and
-  panels; meanwhile a change there is found by the hash and replaced by the holder's story).
+- **Following, the story is the holder's**: editing is off (`App::can_edit`), and nothing is
+  saved, kept as a version or sent online from here (`keep_safe`, `save_before_leaving`,
+  `page_hidden`, and `Cloud::skip` in `plan`). Its `saved_hash` follows each batch, so it is
+  never "unsaved" and leaving asks nothing. Editing is off in three layers:
+  - every function that changes the story returns at once (`replace_raw`, `apply_edit`, `paste`,
+    `apply_style`, `set_para`, `set_setup`, `step_history`, the pictures', `add_note`,
+    `insert_text_box`, `set_band`, replacing, going back to a version);
+  - what reaches them is greyed or held back: `process_input` keeps only events that read
+    (`reads_only`), `apply_tools` only finding, turning, printing and other stories, the toolbar's
+    groups, the Claude menu and `can_paint` are off, notes, the scratchpad and the cast are read
+    only, text boxes take no pointer, the scene list only goes to a scene;
+  - and a net: after a frame with a click or a key, a story that changed all the same is replaced
+    by the holder's (`live_check`).
+  **Anything new that changes the story must return early without `can_edit`**, in the
+  function itself rather than only in the button that calls it.
 - **Transfer here** (`take`): the holder sends its last batch, then gives the pen (`given`), or
   loses it after `LIVE_HAND_OVER_MS`. A device that takes the pen of a story it followed clears
   its undo and first learns the version online (`take_claim`, `Cloud::agree`), so its saving
@@ -1845,6 +1854,7 @@ and too big a message is not taken", "the site's live connections for the day ru
 off switch stops them". In the app:
 `a_story_open_on_two_devices_is_written_on_one_and_followed_live_on_the_other`,
 `a_change_that_is_no_edit_reaches_the_following_device_as_the_whole_story`,
+`a_following_device_changes_nothing_with_its_tools_notes_or_scratchpad`,
 `transfer_here_moves_the_pen_and_the_other_device_follows_what_is_written_here`.
 
 ## 5. Checklists for common changes

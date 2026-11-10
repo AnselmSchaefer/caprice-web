@@ -15,6 +15,8 @@ impl App {
 
     /// The scratchpad's window, if it is open: on the right, the size of most of the window's height.
     pub fn scratchpad(&mut self, ctx: &egui::Context) {
+        // Another device holds the pen (R34): read here, not written.
+        let can = self.can_edit();
         if !self.scratchpad_open {
             return;
         }
@@ -34,6 +36,7 @@ impl App {
                 egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                     // The field fills the window, so a click anywhere in it starts writing.
                     let field = egui::TextEdit::multiline(&mut self.doc.scratchpad)
+                        .interactive(can)
                         .id(Id::new("scratchpad_text"))
                         .hint_text(HINT)
                         .font(egui::TextStyle::Monospace)

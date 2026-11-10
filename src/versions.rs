@@ -253,6 +253,10 @@ impl App {
     /// Put the story back as it was opened or last saved by hand, its file too. What it held is
     /// kept as a version first, so dropping it can be undone from the Versions window.
     pub fn drop_changes(&mut self, ctx: &egui::Context) {
+        // Another device holds the pen (R34).
+        if !self.can_edit() {
+            return;
+        }
         let Some(file) = self.as_saved.as_ref().and_then(|(_, j)| serde_json::from_str::<DocFile>(j).ok()) else {
             self.status = "- not saved yet: nothing to go back to".into();
             return;
@@ -347,6 +351,10 @@ impl App {
     /// Show the version `k` in place of the story shown, which is kept first. A version of this
     /// story keeps its file, to be saved over; a story never saved stays without one.
     pub fn go_back_to(&mut self, ctx: &egui::Context, k: &Kept) {
+        // Another device holds the pen (R34).
+        if !self.can_edit() {
+            return;
+        }
         let Some(file) = fs::read_to_string(&k.file).ok().and_then(|j| serde_json::from_str::<DocFile>(&j).ok()) else {
             self.status = "- that version cannot be read".into();
             return;

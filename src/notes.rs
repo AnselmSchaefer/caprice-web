@@ -197,6 +197,10 @@ impl App {
 
     /// Attach a new note to the selection, or to the line the cursor is on, and start writing on it.
     pub fn add_note(&mut self, ctx: &egui::Context) {
+        // Another device holds the pen (R34).
+        if !self.can_edit() {
+            return;
+        }
         let (mut start, mut end) = self.selection();
         if start == end {
             // No selection: take the line the caret is on.
@@ -346,6 +350,8 @@ impl App {
         let sc = self.scale_of(rect);
         let places = self.note_places(&ctx).remove(&i).unwrap_or_default();
         let mut delete = None;
+        // Another device holds the pen (R34): notes are read here, not written, coloured or deleted.
+        let can = self.can_edit();
         for (k, y) in places {
             let id = self.doc.notes[k].id;
             let r = note_rect(rect, sc, y);
@@ -368,6 +374,7 @@ impl App {
             child.set_clip_rect(rows.intersect(ui.clip_rect()));
             let mut layouter = |ui: &egui::Ui, buf: &dyn egui::TextBuffer, _wrap: f32| ui.fonts_mut(|f| f.layout_job(note_job(buf.as_str(), sc)));
             let out = TextEdit::multiline(&mut self.doc.notes[k].text)
+                .interactive(can)
                 .id(Id::new(("note_text", id)))
                 .frame(egui::Frame::NONE)
                 .margin(egui::Margin::ZERO)
@@ -405,6 +412,9 @@ impl App {
 
             let note = &mut self.doc.notes[k];
             resp.context_menu(|ui| {
+                if !can {
+                    ui.disable();
+                }
                 ui.horizontal(|ui| {
                     for c in 0..NOTE_COLORS.len() {
                         let (sw, r) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());

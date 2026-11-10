@@ -814,6 +814,7 @@ impl App {
         self.unsaved_prompt(&ctx);
         self.welcome_leaving(ui);
         self.hold_keyboard(&ctx);
+        self.live_check(&ctx);
     }
 
     /// The story asks for text input (in the browser, the phone's keyboard) only while the editable
@@ -7923,6 +7924,51 @@ mod tests {
         assert_eq!(phone.app.doc.setup.margin_left, setup.margin_left, "the phone fetched the whole story");
         assert_eq!(phone.app.live_hash(), laptop.app.live_hash(), "and is the same story again");
         assert!(!phone.app.can_edit(), "still following");
+        for d in dirs {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+
+    #[test]
+    fn a_following_device_changes_nothing_with_its_tools_notes_or_scratchpad() {
+        let (mut laptop, mut phone, server, dirs) = laptop_and_phone("live-readonly");
+        side_by_side(&mut laptop, &mut phone, 6);
+        assert!(!phone.app.can_edit());
+        let story = phone.app.live_hash();
+        let ctx = phone.ctx.clone();
+        phone.app.select_all(&ctx);
+        // The tools that change the story do nothing; finding still works.
+        for tool in ["B", "Note"] {
+            phone.click_widget(tool);
+        }
+        phone.key(Key::B, Modifiers::COMMAND);
+        phone.key(Key::N, Modifiers::COMMAND | Modifiers::ALT);
+        phone.key(Key::Enter, Modifiers::COMMAND);
+        phone.key(Key::Backspace, Modifiers::NONE);
+        phone.click_widget("Find");
+        assert!(phone.app.search.open, "finding is reading");
+        phone.key(Key::Escape, Modifiers::NONE);
+        // The scratchpad opens, but is not written in.
+        phone.click_widget("Scratchpad");
+        phone.frames(2, vec![], Modifiers::NONE);
+        let field = egui::Id::new("scratchpad_text");
+        phone.ctx.memory_mut(|m| m.request_focus(field));
+        phone.frames(1, vec![], Modifiers::NONE);
+        phone.type_text("scribbled");
+        assert_eq!(phone.app.live_hash(), story, "nothing of the story changed on the phone");
+        assert!(phone.app.doc.notes.is_empty() && !phone.app.doc.scratchpad.contains("scribbled"));
+        let said = server.0.borrow().rooms.borrow().values().flat_map(|r| r.said.clone()).collect::<Vec<_>>();
+        assert!(!said.iter().any(|(d, kind)| *d == phone.app.live.device && kind == "edits"), "and nothing was sent");
+
+        // Should something change it all the same, the writer's story replaces it at the next click.
+        phone.app.doc.scratchpad = "slipped past".into();
+        phone.click_widget("Find");
+        for _ in 0..4 {
+            side_by_side(&mut laptop, &mut phone, 3);
+            laptop.later(1.0);
+        }
+        assert_eq!(phone.app.live_hash(), laptop.app.live_hash(), "the writer's story again");
+        assert!(!phone.app.doc.scratchpad.contains("slipped past"));
         for d in dirs {
             let _ = std::fs::remove_dir_all(d);
         }

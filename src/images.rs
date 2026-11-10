@@ -163,6 +163,9 @@ impl App {
     }
 
     pub fn insert_image_bytes(&mut self, ctx: &egui::Context, bytes: Vec<u8>) -> Result<(), String> {
+        if !self.can_edit() {
+            return Err("another device holds the pen".into());
+        }
         let (format, px) = describe(&bytes)?;
         let id = self.doc.images.iter().map(|i| i.id).max().unwrap_or(0) + 1;
         // 96 dpi, but never wider than the writing area.
@@ -197,6 +200,10 @@ impl App {
 
     /// Show a picture this wide (in points), keeping its proportions.
     pub fn set_image_width(&mut self, ctx: &egui::Context, id: u32, width_pt: f32) {
+        // Another device holds the pen (R34).
+        if !self.can_edit() {
+            return;
+        }
         let max = self.doc.setup.content_size().x;
         if let Some(img) = self.doc.images.iter_mut().find(|i| i.id == id) {
             img.width_pt = width_pt.clamp(16.0, max);
@@ -207,6 +214,10 @@ impl App {
     }
 
     pub fn rotate_image(&mut self, ctx: &egui::Context, quarter_turns: i8) {
+        // Another device holds the pen (R34).
+        if !self.can_edit() {
+            return;
+        }
         let Some(id) = self.selected_image() else { return };
         if let Some(img) = self.doc.images.iter_mut().find(|i| i.id == id) {
             img.rotation = (img.rotation as i8 + quarter_turns).rem_euclid(4) as u8;
@@ -228,6 +239,10 @@ impl App {
 
     /// Move the picture paragraph starting at `from` so that it starts at the paragraph start `boundary`.
     pub fn move_picture(&mut self, ctx: &egui::Context, from: usize, boundary: usize) {
+        // Another device holds the pen (R34).
+        if !self.can_edit() {
+            return;
+        }
         let (to_end, max) = (from + 2, self.doc.total_chars() - 1);
         let valid = self.doc.char_at(from) == Some(IMAGE_CHAR) && self.doc.char_at(from + 1).is_some_and(is_terminator);
         if !valid || boundary == from || boundary == to_end || boundary > max {
@@ -246,6 +261,10 @@ impl App {
 
     /// Move the selected picture up or down by one paragraph (Alt+Up / Alt+Down).
     pub fn nudge_picture(&mut self, ctx: &egui::Context, up: bool) {
+        // Another device holds the pen (R34).
+        if !self.can_edit() {
+            return;
+        }
         let Some((from, _)) = self.picture_paragraph() else { return };
         let boundary = if up {
             if from == 0 {
@@ -304,6 +323,10 @@ impl App {
     }
 
     pub fn do_picture_action(&mut self, ctx: &egui::Context, action: PicAction) {
+        // Another device holds the pen (R34).
+        if !self.can_edit() {
+            return;
+        }
         match action {
             PicAction::RotateRight => self.rotate_image(ctx, 1),
             PicAction::RotateLeft => self.rotate_image(ctx, -1),
@@ -333,6 +356,10 @@ impl App {
 
     /// Show the selected picture at this share of the writing width.
     pub fn set_image_width_fraction(&mut self, ctx: &egui::Context, fraction: f32) {
+        // Another device holds the pen (R34).
+        if !self.can_edit() {
+            return;
+        }
         let Some(id) = self.selected_image() else { return };
         let full = self.doc.setup.content_size().x;
         if let Some(img) = self.doc.images.iter_mut().find(|i| i.id == id) {

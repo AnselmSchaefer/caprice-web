@@ -148,6 +148,10 @@ impl App {
     }
 
     fn replace_raw(&mut self, ctx: &egui::Context, a: usize, b: usize, text: &str) {
+        // Another device holds the pen (R34).
+        if !self.can_edit() {
+            return;
+        }
         let max = self.max_caret();
         let (a, b) = (a.min(max), b.min(max));
         // The contents are a page setting, not text (older files had a char for them).
@@ -175,6 +179,10 @@ impl App {
 
     /// Apply an edit made around the caret and park the caret after it.
     pub fn apply_edit(&mut self, ctx: &egui::Context, edit: Edit, old_end: usize) {
+        // Another device holds the pen (R34).
+        if !self.can_edit() {
+            return;
+        }
         let (dchars, dbytes) = edit.delta();
         let at = match &edit {
             Edit::Replace { at, .. } | Edit::Restyle { at, .. } => *at,
@@ -203,6 +211,10 @@ impl App {
 
     /// Paste formatted if the clipboard still holds what was copied here, else as plain text.
     fn paste(&mut self, ctx: &egui::Context, t: &str) {
+        // Another device holds the pen (R34).
+        if !self.can_edit() {
+            return;
+        }
         let plain: String = t.chars().filter(|&c| c != '\r').collect();
         match self.clip.take() {
             Some(clip) if clip.plain == plain => {
@@ -328,6 +340,10 @@ impl App {
 
     /// Insert a hard page break at the caret.
     pub fn insert_page_break(&mut self, ctx: &egui::Context) {
+        // Another device holds the pen (R34).
+        if !self.can_edit() {
+            return;
+        }
         let c = self.caret;
         let (ps, _) = self.doc.para_start(c);
         let at_end = self.doc.char_at(c).is_some_and(is_terminator);
@@ -648,6 +664,10 @@ impl App {
 
     /// Set a character style property on the selection (if any) and on what is typed next.
     pub fn apply_style(&mut self, ctx: &egui::Context, edit: impl Fn(&mut Style)) {
+        // Another device holds the pen (R34).
+        if !self.can_edit() {
+            return;
+        }
         edit(&mut self.typing);
         let (a, b) = self.selection();
         if a == b {
@@ -671,6 +691,10 @@ impl App {
 
     /// Change the format of every paragraph the selection touches.
     pub fn set_para(&mut self, ctx: &egui::Context, edit: impl Fn(&mut ParaAttrs)) {
+        // Another device holds the pen (R34).
+        if !self.can_edit() {
+            return;
+        }
         let (a, b) = self.selection();
         let (ps, _) = self.doc.para_start(a);
         let last_char = b.min(self.max_caret());
@@ -756,6 +780,10 @@ impl App {
 
     /// Undo or redo one step and put the caret where the change happened.
     pub fn step_history(&mut self, ctx: &egui::Context, redo: bool) {
+        // Another device holds the pen (R34).
+        if !self.can_edit() {
+            return;
+        }
         let caret = if redo { self.doc.redo() } else { self.doc.undo() };
         let Some(caret) = caret else { return };
         self.doc.full_paginate(ctx, &self.typing);
@@ -764,6 +792,10 @@ impl App {
 
     /// Swap in new page settings and reflow the whole document.
     pub fn set_setup(&mut self, ctx: &egui::Context, mut setup: PageSetup) {
+        // Another device holds the pen (R34).
+        if !self.can_edit() {
+            return;
+        }
         setup.clamp_margins();
         let contents_added = setup.contents && !self.doc.setup.contents;
         // The page being read stays in view: the one its first char goes to, not the caret's (R5).

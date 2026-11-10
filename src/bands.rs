@@ -218,6 +218,10 @@ impl App {
     /// The header (`top`) or footer, new. Like the other page settings it is not undoable (R1),
     /// but unlike them it changes no page break, so nothing is paginated again.
     pub fn set_band(&mut self, top: bool, band: Band) {
+        // Another device holds the pen (R34).
+        if !self.can_edit() {
+            return;
+        }
         let slot = if top { &mut self.doc.setup.header } else { &mut self.doc.setup.footer };
         if *slot != band {
             *slot = band;

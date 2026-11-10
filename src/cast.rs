@@ -399,6 +399,7 @@ impl App {
     /// The cast window: everyone in the story, each with their names and their looks, each look with
     /// its words and model sheet, and with several, which of them is in use.
     pub fn cast_window(&mut self, ctx: &egui::Context) {
+        let can = self.can_edit();
         self.update_cast(ctx);
         self.cast_example(ctx);
         if !self.cast_panel.open {
@@ -434,6 +435,10 @@ impl App {
             .default_height(620.0)
             .collapsible(false)
             .show(ctx, |ui| {
+                // Another device holds the pen (R34): the cast is read here, not changed.
+                if !can {
+                    ui.disable();
+                }
                 let about = "The people of the story. When a scene is painted, those its passage names are painted \
                              as described here, and copied from their model sheet if they have one, so they look \
                              the same in every picture.";
