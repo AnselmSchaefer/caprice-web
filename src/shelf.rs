@@ -125,9 +125,14 @@ impl App {
                         field.request_focus();
                         *focused = true;
                     }
-                    let path = dir.join(format!("{}.caprice", file_name(name)));
-                    if crate::platform::fs::exists(&path) {
-                        ui.weak("A story of that name is kept already: saving puts this one in its place.");
+                    // Another story of that name is never replaced: this one goes beside it, under a
+                    // name of its own, so that no words are lost here or online (where the other's
+                    // copy would be replaced too). Only the story's own file is saved over.
+                    let mut path = dir.join(format!("{}.caprice", file_name(name)));
+                    if crate::platform::fs::exists(&path) && shown.as_deref() != Some(path.as_path()) {
+                        path = crate::platform::free_name(&dir, &format!("{}.caprice", file_name(name)));
+                        let beside = path.file_stem().map_or(String::new(), |s| s.to_string_lossy().into_owned());
+                        ui.weak(format!("Another story is kept under that name: this one is saved beside it as \u{201c}{beside}\u{201d}."));
                     }
                     let entered = field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
                     ui.add_space(4.0);

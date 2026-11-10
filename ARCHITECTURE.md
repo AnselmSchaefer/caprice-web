@@ -1554,7 +1554,11 @@ them; it asks `platform` instead, whose desktop half does what Caprice always di
     `<shelf>/<name>.caprice`; or a story from the shelf's list, or one uploaded onto it. With a
   shelf the File menu also has New (R22). The shelf's window (`shelf_window`) is drawn wherever
   its question can be asked, the welcome page too ("Open another…", Ctrl+O): a question asked
-  where no window shows it waits unseen, and the button seems dead. So a
+  where no window shows it waits unseen, and the button seems dead. **Another story is never
+  saved over one of the same name**: only the story's own file is; any other goes beside it under
+  `free_name` ("<name> 2"), and the window says so before saving. Replacing it lost the other's
+  words here, and online too, where its record (found by path) had the new story uploaded over it.
+  Test: `another_story_saved_under_a_name_kept_already_goes_beside_it_and_replaces_nothing`. So a
     story in the browser has a path like any other, and autosave (R22) and the stories last
     opened (R27; the welcome says "In this browser") work unchanged;
   - in the browser, a file to read (a picture) comes from the page's picker into `/uploads`,
@@ -1783,6 +1787,21 @@ In the app (`cloud.rs`) **the shelf is where a story is; online is a copy, and n
   before the delete arrives (412) is kept, and comes down again. Something new that writes stories on the
   shelf needs nothing more: a changed file is found by its fingerprint (`fingerprint`, stable in
   every browser), not by being told.
+- **Each story says how it stands online**, while signed in (`Cloud::mark_of`, `cloud::Mark`): a
+  drawn mark and its word after its name on the welcome page, and the word in the shelf's Open
+  window. Online (a cloud with a tick: the record's fingerprint is the file's), going online (a
+  cloud with an arrow: saved since, and it goes up by itself), only in this browser (a screen, in
+  the accent: online backup is off, or the story is too big; the hover says why and that it goes
+  up by itself), two copies (two sheets, in the accent: kept twice, `Kept::twice` in
+  `cloud.json`, both marked, each naming the other, until a click on the mark says they are sorted
+  out, or one is deleted). The mark is worked out from what the app knows, never by asking the
+  server, so it shows offline too; the welcome page takes the fingerprint from its list
+  (`Story::hash`) rather than reading every file each frame. Going online stays automatic; the
+  Stories online window offers "Try again now" while backup is off and "Back up now" while a save
+  waits (`Cloud::try_now`). Anything new that changes whether a story is online (a new `Do`, a new
+  refusal) must leave `mark_of` right. Tests:
+  `each_story_on_the_welcome_page_says_whether_it_is_online_or_only_in_this_browser`,
+  `a_story_changed_here_and_in_another_browser_is_kept_twice_and_loses_no_word`.
 - **The open story is never written over** while it has changes not saved: the copy from online
   goes beside it. Without such changes it is written and shown again (`Cloud::reload`), the caret
   kept, its page shown with `go_to_page` (R5).
@@ -1943,6 +1962,13 @@ Plan and reasons: `LIVE_PLAN.md`.
   online included): each message in is one, pings are answered without waking it, and it writes
   almost nothing (the batch number goes with the holder's socket, the day's count twenty at a
   time). `SITE_LIVE_PER_DAY` and `ROOM_MESSAGES_PER_DAY` bound it; `LIVE_OFF = "1"` stops it.
+  **Live editing has its own share of the day** (`SITE_LIVE_MESSAGES_PER_DAY`, 40,000): a room
+  passes on only messages the Ledger gave it (`Ledger::liveMessages`, `LIVE_MESSAGES_AT_ONCE` at a
+  time, `StoryRoom::allowed`), so the rest stays for stories online. Out of share, or the Ledger
+  out of reach, the room closes its sockets (4002). Asking the Ledger lets the next message in
+  meanwhile, so messages are handled one after another (`webSocketMessage` chains `message`),
+  or a writer's batches could pass each other. Test: "live editing has its share of the site's
+  requests, and stories online keep the rest".
   **Its alarm is a request too**, and counts against neither: a room wakes only to hand the pen
   to a device there (`settle`), never in an empty room, and never for a time already past. An
   empty room with its holder gone once set an alarm in the past for ever, and two such rooms

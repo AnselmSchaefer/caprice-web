@@ -85,6 +85,83 @@ struct Kept {
     /// Stories deleted here, by their name online, with the version deleted: to delete online.
     #[serde(default)]
     deleting: BTreeMap<String, String>,
+    /// Stories kept twice, changed here and elsewhere (`keep_both`): the copy from online, and the
+    /// story it came beside. Both are marked until the writer says they are sorted out.
+    #[serde(default)]
+    twice: BTreeMap<PathBuf, PathBuf>,
+}
+
+/// How a story on the shelf stands online, while signed in: the mark beside it, its shape and its
+/// words, so that what is only in this browser is never mistaken for what is safe online.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Mark {
+    /// Online as it is here.
+    Online,
+    /// Saved here since, and going up by itself in a moment.
+    Waiting,
+    /// Only in this browser for now: the server cannot be reached, or the story is too big.
+    HereOnly,
+    /// Changed here and elsewhere, and kept twice: this one and its other copy.
+    Twice,
+}
+
+impl Mark {
+    pub fn label(self) -> &'static str {
+        match self {
+            Mark::Online => "online",
+            Mark::Waiting => "going online",
+            Mark::HereOnly => "only in this browser",
+            Mark::Twice => "two copies",
+        }
+    }
+
+    /// Its colour: quiet when all is well, the accent for something to see to.
+    pub fn color(self) -> Color32 {
+        match self {
+            Mark::Online | Mark::Waiting => crate::theme::pal().text_dim,
+            Mark::HereOnly | Mark::Twice => crate::theme::pal().accent,
+        }
+    }
+
+    /// The mark itself in `r` (a square): a cloud with a tick, a cloud with an arrow going up, a
+    /// screen, or two sheets one over the other. Shapes rather than letters, so every font has
+    /// them; nothing is hidden by painting over it, as the row under it may be seen through.
+    pub fn draw(self, p: &Painter, r: egui::Rect) {
+        let c = self.color();
+        let stroke = Stroke::new(1.5, c);
+        let (x, y, s) = (r.left(), r.top(), r.width());
+        let at = |a: f32, b: f32| pos2(x + a * s, y + b * s);
+        match self {
+            Mark::Online | Mark::Waiting => {
+                // A cloud, filled: three bumps on a flat bottom; in it a tick, or an arrow going up,
+                // cut out in the dock's colour.
+                p.circle_filled(at(0.34, 0.56), 0.18 * s, c);
+                p.circle_filled(at(0.56, 0.44), 0.24 * s, c);
+                p.circle_filled(at(0.76, 0.6), 0.15 * s, c);
+                p.rect_filled(egui::Rect::from_min_max(at(0.16, 0.56), at(0.91, 0.75)), 0.18 * s, c);
+                let cut = Stroke::new(1.6, crate::theme::pal().dock);
+                if self == Mark::Online {
+                    p.line_segment([at(0.4, 0.56), at(0.5, 0.65)], cut);
+                    p.line_segment([at(0.5, 0.65), at(0.68, 0.45)], cut);
+                } else {
+                    p.line_segment([at(0.54, 0.7), at(0.54, 0.4)], cut);
+                    p.line_segment([at(0.44, 0.5), at(0.54, 0.4)], cut);
+                    p.line_segment([at(0.64, 0.5), at(0.54, 0.4)], cut);
+                }
+            }
+            Mark::HereOnly => {
+                // A screen on its stand: this device.
+                p.rect_stroke(egui::Rect::from_min_max(at(0.14, 0.2), at(0.86, 0.66)), 2.0, stroke, StrokeKind::Middle);
+                p.line_segment([at(0.5, 0.66), at(0.5, 0.8)], stroke);
+                p.line_segment([at(0.32, 0.82), at(0.68, 0.82)], stroke);
+            }
+            Mark::Twice => {
+                // The sheet behind in outline, the one in front filled over it.
+                p.rect_stroke(egui::Rect::from_min_max(at(0.18, 0.14), at(0.62, 0.7)), 2.0, stroke, StrokeKind::Middle);
+                p.rect_filled(egui::Rect::from_min_max(at(0.38, 0.3), at(0.82, 0.86)), 2.0, c);
+            }
+        }
+    }
 }
 
 /// A story the server has, or had: one deleted is listed as gone with the version it was.
@@ -345,6 +422,7 @@ impl Cloud {
     /// The story at `path` is being deleted here: online it goes next, if it is there. Its record
     /// goes now, so that it is neither sent up nor brought down meanwhile.
     pub fn deleted(&mut self, path: &Path) {
+        self.sorted_out(path);
         let Some(key) = self.kept.stories.iter().find(|(_, r)| r.path == path).map(|(k, _)| k.clone()) else { return };
         if let Some(record) = self.kept.stories.remove(&key) {
             self.kept.deleting.insert(key, record.version);
@@ -399,12 +477,51 @@ impl Cloud {
         self.next_round = Some(self.now());
     }
 
-    /// What the shelf says beside a story, while signed in.
-    pub fn mark(&self, path: &Path) -> Option<&'static str> {
+    /// The mark beside the story kept at `path`, while signed in, and what it means for this one.
+    pub fn mark(&self, path: &Path) -> Option<(Mark, String)> {
+        self.mark_of(path, fingerprint(&fs::read(path).ok()?))
+    }
+
+    /// The same, for the story at `path` whose file's fingerprint is `hash`.
+    pub fn mark_of(&self, path: &Path, hash: u64) -> Option<(Mark, String)> {
         self.who.as_ref()?;
-        let hash = fingerprint(&fs::read(path).ok()?);
-        let online = self.kept.stories.values().any(|r| r.path == path && r.hash == hash);
-        Some(if online { "online" } else { "not online yet" })
+        if let Some(other) = self.other_copy(path) {
+            let said = format!("Changed here and in another browser, so both are kept: the other is \u{201c}{}\u{201d}. \
+                Compare them, and delete the one you do not want, or keep both. Click when they are sorted out.", story_name(&other));
+            return Some((Mark::Twice, said));
+        }
+        if self.kept.stories.values().any(|r| r.path == path && r.hash == hash) {
+            return Some((Mark::Online, "Kept online as it is here, to find in any browser.".into()));
+        }
+        if self.too_big.values().any(|h| *h == hash) {
+            return Some((Mark::HereOnly, "Only in this browser: it is too big to keep online.".into()));
+        }
+        Some(match self.backup_off() {
+            Some(why) => (Mark::HereOnly, format!("Only in this browser for now. {why} It goes online by itself once Caprice's server can be reached.")),
+            None => (Mark::Waiting, "Saved here, and going online by itself in a moment.".into()),
+        })
+    }
+
+    /// The other copy of a story kept twice, while both are there.
+    fn other_copy(&self, path: &Path) -> Option<PathBuf> {
+        let other = self.kept.twice.iter().find_map(|(copy, story)| {
+            if copy == path { Some(story) } else if story == path { Some(copy) } else { None }
+        })?;
+        fs::exists(other).then(|| other.clone())
+    }
+
+    /// The writer has sorted out the story at `path` and its other copy: neither is marked now.
+    pub fn sorted_out(&mut self, path: &Path) {
+        self.kept.twice.retain(|copy, story| copy != path && story != path);
+        self.keep();
+    }
+
+    /// Send what is saved here now, or ask the server again now if it could not be reached.
+    pub fn try_now(&mut self) {
+        if self.who.is_some() {
+            self.paused_until = self.paused_until.min(self.now());
+            self.due_now();
+        }
     }
 
     fn send(&mut self, asking: Asking, request: Request) {
@@ -839,6 +956,7 @@ impl App {
         }
         self.start.remember(&copy, self.keep.now());
         self.start.stories = None;
+        self.cloud.kept.twice.insert(copy.clone(), path.to_owned());
         // Agreeing on the version online, but not on the words: the shelf's go up next.
         let record = Record { path: path.to_owned(), version: version.to_owned(), hash: 0 };
         self.cloud.kept.stories.insert(key.to_owned(), record);
@@ -880,18 +998,27 @@ impl App {
                         let by = if who.provider == "github" { "GitHub" } else { "Google" };
                         ui.label(format!("Signed in with {by} as {}.", who.name));
                         ui.add_space(4.0);
+                        let mut now = false;
                         match cloud.backup_off() {
                             Some(why) => {
                                 ui.strong("Online backup is off for now.");
                                 ui.weak(why);
                                 ui.label(BACKUP_OFF);
+                                now = ui.button("Try again now").on_hover_text("Ask Caprice's server again, rather than wait").clicked();
                             }
                             None if cloud.busy() || cloud.next_round.is_some_and(|t| t <= cloud.now() + UP_AFTER) => {
-                                ui.weak("Saving online\u{2026}");
+                                ui.horizontal(|ui| {
+                                    ui.weak("Saving online\u{2026}");
+                                    now = !cloud.busy() && ui.button("Back up now").on_hover_text("Send what is saved here now, rather than in a moment").clicked();
+                                });
                             }
                             None => {
                                 ui.weak("Your stories are online, and in this browser.");
                             }
+                        }
+                        ui.weak("Beside each story on the welcome page, a mark says whether it is online or only in this browser.");
+                        if now {
+                            cloud.try_now();
                         }
                         if let Some(told) = &cloud.told {
                             ui.add_space(4.0);

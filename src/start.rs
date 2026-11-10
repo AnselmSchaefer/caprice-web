@@ -16,6 +16,7 @@ use eframe::egui::{self, Color32, CornerRadius, FontId, Galley, Id, LayerId, Ord
 use serde::{Deserialize, Serialize};
 
 use crate::App;
+use crate::cloud::Mark;
 use crate::fileio::DocFile;
 use crate::fonts::{FontBook, family_for};
 use crate::model::{Align, Band, BandLook, CHAPTER_FIELD, Doc, Flow, PAGE_FIELD, PageSetup, ParaAttrs, ParaKind, Style};
@@ -53,6 +54,8 @@ pub struct Story {
     pub excerpt: String,
     pub paper: String,
     sheet: Sheet,
+    /// Its file's fingerprint, for the mark of how it stands online (`Cloud::mark_of`).
+    pub hash: u64,
 }
 
 /// The kinds of story the welcome page begins: each its own paper, type and furniture.
@@ -330,6 +333,7 @@ impl Sheet {
 /// Read what the welcome page tells about a story from its file.
 fn read_story(l: &Lately) -> Option<Story> {
     let json = fs::read_to_string(&l.path).ok()?;
+    let hash = crate::cloud::fingerprint(json.as_bytes());
     let doc: Doc = serde_json::from_str::<DocFile>(&json).ok()?.into_doc();
     let changed = fs::modified(&l.path);
     let paras = paragraphs(&doc);
@@ -346,6 +350,7 @@ fn read_story(l: &Lately) -> Option<Story> {
         excerpt,
         paper: paper_name(&doc.setup),
         sheet: Sheet::of_doc(&doc, seed),
+        hash,
     })
 }
 
@@ -519,6 +524,8 @@ enum Row {
     Ask,
     Delete,
     Keep,
+    /// The mark of two copies, clicked: the writer has sorted them out.
+    SortedOut,
 }
 
 impl App {
@@ -705,11 +712,13 @@ impl App {
             let shelf = self.shelf.dir.is_some();
             for st in &stories {
                 let asking = self.start.asking.as_ref() == Some(&st.path);
-                match story_row(ui, st, (left, col, full), &serif, now, sense, live && !waiting, (asking, shelf)) {
+                let mark = if shelf { self.cloud.mark_of(&st.path, st.hash) } else { None };
+                match story_row(ui, st, (left, col, full), &serif, now, sense, live && !waiting, (asking, shelf), mark) {
                     Some(Row::Open(at)) => chosen = Some(Chosen::Story(st.path.clone(), at)),
                     Some(Row::Ask) => self.start.asking = Some(st.path.clone()),
                     Some(Row::Keep) => self.start.asking = None,
                     Some(Row::Delete) => chosen = Some(Chosen::Delete(st.path.clone())),
+                    Some(Row::SortedOut) => self.cloud.sorted_out(&st.path),
                     None => {}
                 }
                 ui.add_space(10.0 - ui.spacing().item_spacing.y);
@@ -782,7 +791,7 @@ impl App {
 #[allow(clippy::too_many_arguments)]
 fn story_row(
     ui: &mut Ui, st: &Story, (left, col, full): (f32, f32, f32), serif: &egui::FontFamily, now: u64, sense: Sense, live: bool,
-    (asking, shelf): (bool, bool),
+    (asking, shelf): (bool, bool), mark: Option<(Mark, String)>,
 ) -> Option<Row> {
     let row_h = 118.0;
     let (r, _) = ui.allocate_exact_size(vec2(full, row_h), Sense::hover());
@@ -816,7 +825,13 @@ fn story_row(
         p.galley(pos2(row.right() - 16.0 - g.size().x, y), g, color);
         y += 20.0;
     }
-    let name = galley(ui, &st.name, FontId::new(20.0, serif.clone()), pal().text, text_w, 1, false);
+    // After the name, how it stands online: a mark and its word, which say more under the pointer.
+    let mark = mark.map(|(m, said)| {
+        let word = galley(ui, m.label(), FontId::proportional(12.0), m.color(), text_w * 0.5, 1, false);
+        (m, said, word)
+    });
+    let mark_w = mark.as_ref().map_or(0.0, |(_, _, word)| 12.0 + 16.0 + 4.0 + word.size().x);
+    let name = galley(ui, &st.name, FontId::new(20.0, serif.clone()), pal().text, text_w - mark_w, 1, false);
     let excerpt = match (asking, shelf) {
         (true, true) => "Delete it here and online, on every device? It stays under File \u{203a} Versions.".to_owned(),
         (true, false) => "Take it off this list? The file stays where it is.".to_owned(),
@@ -827,6 +842,10 @@ fn story_row(
     let meta = galley(ui, holds(st), FontId::proportional(12.0), pal().text_dim, text_w, 1, false);
     let mut y = row.top() + 14.0;
     let (name_h, excerpt_h) = (name.size().y, excerpt.size().y);
+    let mark_at = mark.as_ref().map(|(_, _, word)| {
+        let left = x + name.size().x + 12.0;
+        Rect::from_min_size(pos2(left, y + name_h / 2.0 - 9.0), vec2(16.0 + 4.0 + word.size().x, 18.0))
+    });
     p.galley(pos2(x, y), name, pal().text);
     y += name_h + 4.0;
     p.galley(pos2(x, y), excerpt, pal().text);
@@ -834,6 +853,18 @@ fn story_row(
     p.galley(pos2(x, y), meta, pal().text_dim);
     let clicked = resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(st.path.display().to_string()).clicked();
     let mut done = clicked.then_some(Row::Open(at));
+    if let (Some((m, said, word)), Some(r)) = (mark, mark_at) {
+        m.draw(ui.painter(), Rect::from_min_size(pos2(r.left(), r.center().y - 8.0), vec2(16.0, 16.0)));
+        ui.painter().galley(pos2(r.left() + 20.0, r.center().y - word.size().y / 2.0), word, m.color());
+        // Over the row, so the pointer finds it; two copies are sorted out with a click on it.
+        let sense = if live && m == Mark::Twice { Sense::click() } else { Sense::hover() };
+        let tag = ui.interact(r, Id::new(("welcome_mark", &st.path)), sense);
+        let kind = if m == Mark::Twice { egui::WidgetType::Button } else { egui::WidgetType::Label };
+        tag.widget_info(|| egui::WidgetInfo::labeled(kind, true, m.label()));
+        if tag.on_hover_text(said).clicked() {
+            done = Some(Row::SortedOut);
+        }
+    }
     if live {
         // Laid over the row, so a press on them is theirs, not the row's; their text ends where the
         // lines above it do.

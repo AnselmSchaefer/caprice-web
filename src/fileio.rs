@@ -550,7 +550,7 @@ impl App {
         let pick = matches!(purpose, DialogFor::Open | DialogFor::Picture);
         match purpose {
             DialogFor::Save if self.shelf.dir.is_some() => self.shelf.ask_name(dialog.name, tx),
-            DialogFor::Open if self.shelf.dir.is_some() => self.shelf.ask_open(tx, &|p| self.cloud.mark(p)),
+            DialogFor::Open if self.shelf.dir.is_some() => self.shelf.ask_open(tx, &|p| self.cloud.mark(p).map(|(m, _)| m.label())),
             #[cfg(target_arch = "wasm32")]
             _ if pick => crate::platform::upload(&dialog, crate::platform::UPLOADS.into(), tx, crate::platform::Waker::new(ctx)),
             #[cfg(target_arch = "wasm32")]

@@ -889,6 +889,27 @@ test("a story's messages for the day run out, and too big a message is not taken
   assert.equal((await device(mf, ada, "story-1", "phone00001")).status, 503, "and no one comes in until tomorrow");
 });
 
+test("live editing has its share of the site's requests, and stories online keep the rest", async t => {
+  const mf = await start(t, { SITE_LIVE_MESSAGES_PER_DAY: "5", LIVE_MESSAGES_AT_ONCE: "2" });
+  const ada = await liveWriter(mf, "1", "Ada");
+  const one = await device(mf, ada, "story-1", "laptop0001");
+  await one.next("hello");
+  const other = await device(mf, ada, "story-2", "laptop0001");
+  await other.next("hello");
+  // Two rooms take from the same share: two at a time, five in all.
+  one.say({ t: "edits", seq: 1, edits: [], hash: "a" });
+  one.say({ t: "edits", seq: 2, edits: [], hash: "b" });
+  one.say({ t: "edits", seq: 3, edits: [], hash: "c" });
+  other.say({ t: "edits", seq: 1, edits: [], hash: "a" });
+  other.say({ t: "edits", seq: 2, edits: [], hash: "b" });
+  other.say({ t: "edits", seq: 3, edits: [], hash: "c" });
+  await one.next("never", 300);
+  await other.next("never", 300);
+  assert.deepEqual([one.closed(), other.closed()].sort(), [4002, null], "the share ran out in one room");
+  const api = await writer(mf, "1", "Ada");
+  assert.equal((await saveNew(api, "s", story("still saved"))).status, 200, "stories online go on");
+});
+
 test("the site's live connections for the day run out, and the off switch stops them", async t => {
   const mf = await start(t, { SITE_LIVE_PER_DAY: "1" });
   const ada = await liveWriter(mf, "1", "Ada");

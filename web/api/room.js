@@ -8,7 +8,9 @@
 // The sockets hibernate, so a quiet room costs nothing. On the free plan every message in counts
 // as a request and every write to storage as a row, out of 100,000 a day for the whole site, so a
 // batch writes nothing here: its number goes with the holder's socket, and the day's count is
-// written twenty at a time.
+// written twenty at a time. The room passes on only messages it was given by the Ledger, taken
+// from live editing's share for the whole site so many at a time (`allowed`), so that live
+// editing leaves the rest of the 100,000 to stories online.
 //
 // What the devices say, as JSON:
 //   to the room   edits { seq, edits, hash, at }   only the holder; seq one on from the last
@@ -95,6 +97,26 @@ export class StoryRoom extends DurableObject {
     this.sql.exec("DELETE FROM counts WHERE day < ?", day(now));
     this.sql.exec("INSERT INTO counts VALUES (?, ?) ON CONFLICT (day) DO UPDATE SET n = n + excluded.n", day(now), this.unwritten.n);
     this.unwritten.n = 0;
+  }
+
+  // One more message out of those the Ledger gave this room today, asking it for more when they
+  // are used up. Kept in memory only: a room put away loses the few it had, which stay counted.
+  // The Ledger out of reach (Cloudflare's daily limit, a fault) passes on nothing more.
+  async allowed(now = Date.now()) {
+    if (this.given?.day !== day(now)) this.given = { day: day(now), n: 0 };
+    if (this.given.n <= 0) {
+      let answer;
+      try {
+        answer = await this.env.LEDGER.get(this.env.LEDGER.idFromName("ledger")).liveMessages();
+      } catch (e) {
+        console.error("room: no messages from the Ledger:", e?.message);
+        return false;
+      }
+      if (!answer.ok) return false;
+      this.given.n = answer.n;
+    }
+    this.given.n -= 1;
+    return true;
   }
 
   // The number of the last batch: the holder's socket carries it, and storage has it once the
@@ -189,13 +211,25 @@ export class StoryRoom extends DurableObject {
     await this.settle();
   }
 
-  async webSocketMessage(ws, data) {
+  // Each message in its turn: asking the Ledger for more (`allowed`) lets the next one in
+  // meanwhile, and a writer's batches must go on in the order they came.
+  webSocketMessage(ws, data) {
+    const turn = (this.turn ?? Promise.resolve()).then(() => this.message(ws, data));
+    this.turn = turn.catch(() => {});
+    return turn;
+  }
+
+  async message(ws, data) {
     const me = ws.deserializeAttachment();
     if (typeof data !== "string" || data.length > this.limits.LIVE_MESSAGE_BYTES) return ws.close(1009, "Too big");
     // The session it came in with has run out: signed in no longer, as far as this socket knows.
     if (Date.now() > me.until) return ws.close(4001, "Signed out");
     if (this.used() >= this.limits.ROOM_MESSAGES_PER_DAY) {
       for (const d of this.devices()) d.ws.close(4002, "Live editing is paused for this story until tomorrow");
+      return;
+    }
+    if (!await this.allowed()) {
+      for (const d of this.devices()) d.ws.close(4002, "Live editing is paused until tomorrow");
       return;
     }
     this.count();

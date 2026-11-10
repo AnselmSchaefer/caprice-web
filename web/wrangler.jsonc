@@ -48,6 +48,9 @@
     // stories online included, and each message in is one: a writer sends at most one a second
     // while typing, a few thousand in a day of writing. See LIVE_PLAN.md.
     "SITE_LIVE_PER_DAY": "1000",
-    "ROOM_MESSAGES_PER_DAY": "5000"
+    "ROOM_MESSAGES_PER_DAY": "5000",
+    // And for every room together: live editing's share, so that stories online keep the rest.
+    "SITE_LIVE_MESSAGES_PER_DAY": "40000",
+    "LIVE_MESSAGES_AT_ONCE": "200"
   }
 }

@@ -44,6 +44,10 @@ const DEFAULTS = {
   // before another has it, and how long the holder has to hand it over.
   SITE_LIVE_PER_DAY: 5_000,
   ROOM_MESSAGES_PER_DAY: 20_000,
+  // And the messages a day for every room together, which rooms take from here so many at a time:
+  // live editing's share of the 100,000, so that it cannot use up what stories online need.
+  SITE_LIVE_MESSAGES_PER_DAY: 40_000,
+  LIVE_MESSAGES_AT_ONCE: 200,
   LIVE_MESSAGE_BYTES: 256_000,
   LIVE_FREE_AFTER_MS: 30_000,
   LIVE_HAND_OVER_MS: 3_000,
@@ -300,6 +304,18 @@ export class Ledger extends DurableObject {
     }
     this.bump(now, "live");
     return { ok: true };
+  }
+
+  // A room's next messages for today, out of live editing's share for the whole site. Taken so
+  // many at a time, so that a room asks here once for every LIVE_MESSAGES_AT_ONCE it passes on.
+  liveMessages(now = Date.now()) {
+    const l = this.limits;
+    const left = l.SITE_LIVE_MESSAGES_PER_DAY - this.count(now, "live messages");
+    if (left <= 0) return { error: 503, message: "Live editing is paused until tomorrow", retry: untilTomorrow(now) };
+    const n = Math.min(left, l.LIVE_MESSAGES_AT_ONCE);
+    this.sql.exec("DELETE FROM counts WHERE key < ?", day(now));
+    this.sql.exec("INSERT INTO counts VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET n = n + excluded.n", `${day(now)}|live messages`, n);
+    return { ok: true, n };
   }
 
   // The painting is over, however it went: the writer may ask for the next.

@@ -8248,6 +8248,22 @@ mod tests {
         assert!(stories_online(&server).iter().any(|(_, f)| f.contains("Written here.")));
         h.app.cloud.open = true;
         assert!(h.labels().contains("both are kept"), "and the writer is told");
+
+        // Both are marked on the welcome page, each naming the other, until they are sorted out.
+        let (story, copy) = (dir.join("First words.caprice"), dir.join("First words (from another browser).caprice"));
+        for (path, other) in [(&story, "First words (from another browser)"), (&copy, "First words")] {
+            let (mark, said) = h.app.cloud.mark(path).unwrap();
+            assert_eq!(mark, cloud::Mark::Twice);
+            assert!(said.contains(&format!("the other is \u{201c}{other}\u{201d}")), "{said}");
+        }
+        h.app.cloud.open = false;
+        h.app.start.open = true;
+        h.app.start.stories = None;
+        h.frames(30, vec![], Modifiers::NONE);
+        assert_eq!(h.labels().lines().filter(|l| *l == "two copies").count(), 2, "{}", h.labels());
+        h.click_widget("two copies");
+        assert_eq!(h.labels().lines().filter(|l| *l == "two copies").count(), 0, "sorted out, neither is marked");
+        assert!(story.exists() && copy.exists(), "and both are still there");
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -8313,6 +8329,88 @@ mod tests {
         assert!(stories_online(&server).iter().any(|s| s.1.contains("Written on a train.")), "{:?}", stories_online(&server));
         assert!(!back.labels().contains("Online backup is off"));
         assert_eq!(back.app.shown_status, "- online backup is on again");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn each_story_on_the_welcome_page_says_whether_it_is_online_or_only_in_this_browser() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "online-marks");
+        let server = online(&mut h, &dir, true);
+        h.frames(12, vec![], Modifiers::NONE);
+        h.type_text("Kept online.");
+        h.save_on_shelf();
+        h.later(cloud::UP_AFTER + 1.0);
+        let up = dir.join("Kept online.caprice");
+        assert_eq!(h.app.cloud.mark(&up).map(|m| m.0), Some(cloud::Mark::Online));
+
+        // No network: the next story is saved in this browser only, and marked so.
+        server.0.borrow_mut().offline = true;
+        h.file_new();
+        h.type_text("Written offline.");
+        h.save_on_shelf();
+        let here = dir.join("Written offline.caprice");
+        assert_eq!(h.app.cloud.mark(&here).map(|m| m.0), Some(cloud::Mark::Waiting), "until it has tried, it is on its way");
+        h.later(cloud::UP_AFTER + 1.0);
+        let (mark, said) = h.app.cloud.mark(&here).unwrap();
+        assert_eq!(mark, cloud::Mark::HereOnly);
+        assert!(said.contains("Only in this browser for now. There is no connection") && said.contains("goes online by itself"), "{said}");
+        assert_eq!(h.app.cloud.mark(&up).map(|m| m.0), Some(cloud::Mark::Online), "the one online stays marked online");
+
+        let mut back = started_without_a_file(&dir);
+        back.app.shelf.dir = Some(dir.clone());
+        back.app.cloud = cloud::Cloud::with(Some(server.clone()), Some(dir.join("cloud.json")));
+        back.app.cloud.clock = Some(2000.0);
+        back.app.start.stories = None;
+        back.frames(12, vec![], Modifiers::NONE);
+        let welcome = back.labels();
+        assert!(welcome.contains("Kept online") && welcome.contains("Written offline"), "{welcome}");
+        assert!(welcome.lines().any(|l| l == "online") && welcome.lines().any(|l| l == "only in this browser"), "{welcome}");
+
+        // The network back, the writer need not wait: Try again now sends it.
+        server.0.borrow_mut().offline = false;
+        back.app.cloud.open = true;
+        back.frames(3, vec![], Modifiers::NONE);
+        let asked = server.0.borrow().asked.len();
+        back.click_widget("Try again now");
+        back.frames(30, vec![], Modifiers::NONE);
+        assert!(stories_online(&server).iter().any(|s| s.1.contains("Written offline.")), "{:?}", &server.0.borrow().asked[asked..]);
+        back.app.cloud.open = false;
+        let welcome = back.labels();
+        assert!(!welcome.lines().any(|l| l == "only in this browser"), "{welcome}");
+        assert_eq!(back.app.cloud.mark(&here).map(|m| m.0), Some(cloud::Mark::Online));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn another_story_saved_under_a_name_kept_already_goes_beside_it_and_replaces_nothing() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "same-name");
+        let server = online(&mut h, &dir, true);
+        h.frames(12, vec![], Modifiers::NONE);
+        h.type_text("The hatch lay wide open.");
+        h.save_on_shelf();
+        h.later(cloud::UP_AFTER + 1.0);
+        // Another story, whose first words give it the same name.
+        h.file_new();
+        h.type_text("The hatch lay wide open. Another story.");
+        h.key(Key::S, Modifiers::COMMAND);
+        assert!(h.labels().contains("this one is saved beside it as \u{201c}The hatch lay wide open 2\u{201d}"), "the writer is told before saving");
+        h.key(Key::Enter, Modifiers::NONE);
+        let first = std::fs::read_to_string(dir.join("The hatch lay wide open.caprice")).unwrap();
+        let second = std::fs::read_to_string(dir.join("The hatch lay wide open 2.caprice")).unwrap();
+        assert!(!first.contains("Another story."), "the first story is as it was");
+        assert!(second.contains("Another story."));
+        h.later(cloud::UP_AFTER + 1.0);
+        let online = stories_online(&server);
+        assert_eq!(online.len(), 2, "both are online: {:?}", online.iter().map(|s| &s.0).collect::<Vec<_>>());
+        assert!(online.iter().any(|s| !s.1.contains("Another story.")), "the first is not replaced online");
+
+        // Its own file is saved over, as ever.
+        h.type_text(" More.");
+        h.key(Key::S, Modifiers::COMMAND);
+        assert!(std::fs::read_to_string(dir.join("The hatch lay wide open 2.caprice")).unwrap().contains("More."));
+        assert!(!dir.join("The hatch lay wide open 3.caprice").exists());
         std::fs::remove_dir_all(dir).unwrap();
     }
 
