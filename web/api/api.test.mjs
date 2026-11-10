@@ -58,6 +58,9 @@ function providers(request) {
   return new Response("Not reachable from the test", { status: 502 });
 }
 
+// The rooms each test opened, each with the sockets of the devices that came in (`device`).
+const opened = new WeakMap();
+
 async function start(t, vars = {}) {
   const mf = new Miniflare(convertV4MiniflareOptions({
     modulesRoot: fileURLToPath(new URL(".", import.meta.url)),
@@ -74,7 +77,14 @@ async function start(t, vars = {}) {
     },
     outboundService: providers,
   }));
-  t.after(() => mf.dispose());
+  opened.set(mf, new Map());
+  t.after(async () => {
+    try {
+      await everyRoomSleeps(mf);
+    } finally {
+      await mf.dispose();
+    }
+  });
   Object.assign(claude, { asked: [], writes: "Here it is:\n<svg viewBox=\"0 0 4 3\"><rect/></svg>", stop: "end_turn", hold: null, broke: null });
   return mf;
 }
@@ -580,6 +590,36 @@ test("a picture comes back without anything that could run or reach outside it",
   }
 });
 
+// After every test: each room it opened sleeps once its devices are gone. A room that wakes by
+// itself costs a request each time, out of 100,000 a day for the whole site, and nothing else
+// counts those: two rooms waking for ever used up a whole day's in a morning.
+async function everyRoomSleeps(mf) {
+  const rooms = opened.get(mf);
+  if (!rooms.size) return;
+  for (const sockets of rooms.values()) {
+    for (const ws of sockets) {
+      try {
+        ws.close();
+      } catch {
+        // Closed by the room already.
+      }
+    }
+  }
+  await new Promise(r => setTimeout(r, 500));
+  const namespace = await mf.getDurableObjectNamespace("ROOMS");
+  for (const name of rooms.keys()) {
+    const { at, woken } = await namespace.get(namespace.idFromName(name)).wakes();
+    assert.equal(at, null, `room ${name}: no device is in it, so nothing is to wake it`);
+    assert.ok(woken <= 5, `room ${name} woke ${woken} times by itself`);
+  }
+}
+
+// The room a writer's story meets in, as the Worker names it: the session's user, and the key.
+function roomName(cookie, key) {
+  const body = cookie.slice(cookie.indexOf("=") + 1).split(".")[0];
+  return `${JSON.parse(Buffer.from(body, "base64url").toString()).u}/${key}`;
+}
+
 // A device opening story `key` live, as the writer of `cookie`: its socket, every message it was
 // sent, and a way to wait for the next of a kind.
 async function device(mf, cookie, key, id, name = "Firefox on Linux", headers = {}) {
@@ -588,6 +628,8 @@ async function device(mf, cookie, key, id, name = "Firefox on Linux", headers = 
   });
   if (r.status !== 101) return { status: r.status, said: await r.text() };
   const ws = r.webSocket;
+  const room = roomName(cookie, key);
+  opened.get(mf).set(room, [...(opened.get(mf).get(room) ?? []), ws]);
   const got = [];
   const waiting = [];
   ws.addEventListener("message", e => {
@@ -716,6 +758,21 @@ test("a writer gone for a while frees the pen; back sooner, it keeps it", async 
   assert.equal((await laptop.next("hello")).holder, "laptop0001", "a reload keeps the pen");
   laptop.ws.close();
   assert.equal((await phone.next("pen", 3000)).holder, "phone00001", "gone long enough, the pen is free");
+});
+
+test("a room everyone left sleeps until a device comes back, however long the pen was gone", async t => {
+  const mf = await start(t, { LIVE_FREE_AFTER_MS: "200" });
+  const ada = await liveWriter(mf, "1", "Ada");
+  const laptop = await device(mf, ada, "story-1", "laptop0001");
+  await laptop.next("hello");
+  laptop.ws.close();
+  await new Promise(r => setTimeout(r, 1500));
+  const rooms = await mf.getDurableObjectNamespace("ROOMS");
+  const wakes = await rooms.get(rooms.idFromName(roomName(ada, "story-1"))).wakes();
+  assert.ok(wakes.woken <= 1, `woken ${wakes.woken} times: every wake is a request, out of 100,000 a day`);
+  assert.equal(wakes.at, null, "and nothing left to wake it");
+  const phone = await device(mf, ada, "story-1", "phone00001");
+  assert.equal((await phone.next("hello")).holder, "phone00001", "the next device in has the pen");
 });
 
 test("a follower that lost its way has the writer save, and is told what to fetch", async t => {

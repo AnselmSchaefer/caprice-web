@@ -1889,6 +1889,10 @@ Plan and reasons: `LIVE_PLAN.md`.
   online included): each message in is one, pings are answered without waking it, and it writes
   almost nothing (the batch number goes with the holder's socket, the day's count twenty at a
   time). `SITE_LIVE_PER_DAY` and `ROOM_MESSAGES_PER_DAY` bound it; `LIVE_OFF = "1"` stops it.
+  **Its alarm is a request too**, and counts against neither: a room wakes only to hand the pen
+  to a device there (`settle`), never in an empty room, and never for a time already past. An
+  empty room with its holder gone once set an alarm in the past for ever, and two such rooms
+  used up the day's 100,000 in a morning.
 - **Only the writer's own devices**: the WebSocket cannot carry `X-Caprice`, so `connect` checks
   its `Origin`, then the session; the room hears who from the Worker, never from the device, and
   refuses a socket whose session has run out.
@@ -1902,7 +1906,8 @@ pen, and everyone is told", "a writer that does not answer loses the pen after t
 time", "a writer gone for a while frees the pen; back sooner, it keeps it", "a follower that lost
 its way has the writer save, and is told what to fetch", "a story's messages for the day run out,
 and too big a message is not taken", "the site's live connections for the day run out, and the
-off switch stops them". In the app:
+off switch stops them", "a room everyone left sleeps until a device comes back, however long the
+pen was gone". In the app:
 `a_story_open_on_two_devices_is_written_on_one_and_followed_live_on_the_other`,
 `a_change_that_is_no_edit_reaches_the_following_device_as_the_whole_story`,
 `a_following_device_changes_nothing_with_its_tools_notes_or_scratchpad`,

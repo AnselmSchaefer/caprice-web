@@ -149,8 +149,12 @@ export class StoryRoom extends DurableObject {
     this.set("gone", gone);
     this.set("asked", asked);
 
-    const wake = [gone !== null ? gone + this.limits.LIVE_FREE_AFTER_MS : null, asked?.until ?? null].filter(t => t !== null);
-    const at = wake.length ? Math.min(...wake) : null;
+    // Woken only to hand the pen to a device here: in an empty room the pen stays with the one gone,
+    // and the next device to come in settles it (`fetch`). Every wake is a request, out of 100,000 a
+    // day for the whole site; one due already (the pen gone long ago, no one here to take it) would
+    // wake the room again at once, for ever.
+    const wake = here.length ? [gone !== null ? gone + this.limits.LIVE_FREE_AFTER_MS : null, asked?.until ?? null].filter(t => t !== null) : [];
+    const at = wake.length ? Math.max(Math.min(...wake), now + 1000) : null;
     if (at !== await this.ctx.storage.getAlarm()) {
       if (at !== null) await this.ctx.storage.setAlarm(at);
       else await this.ctx.storage.deleteAlarm();
@@ -164,7 +168,13 @@ export class StoryRoom extends DurableObject {
   }
 
   async alarm() {
+    this.woken = (this.woken ?? 0) + 1;
     await this.settle();
+  }
+
+  // For the tests: when the room's alarm wakes it next, and how often it has since it was loaded.
+  async wakes() {
+    return { at: await this.ctx.storage.getAlarm(), woken: this.woken ?? 0 };
   }
 
   async webSocketClose(ws) {
