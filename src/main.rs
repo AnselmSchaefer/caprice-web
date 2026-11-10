@@ -4324,6 +4324,8 @@ mod tests {
                 _ => None,
             }).expect("the part is drawn")
         };
+        // The writing paused long enough for the picture to move.
+        h.wait(45.0);
         let before = (at(&h, wing), at(&h, cloud));
         h.wait(0.3);
         assert_ne!(at(&h, wing), before.0, "the wing beats");
@@ -4336,6 +4338,58 @@ mod tests {
         assert_eq!((at(&h, wing), at(&h, cloud)), still, "told to, the picture stands still");
         let other = h.reopened("still");
         assert!(!other.app.backdrop.moving, "and does so when the story opens again");
+    }
+
+    #[test]
+    fn the_picture_rests_while_writing_and_starts_moving_slowly_half_a_minute_after() {
+        let mut h = Harness::new();
+        h.type_text("Night fell over the village, and something flew over it.");
+        h.app.fake_painting(0, motion::NIGHT);
+        h.frames(2, vec![], Modifiers::NONE);
+        let parts = h.app.shown_parts();
+        let cloud = parts.iter().find(|(p, _)| *p == motion::Motion::Drift).unwrap().1;
+        let at = |h: &Harness| -> Vec<egui::Pos2> {
+            h.painted.iter().find_map(|cs| match &cs.shape {
+                egui::Shape::Mesh(m) if m.texture_id == cloud => Some(m.vertices.iter().map(|v| v.pos).collect()),
+                _ => None,
+            }).expect("the cloud is drawn")
+        };
+        // Moving at first: the story was only opened, not written in.
+        h.wait(45.0);
+        assert_eq!(h.app.backdrop.pace, 1.0);
+
+        // Writing again, it slows to a stop over five seconds, and stays still.
+        h.type_text(" A shadow.");
+        assert!(h.app.backdrop.pace > 0.9, "slowing, not stopped dead");
+        h.frames(150, vec![], Modifiers::NONE);
+        let slowing = h.app.backdrop.pace;
+        assert!(slowing > 0.3 && slowing < 0.7, "half way there: {slowing}");
+        h.frames(160, vec![], Modifiers::NONE);
+        assert_eq!(h.app.backdrop.pace, 0.0);
+        let resting = at(&h);
+        // Each wait is a second and two frames: 29 s after the edit.
+        for _ in 0..23 {
+            h.wait(1.0);
+        }
+        // Still to the eye (the view may settle by a hair after the edit).
+        let moved = |h: &Harness| at(h).iter().zip(&resting).map(|(p, q)| p.distance(*q)).fold(0.0, f32::max);
+        assert!(moved(&h) < 0.01, "still for half a minute after the last edit: {}", moved(&h));
+
+        // Then it begins again, gaining speed over ten seconds.
+        for _ in 0..2 {
+            h.wait(1.0);
+        }
+        let waking = h.app.backdrop.pace;
+        assert!(waking > 0.0 && waking < 0.2, "{waking}");
+        for _ in 0..5 {
+            h.wait(1.0);
+        }
+        assert!(moved(&h) > 0.01, "moving again");
+        assert!(h.app.backdrop.pace > waking && h.app.backdrop.pace < 1.0, "faster, not yet full speed");
+        for _ in 0..5 {
+            h.wait(1.0);
+        }
+        assert_eq!(h.app.backdrop.pace, 1.0, "full speed ten seconds on");
     }
 
     #[test]

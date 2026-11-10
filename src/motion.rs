@@ -31,14 +31,24 @@ pub const PROMPT: &str = "- The picture will move a little. Put each part that m
 const NEAR_PART: f32 = 0.04;
 /// How close two wings' shoulders are for them to be one creature's, beating together.
 const ONE_CREATURE: f32 = 0.06;
+/// How far a wing turns up or down at most in a beat, and how far up it is held gliding, as a
+/// share of that.
+const WING_TURN: f32 = 12.0;
+const GLIDE: f64 = 0.25;
+/// Seconds a stroke takes for the smallest wings and the largest; in between, by their span.
+const QUICKEST_BEAT: f64 = 0.8;
+const SLOWEST_BEAT: f64 = 3.0;
+/// Most strokes in a burst of beating, and the least seconds of gliding between bursts.
+const MOST_STROKES: f64 = 3.0;
+const LEAST_GLIDE: f64 = 15.0;
 
 /// How a part of a picture moves. Points are shares of the picture's width and height.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Motion {
     Drift,
     /// `side` is 1 for a wing reaching out to the left of its shoulder, -1 to the right; `phase`
-    /// is shared by the wings of one creature.
-    Wing { pivot: Pos2, side: f32, phase: f32 },
+    /// and `beat` (seconds a stroke) are shared by the wings of one creature.
+    Wing { pivot: Pos2, side: f32, phase: f32, beat: f32 },
     Sway { foot: Pos2 },
     Smoke,
     Flicker,
@@ -98,7 +108,9 @@ pub fn layered(svg: &str, width: f32) -> Result<Layered, String> {
         pos2(p.x / size.width(), p.y / size.height())
     };
     let (mut cut, mut layers) = (Vec::new(), Vec::new());
-    let mut shoulders: Vec<(Pos2, f32)> = Vec::new();
+    // The shoulders found, by creature; and each wing's layer, creature and span.
+    let mut shoulders: Vec<(Pos2, usize)> = Vec::new();
+    let mut wings: Vec<(usize, usize, f32)> = Vec::new();
     let moving = |n: &roxmltree::Node| n.is_element() && n.attribute("id").is_some_and(|id| id.starts_with("move-"));
     for node in xml.descendants().filter(moving) {
         // A part inside another moves with it; one in <defs> is not drawn where it stands.
@@ -121,6 +133,7 @@ pub fn layered(svg: &str, width: f32) -> Result<Layered, String> {
         // A shoulder or foot is on its part's edge, or near it.
         let margin = vec2(NEAR_PART, NEAR_PART * size.width() / size.height());
         let near = |p: Pos2| at.expand2(margin).contains(p);
+        let mut wing = None;
         let motion = match (kind, point) {
             ("drift", _) => Motion::Drift,
             ("flicker", _) => Motion::Flicker,
@@ -128,10 +141,11 @@ pub fn layered(svg: &str, width: f32) -> Result<Layered, String> {
             ("sway", Some(foot)) if near(foot) => Motion::Sway { foot },
             ("wing", Some(pivot)) if near(pivot) => {
                 let side = if at.center().x < pivot.x { 1.0 } else { -1.0 };
-                let close = |&&(s, _): &&(Pos2, f32)| (s.x - pivot.x).hypot((s.y - pivot.y) * size.height() / size.width()) < ONE_CREATURE;
-                let phase = shoulders.iter().find(close).map_or(shoulders.len() as f32 * 0.37 % 1.0, |&(_, ph)| ph);
-                shoulders.push((pivot, phase));
-                Motion::Wing { pivot, side, phase }
+                let close = |&&(s, _): &&(Pos2, usize)| (s.x - pivot.x).hypot((s.y - pivot.y) * size.height() / size.width()) < ONE_CREATURE;
+                let creature = shoulders.iter().find(close).map_or(shoulders.len(), |&(_, c)| c);
+                shoulders.push((pivot, creature));
+                wing = Some((creature, at.width().hypot(at.height() * size.height() / size.width())));
+                Motion::Wing { pivot, side, phase: creature as f32 * 0.37 % 1.0, beat: 0.0 }
             }
             _ => continue,
         };
@@ -151,7 +165,18 @@ pub fn layered(svg: &str, width: f32) -> Result<Layered, String> {
         let image = ColorImage::from_rgba_premultiplied([pixmap.width() as usize, pixmap.height() as usize], pixmap.data());
         let at = Rect::from_min_max(pos2(x0 / w as f32, y0 / h as f32), pos2(x1 / w as f32, y1 / h as f32));
         layers.push(Layer { motion, seed, at, image: Some(image) });
+        if let Some((creature, span)) = wing {
+            wings.push((layers.len() - 1, creature, span));
+        }
         cut.push(node.range());
+    }
+    // A creature beats as slowly as its largest wing: a dragon's stroke takes seconds, a sparrow's
+    // under one.
+    for &(l, creature, _) in &wings {
+        let span = wings.iter().filter(|w| w.1 == creature).map(|w| w.2).fold(0.0, f32::max) as f64;
+        if let Motion::Wing { beat, .. } = &mut layers[l].motion {
+            *beat = (QUICKEST_BEAT + 8.0 * span).min(SLOWEST_BEAT) as f32;
+        }
     }
     // The still picture is the drawing without the parts that move.
     let mut still = svg.to_owned();
@@ -201,11 +226,25 @@ impl Pose {
     }
 }
 
-/// A wing's beat at `t` beats: 1 up, -1 down, quickly down and slowly up again.
-fn wingbeat(t: f64) -> f32 {
-    let ph = t.rem_euclid(1.0) as f32;
-    let a = if ph < 0.4 { 1.0 - 2.0 * ph / 0.4 } else { -1.0 + 2.0 * (ph - 0.4) / 0.6 };
-    a.signum() * a.abs().powf(0.8)
+/// How far up a wing is at `t` seconds (1 a full stroke up, -1 down), for a creature with `phase`
+/// taking `beat` seconds a stroke; and how much it is beating rather than gliding, from 0 to 1.
+/// Like a large bird it mostly glides, wings held a little up and shifting slowly, and now and
+/// then beats two or three strokes, easing in and out of them: steady beating, and turning
+/// sharply at the top and bottom, would draw the eye away from the writing. The bursts come at
+/// uneven times, each creature on its own.
+fn wing_lift(t: f64, beat: f64, phase: f64) -> (f64, f64) {
+    let burst = MOST_STROKES * beat;
+    let cycle = burst + LEAST_GLIDE + 10.0 * phase;
+    let t_cycle = t + phase * cycle;
+    let k = (t_cycle / cycle).floor();
+    let random = |x: f64| ((x * 12.9898 + phase * 78.233).sin() * 43758.5453).rem_euclid(1.0);
+    let strokes = if random(k) < 0.5 { 2.0 } else { 3.0 };
+    let u = (t_cycle - k * cycle - random(k + 0.5) * (cycle - burst)) / beat;
+    let ease = |x: f64| { let x = x.clamp(0.0, 1.0); x * x * (3.0 - 2.0 * x) };
+    let beating = if (0.0..strokes).contains(&u) { ease(u.min(strokes - u) / 0.5) } else { 0.0 };
+    let soaring = 0.1 * (TAU * t / 7.0 + TAU * phase).sin();
+    // Down first, from the glide.
+    (GLIDE + soaring - beating * (TAU * u).sin(), beating)
 }
 
 /// Where `motion` has a part at `t` seconds on a page `size` large, its points in page units.
@@ -216,9 +255,11 @@ fn pose(motion: Motion, seed: f32, t: f64, page: Rect) -> Pose {
     match motion {
         // Clouds take over a minute to go and come back, a few points either way.
         Motion::Drift => Pose { shift: vec2(0.03 * w * wave(70.0 + 11.0 * (seed % 4.0), seed), 0.0), ..Pose::STILL },
-        Motion::Wing { pivot, side, phase } => {
-            let a = wingbeat(t + phase as f64);
-            Pose { pivot: at(pivot), angle: side * 22f32.to_radians() * a, squash: 1.0 - 0.15 * (1.0 - a.abs()), ..Pose::STILL }
+        Motion::Wing { pivot, side, phase, beat } => {
+            let (lift, beating) = wing_lift(t, beat as f64, phase as f64);
+            // Seen edge on in the middle of a stroke, the wing is a little shorter.
+            let squash = 1.0 - 0.1 * beating * (1.0 - (lift - GLIDE).abs().min(1.0));
+            Pose { pivot: at(pivot), angle: side * WING_TURN.to_radians() * lift as f32, squash: squash as f32, ..Pose::STILL }
         }
         Motion::Sway { foot } => Pose { pivot: at(foot), angle: 1.2f32.to_radians() * wave(5.0 + seed % 3.0, seed), ..Pose::STILL },
         Motion::Flicker => Pose { alpha: 0.75 + 0.25 * ((t * 7.0 + seed * 1.7).sin() * (t * 3.1 + seed).sin()) as f32, ..Pose::STILL },
@@ -367,10 +408,34 @@ mod tests {
         assert_eq!(wings[0].1, wings[1].1, "the same beat");
         // Up, the left wing's tip is higher than drawn.
         let page = Rect::from_min_size(Pos2::ZERO, vec2(600.0, 800.0));
-        let Motion::Wing { pivot, side, phase } = picture.layers[1].motion else { unreachable!() };
-        let up = (0..100).map(|k| k as f64 / 100.0).find(|&t| wingbeat(t + phase as f64) > 0.99).unwrap();
-        let tip = pose(Motion::Wing { pivot, side, phase }, 1.0, up, page).apply(pos2(200.0, 150.0));
-        assert!(tip.y < 150.0 - 30.0, "{tip:?}");
+        let Motion::Wing { beat, phase, .. } = picture.layers[1].motion else { unreachable!() };
+        let up = (0..6000).map(|k| k as f64 / 100.0).find(|&t| wing_lift(t, beat as f64, phase as f64).0 > 1.0).unwrap();
+        let tip = pose(picture.layers[1].motion, 1.0, up, page).apply(pos2(200.0, 150.0));
+        assert!(tip.y < 150.0 - 12.0, "{tip:?}");
+    }
+
+    #[test]
+    fn large_wings_beat_slowly_now_and_then_and_mostly_glide() {
+        // A sparrow and a dragon.
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 800">
+            <g id="move-wing-1-100-100"><path d="M100,100 L85,92 L90,104Z"/></g>
+            <g id="move-wing-2-300-400"><path d="M300,400 L60,250 L120,430Z"/></g>
+        </svg>"##;
+        let picture = layered(svg, 600.0).unwrap();
+        let page = Rect::from_min_size(Pos2::ZERO, vec2(600.0, 800.0));
+        let beats: Vec<f32> = picture.layers.iter().map(|l| match l.motion { Motion::Wing { beat, .. } => beat, _ => 0.0 }).collect();
+        assert!(beats[0] < 1.2 && beats[1] >= 2.5, "{beats:?}");
+        for layer in &picture.layers {
+            let Motion::Wing { beat, phase, .. } = layer.motion else { unreachable!() };
+            let angle = |t: f64| pose(layer.motion, 1.0, t, page).angle.to_degrees();
+            let frames: Vec<f64> = (0..120 * 60).map(|k| k as f64 / 60.0).collect();
+            let beating = frames.iter().filter(|&&t| wing_lift(t, beat as f64, phase as f64).1 > 0.0).count();
+            assert!(beating > 0, "it beats now and then");
+            assert!(beating * 10 < frames.len() * 4, "but glides most of the time: {beating} of {}", frames.len());
+            let fastest = frames.windows(2).map(|w| (angle(w[1]) - angle(w[0])).abs() * 60.0).fold(0.0, f32::max);
+            let most = if beat >= 2.5 { 35.0 } else { 120.0 };
+            assert!(fastest < most, "a wing of {beat} s a stroke turns gently, at most {fastest}° a second");
+        }
     }
 
     #[test]

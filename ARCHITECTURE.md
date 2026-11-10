@@ -498,16 +498,25 @@ is; callers that paint for a paragraph pass `para_start` themselves.
   textures, through the same `map` as the picture, so they turn with the page. What does not fit:
   an unknown kind, a wing or sway whose point is far from its part (`NEAR_PART`), a part usvg
   cannot find, stays in the still picture; a mistake costs movement, never the picture. The
-  wings of one creature (shoulders within `ONE_CREATURE`) beat together. Only full-size drawings
+  wings of one creature (shoulders within `ONE_CREATURE`) beat together, as slowly as its largest
+  wing's span says (`beat`, from `QUICKEST_BEAT` to `SLOWEST_BEAT`), and mostly glide: a burst of
+  two or three smooth strokes at uneven times (`wing_lift`), never a steady beat or a sharp turn,
+  which pull the eye from the text. Only full-size drawings
   are layered: the list's small pictures, Save picture and the cast's sheets are whole, still.
-  A moving picture on the page shown asks for a frame every `MOVE_FRAME` (not while minimized);
-  nothing else does. "Pictures move" in the Scene menu (`Backdrop::moving`, kept as
+  The pictures rest while the writer writes (`App::pace_scenes`): parts move by
+  `Backdrop::clock`, which runs at `Backdrop::pace`; an edit (`Doc::version` changing, not opening
+  the story) slows it to 0 within `SETTLE`, and `CALM` seconds after the last edit it gains speed
+  again over `WAKE`. Anything new that moves on a scene moves by that clock, never by `ctx` time.
+  A moving picture on the page shown asks for a frame every `MOVE_FRAME` (not while minimized),
+  and at rest only one for when the calm ends; nothing else does. "Pictures move" in the Scene menu (`Backdrop::moving`, kept as
   `SceneFile::still`) stops them, parts drawn where painted and no smoke. A change to what is
   marked goes in `PROMPT`, `parse_id` and `pose` together. Scenes are not printed, so print needs
   nothing. Tests: `the_parts_that_move_are_taken_out_of_the_still_picture`,
   `a_creatures_wings_beat_together_each_upward_on_its_own_side`,
+  `large_wings_beat_slowly_now_and_then_and_mostly_glide`,
   `a_picture_with_nothing_marked_is_all_still`,
-  `the_picture_on_the_page_shown_beats_its_wings_and_drifts_its_clouds_until_told_to_stand_still`.
+  `the_picture_on_the_page_shown_beats_its_wings_and_drifts_its_clouds_until_told_to_stand_still`,
+  `the_picture_rests_while_writing_and_starts_moving_slowly_half_a_minute_after`.
 - Moving, hiding, deleting and stepping versions change `Doc::scenes` directly: like page
   settings, they are not undoable (R1) and do not paginate.
 - Tests: `the_picture_follows_the_caret_from_one_part_of_the_story_to_the_next`,
@@ -2332,5 +2341,8 @@ result sent back, a stand-in answer in `api.test.mjs` and in `cloud::stand_in` (
   movement are few and fixed, and people and animals on the ground stay still, since walking cut
   out of a painting looks like a puppet. Tried first on a dragon over a village and two people on
   a bridge: Claude marked wings, chimneys, clouds and lights well, and left the people alone (R14).
+  Then: a dragon's wings beating once a second, without end, were too distracting to write by.
+  So wings beat by their size, mostly glide and turn smoothly, and the whole picture rests while
+  the writer writes, starting again slowly half a minute after the last edit.
 - **No `.docx` import.** Export only.
 - **Contents heading is "Contents"** (English), in the app and in Word.

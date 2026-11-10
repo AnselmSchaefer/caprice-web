@@ -44,6 +44,11 @@ const NEAR: usize = 2;
 const KEEP: usize = 6;
 /// Seconds between frames while the scene on the page shown moves.
 const MOVE_FRAME: f64 = 0.05;
+/// While the writer writes, the pictures come to rest within `SETTLE` seconds; `CALM` seconds after
+/// the last edit they begin to move again, reaching full speed `WAKE` seconds later.
+const SETTLE: f64 = 5.0;
+const CALM: f64 = 30.0;
+const WAKE: f64 = 10.0;
 
 /// The model that paints the scenes.
 pub const MODEL: &str = "claude-opus-5-5";
@@ -148,6 +153,14 @@ pub struct Backdrop {
     pub visible: bool,
     /// Their parts that can move do.
     pub moving: bool,
+    /// How fast they move now, from 0 (at rest, while writing) to 1; the seconds they have moved
+    /// for at that pace, which is the clock they move by; and when the clock last went on.
+    pub pace: f32,
+    clock: f64,
+    ticked: Option<f64>,
+    /// The document version last seen and when it changed, for resting while writing.
+    written: Option<u64>,
+    written_at: f64,
     /// What the writer wants to see.
     pub description: String,
     /// Drawings rendered: full size behind the pages, small in the list.
@@ -190,6 +203,11 @@ impl Default for Backdrop {
             mode: Mode::Described,
             visible: true,
             moving: true,
+            pace: 1.0,
+            clock: 0.0,
+            ticked: None,
+            written: None,
+            written_at: f64::NEG_INFINITY,
             description: String::new(),
             textures: HashMap::new(),
             thumbs: HashMap::new(),
@@ -777,6 +795,28 @@ impl App {
         }
     }
 
+    /// Move the scenes' clock on, at a pace that lets the pictures rest while the writer writes:
+    /// movement at the edge of sight pulls the eye from the text. An edit slows them to a stop
+    /// within `SETTLE`, without a jump; after `CALM` with no edit they speed up again, gently,
+    /// over `WAKE`. Opening the story is not writing in it. A long gap between frames (the page
+    /// hidden) does not leap the pictures on.
+    fn pace_scenes(&mut self, now: f64) {
+        let version = self.doc.version;
+        let b = &mut self.backdrop;
+        if b.written != Some(version) {
+            if b.written.is_some() {
+                b.written_at = now;
+            }
+            b.written = Some(version);
+        }
+        let dt = b.ticked.map_or(0.0, |t| (now - t).clamp(0.0, 0.25));
+        b.ticked = Some(now);
+        let x = ((now - b.written_at - CALM) / WAKE).clamp(0.0, 1.0);
+        let wanted = (x * x * (3.0 - 2.0 * x)) as f32;
+        b.pace = if wanted < b.pace { (b.pace - (dt / SETTLE) as f32).max(wanted) } else { wanted };
+        b.clock += dt * b.pace as f64;
+    }
+
     /// Set where new scenes come from.
     pub fn set_scene_mode(&mut self, mode: Mode) {
         let b = &mut self.backdrop;
@@ -795,6 +835,7 @@ impl App {
     pub fn update_backdrop(&mut self, ctx: &egui::Context) {
         self.recover_paintings(ctx);
         let now = ctx.input(|i| i.time);
+        self.pace_scenes(now);
         if self.backdrop.mode == Mode::Writing {
             self.follow_writing(ctx, now);
         }
@@ -860,7 +901,9 @@ impl App {
         let shown = b.on_target.and_then(|t| t.1).into_iter().chain(b.fade.and_then(|f| f.0));
         let moves = b.visible && b.moving && shown.filter_map(|k| b.textures.get(&k)).any(Drawn::moves);
         if moves && !ctx.input(|i| i.viewport().minimized.unwrap_or(false)) {
-            ctx.request_repaint_after(std::time::Duration::from_secs_f64(MOVE_FRAME));
+            // At rest, nothing changes until the writing has paused long enough.
+            let wait = if b.pace > 0.0 { MOVE_FRAME } else { (b.written_at + CALM - now).max(MOVE_FRAME) };
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
         }
 
         // Only the drawings near the page shown, and the ones fading, stay rendered.
@@ -1378,7 +1421,7 @@ impl App {
             Color32::from_rgb(v, v, v).gamma_multiply(a * alpha * OPACITY)
         };
         let now = ctx.input(|inp| inp.time);
-        let time = b.moving.then_some(now);
+        let time = b.moving.then_some(b.clock);
         let shapes = |key: Option<DrawingKey>, a: f32| key.and_then(|k| b.textures.get(&k)).map(|d| d.shapes(rect, tint(a), map, time)).unwrap_or_default();
         match b.on_target {
             Some((page, shown)) if page == i => {
