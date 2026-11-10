@@ -920,11 +920,17 @@ pub mod stand_in {
         pub went_to: Vec<String>,
         /// An answer to give every story request instead: its status, Retry-After, and what it says.
         pub refuse: Option<(u16, u32, String)>,
-        /// The stories' rooms, as `web/api/room.js` keeps them (R34).
+        /// The stories' rooms, as `web/api/room.js` keeps them (R34), and whether they can be
+        /// reached (no: a socket closes as soon as it opens, as with no network).
         pub rooms: Rooms,
+        pub unreachable: bool,
         /// Scenes painted, of the day's 50, and an answer to give instead of a painting.
         pub painted: u32,
         pub no_painting: Option<(u16, String)>,
+        /// Pictures kept until the app has them: id, story, char, picture. With `lose_answers`,
+        /// a painting is kept but its answer never reaches the app, as if the page had gone.
+        pub kept: Vec<(String, String, usize, String)>,
+        pub lose_answers: bool,
         versions: u32,
     }
 
@@ -963,7 +969,21 @@ pub mod stand_in {
                 }
                 o.painted += 1;
                 let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 3"><rect width="4" height="3" fill="#a52"/></svg>"##;
+                if let (Some(id), Some(story), Some(at)) = (header("X-Caprice-Painting"), header("X-Caprice-Story"), header("X-Caprice-At").and_then(|a| a.parse().ok())) {
+                    o.kept.push((id, story, at, svg.into()));
+                }
+                if o.lose_answers {
+                    return Answer::default();
+                }
                 return Answer { status: 200, headers: vec![("X-Caprice-Scenes-Left".into(), (50 - o.painted).to_string())], body: svg.into() };
+            }
+            if let Some(story) = r.path.strip_prefix("/api/scenes?story=") {
+                let waiting: Vec<_> = o.kept.iter().filter(|k| k.1 == story).map(|k| serde_json::json!({ "id": k.0, "at": k.2, "svg": k.3 })).collect();
+                return json(serde_json::json!(waiting));
+            }
+            if let Some(id) = r.path.strip_prefix("/api/scenes/") {
+                o.kept.retain(|k| k.0 != id);
+                return status(204);
             }
             if let Some((code, retry, said)) = &o.refuse {
                 return Answer { status: *code, headers: vec![("Retry-After".into(), retry.to_string())], body: said.clone().into_bytes() };
@@ -1018,7 +1038,29 @@ pub mod stand_in {
 
         fn live(&self, path: &str, _wake: Waker) -> Box<dyn LiveSocket> {
             let rooms = self.0.borrow().rooms.clone();
+            if self.0.borrow().unreachable {
+                let heard = Rc::new(RefCell::new(vec![Heard::Closed(1006)]));
+                return Box::new(Device { rooms, key: String::new(), id: String::new(), heard });
+            }
             Box::new(Device::join(rooms, path))
+        }
+    }
+
+    impl StandIn {
+        /// The connection of `device` drops (a tab in the background, a phone asleep). With
+        /// `free`, the pen it held passes on, as after `LIVE_FREE_AFTER_MS`; without, it waits.
+        pub fn cut_off(&self, device: &str, free: bool) {
+            let rooms = self.0.borrow().rooms.clone();
+            let mut all = rooms.borrow_mut();
+            for room in all.values_mut() {
+                let Some(i) = room.devices.iter().position(|(d, ..)| d == device) else { continue };
+                room.devices.remove(i).2.borrow_mut().push(Heard::Closed(1006));
+                if free && room.pen.as_ref().is_some_and(|(d, _)| d == device)
+                    && let Some((d, n, _)) = room.devices.first().cloned()
+                {
+                    room.pen_to(d, n);
+                }
+            }
         }
     }
 
@@ -1139,8 +1181,9 @@ pub mod stand_in {
         fn drop(&mut self) {
             let mut all = self.rooms.borrow_mut();
             let Some(room) = all.get_mut(&self.key) else { return };
+            let was_here = room.devices.iter().any(|(d, ..)| *d == self.id);
             room.devices.retain(|(d, ..)| *d != self.id);
-            if room.pen.as_ref().is_some_and(|(d, _)| *d == self.id) {
+            if was_here && room.pen.as_ref().is_some_and(|(d, _)| *d == self.id) {
                 room.pen = None;
                 if let Some((d, n, _)) = room.devices.first().cloned() {
                     room.pen_to(d, n);

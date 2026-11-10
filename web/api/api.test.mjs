@@ -738,3 +738,37 @@ test("the site's live connections for the day run out, and the off switch stops 
   const off = await start(t, { LIVE_OFF: "1" });
   assert.equal((await device(off, await liveWriter(off, "1", "Ada"), "story-1", "laptop0001")).status, 503);
 });
+
+const paintFor = (api, id, story = "story-1", at = 12) =>
+  api("/api/scene", { method: "POST", body: "<scene>\nA lighthouse\n</scene>", headers: { "X-Caprice-Painting": id, "X-Caprice-Story": story, "X-Caprice-At": String(at) } });
+
+test("a picture painted waits for the app until it has it, and only for its writer", async t => {
+  const mf = await start(t);
+  const ada = await writer(mf, "1", "Ada");
+  const eve = await writer(mf, "2", "Eve");
+  assert.equal((await paintFor(ada, "paint0001")).status, 200);
+  await paintFor(ada, "paint0002", "story-2", 40);
+  // The page went before the answer came: opening the story again, it is there.
+  const waiting = await (await ada("/api/scenes?story=story-1")).json();
+  assert.deepEqual(waiting.map(p => [p.id, p.at]), [["paint0001", 12]]);
+  assert.ok(waiting[0].svg.startsWith("<svg") && waiting[0].svg.includes("Made with AI"), "the picture as it was sent");
+  assert.deepEqual(await (await eve("/api/scenes?story=story-1")).json(), [], "no one else's");
+  assert.equal((await ada("/api/scenes?story=../x")).status, 400);
+  // The app has it: it waits no longer.
+  assert.equal((await ada("/api/scenes/paint0001", { method: "DELETE" })).status, 204);
+  assert.deepEqual(await (await ada("/api/scenes?story=story-1")).json(), []);
+  assert.equal((await (await ada("/api/scenes?story=story-2")).json()).length, 1, "another story's still waits");
+  // Without saying where it goes, a picture is not kept.
+  await ada("/api/scene", { method: "POST", body: "<scene>x</scene>" });
+  assert.equal((await (await ada("/api/scenes?story=story-1")).json()).length, 0);
+});
+
+test("pictures waiting are few for each writer, and go with the stories online", async t => {
+  const mf = await start(t, { PAINTED_PER_USER: "2" });
+  const ada = await writer(mf, "1", "Ada");
+  for (const id of ["paint0001", "paint0002", "paint0003"]) await paintFor(ada, id);
+  const waiting = await (await ada("/api/scenes?story=story-1")).json();
+  assert.deepEqual(waiting.map(p => p.id), ["paint0002", "paint0003"], "the oldest went first");
+  assert.equal((await ada("/api/stories", { method: "DELETE" })).status, 204);
+  assert.deepEqual(await (await ada("/api/scenes?story=story-1")).json(), [], "deleting the stories online deletes them too");
+});

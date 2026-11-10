@@ -619,6 +619,7 @@ impl App {
         self.page_hidden(platform::page_hidden());
         platform::warn_on_leaving(self.keep.has_changes());
         self.tend_cloud();
+        self.live_hidden();
     }
 
     /// One frame of the whole app (separate from `eframe::App::ui` so tests can drive it).
@@ -7665,6 +7666,7 @@ mod tests {
         assert!(server.0.borrow().asked.contains(&"POST /api/scene".to_owned()), "{:?}", server.0.borrow().asked);
         let scene = h.app.doc.scenes.iter().find(|s| !s.versions.is_empty()).expect("a scene is painted");
         assert!(scene.versions[0].contains("#a52"), "with the server's picture");
+        assert!(server.0.borrow().kept.is_empty(), "come and kept, the server's copy goes");
         assert!(h.app.backdrop.asked().contains("A lighthouse at dusk"));
         h.click_widget("Scene");
         assert!(h.labels().contains("49 scenes left today"), "the menu says how many are left");
@@ -7694,6 +7696,47 @@ mod tests {
         h.later(cloud::UP_AFTER + 1.0);
         let online = stories_online(&server);
         assert!(online.iter().any(|(_, file)| file.matches("#a52").count() == 2), "and online soon after");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_scene_painted_while_the_page_went_comes_back_when_the_story_opens_again() {
+        let mut h = Harness::new();
+        h.app.claude = false;
+        let dir = with_shelf(&mut h, "online-scene-back");
+        let server = online(&mut h, &dir, true);
+        h.app.keep.autosave = true;
+        h.frames(12, vec![], Modifiers::NONE);
+        h.type_text("The lighthouse stood alone.");
+        h.save_on_shelf();
+        let path = h.app.path.clone().unwrap();
+        // Painted, but the page went before the answer came (here: it never comes).
+        server.0.borrow_mut().lose_answers = true;
+        describe_scene(&mut h, "A lighthouse at dusk");
+        assert!(h.app.doc.scenes.iter().all(|s| s.versions.is_empty()), "nothing came");
+        assert_eq!(server.0.borrow().kept.len(), 1, "but the server kept it");
+
+        // The page again, the story opened: the picture is back, pinned where it was asked for.
+        server.0.borrow_mut().lose_answers = false;
+        drop(h);
+        let mut back = Harness::new();
+        back.app.claude = false;
+        back.app.shelf.dir = Some(dir.clone());
+        back.app.keep.autosave = true;
+        back.app.cloud = cloud::Cloud::with(Some(server.clone()), Some(dir.join("cloud.json")));
+        back.app.cloud.clock = Some(2000.0);
+        back.frames(6, vec![], Modifiers::NONE);
+        let ctx = back.ctx.clone();
+        back.app.open_path(&ctx, path.clone());
+        back.frames(6, vec![], Modifiers::NONE);
+        let scene = back.app.doc.scenes.iter().find(|s| !s.versions.is_empty()).expect("the scene is back");
+        assert!(scene.versions[0].contains("#a52") && scene.at == 0);
+        assert!(std::fs::read_to_string(&path).unwrap().contains("#a52"), "saved at once");
+        assert!(server.0.borrow().kept.is_empty(), "and the server need keep it no longer");
+        // Opened once more, it is not added twice.
+        back.app.open_path(&ctx, path.clone());
+        back.frames(6, vec![], Modifiers::NONE);
+        assert_eq!(back.app.doc.scenes.iter().map(|s| s.versions.len()).sum::<usize>(), 1);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -7969,6 +8012,63 @@ mod tests {
         }
         assert_eq!(phone.app.live_hash(), laptop.app.live_hash(), "the writer's story again");
         assert!(!phone.app.doc.scratchpad.contains("slipped past"));
+        for d in dirs {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+
+    #[test]
+    fn a_following_device_out_of_reach_for_a_moment_stays_locked_and_follows_again() {
+        let (mut laptop, mut phone, server, dirs) = laptop_and_phone("live-lost");
+        side_by_side(&mut laptop, &mut phone, 6);
+        // The phone's connection drops (its screen went off): it does not unlock.
+        server.cut_off(&phone.app.live.device, false);
+        server.0.borrow_mut().unreachable = true;
+        phone.frames(3, vec![], Modifiers::NONE);
+        assert!(!phone.app.can_edit(), "still locked while it cannot reach the room");
+        assert!(phone.labels().contains("Connecting again"), "and says so");
+        phone.type_text("Lost words");
+        assert_eq!(phone.text(), "Once upon a time.", "nothing typed there");
+        // Back in reach, it follows again, and the laptop's writing reaches it.
+        server.0.borrow_mut().unreachable = false;
+        phone.wait(6.0);
+        side_by_side(&mut laptop, &mut phone, 6);
+        assert!(!phone.app.can_edit() && !phone.labels().contains("Connecting again"));
+        laptop.type_text(" Later.");
+        laptop.wait(live::BATCH_EVERY + 0.1);
+        side_by_side(&mut laptop, &mut phone, 6);
+        assert_eq!(phone.text(), "Once upon a time. Later.");
+        for d in dirs {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+
+    #[test]
+    fn words_written_where_the_pen_was_lost_are_kept_beside_the_story() {
+        let (mut laptop, mut phone, server, dirs) = laptop_and_phone("live-kept");
+        side_by_side(&mut laptop, &mut phone, 6);
+        // The laptop drops out long enough for the pen to pass to the phone, and writes on meanwhile.
+        server.0.borrow_mut().unreachable = true;
+        server.cut_off(&laptop.app.live.device, true);
+        side_by_side(&mut laptop, &mut phone, 6);
+        assert!(laptop.app.can_edit(), "the laptop wrote here, so it still may");
+        laptop.key(Key::End, Modifiers::COMMAND);
+        laptop.type_text(" Written on the train.");
+        assert!(phone.app.can_edit(), "the phone has the pen");
+        phone.key(Key::End, Modifiers::COMMAND);
+        phone.type_text(" Written at home.");
+        phone.wait(live::BATCH_EVERY + 0.1);
+        // Back in reach: the laptop keeps its own words beside the story, then follows the phone.
+        server.0.borrow_mut().unreachable = false;
+        laptop.wait(6.0);
+        for _ in 0..4 {
+            side_by_side(&mut laptop, &mut phone, 3);
+            phone.later(1.0);
+        }
+        assert!(!laptop.app.can_edit(), "the laptop follows now");
+        let copy = dirs[0].join("Once upon a time (written here).caprice");
+        assert!(std::fs::read_to_string(&copy).is_ok_and(|f| f.contains("Written on the train.")), "its words are kept: {}", laptop.app.shown_status);
+        assert!(laptop.text().contains("Written at home.") && !laptop.text().contains("train"), "and it shows the phone's story: {}", laptop.text());
         for d in dirs {
             let _ = std::fs::remove_dir_all(d);
         }

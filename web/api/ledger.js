@@ -32,6 +32,10 @@ const DEFAULTS = {
   SCENE_TOKENS: 32_000,
   // How many days the scenes painted, by hashed id, are kept for /api/admin/scenes.
   SCENE_DAYS: 30,
+  // A picture painted is kept until the app has it (a reload, another story opened meanwhile):
+  // this many hours at most, and this many for each writer.
+  PAINTED_HOURS: 48,
+  PAINTED_PER_USER: 20,
   // A story live on several devices (room.js): connections a day for the site, messages a day
   // for one story, the most one message holds, how long a device holding the pen may be gone
   // before another has it, and how long the holder has to hand it over.
@@ -82,6 +86,8 @@ export class Ledger extends DurableObject {
       CREATE TABLE IF NOT EXISTS recent (user TEXT, at INTEGER);
       CREATE TABLE IF NOT EXISTS painting (user TEXT PRIMARY KEY, until INTEGER);
       CREATE TABLE IF NOT EXISTS scene_days (day TEXT, user TEXT, n INTEGER NOT NULL, PRIMARY KEY (day, user));
+      CREATE TABLE IF NOT EXISTS painted (user TEXT, id TEXT, story TEXT, at INTEGER, svg TEXT, made INTEGER,
+        PRIMARY KEY (user, id));
     `);
   }
 
@@ -252,6 +258,31 @@ export class Ledger extends DurableObject {
     return { ok: true, limit: this.limits.SITE_SCENES_PER_DAY, days };
   }
 
+  // A picture Claude finished, kept until the app that asked for it has it: paid for, it must
+  // not be lost to a reload or another story opened meanwhile. Only where it goes is kept (the
+  // story's id, the char its scene is pinned to), nothing of the story's text. Oldest go first.
+  keepPainted(user, id, story, at, svg, now = Date.now()) {
+    if (!this.known(user)) return { error: 401, message: "Not signed in" };
+    this.sql.exec("DELETE FROM painted WHERE made <= ?", now - this.limits.PAINTED_HOURS * HOUR);
+    this.sql.exec("INSERT OR REPLACE INTO painted VALUES (?, ?, ?, ?, ?, ?)", user, id, story, at, svg, now);
+    const over = this.rows("SELECT id FROM painted WHERE user = ? ORDER BY made DESC LIMIT -1 OFFSET ?", user, this.limits.PAINTED_PER_USER);
+    for (const o of over) this.sql.exec("DELETE FROM painted WHERE user = ? AND id = ?", user, o.id);
+    return { ok: true };
+  }
+
+  // The pictures waiting for a story of this writer's.
+  paintedFor(user, story, now = Date.now()) {
+    if (!this.known(user)) return { error: 401, message: "Not signed in" };
+    this.sql.exec("DELETE FROM painted WHERE made <= ?", now - this.limits.PAINTED_HOURS * HOUR);
+    return { ok: true, painted: this.rows("SELECT id, at, svg FROM painted WHERE user = ? AND story = ? ORDER BY made", user, story) };
+  }
+
+  // The app has the picture: it is in the story, and saved.
+  forgetPainted(user, id) {
+    this.sql.exec("DELETE FROM painted WHERE user = ? AND id = ?", user, id);
+    return { ok: true };
+  }
+
   // A device opening a story live (room.js): counted against the site's connections for the day.
   goLive(user, now = Date.now()) {
     if (!this.known(user)) return { error: 401, message: "Not signed in" };
@@ -282,7 +313,7 @@ export class Ledger extends DurableObject {
     if (!this.known(user)) return { error: 401, message: "Not signed in" };
     const gone = this.rows("SELECT id, version FROM versions WHERE user = ?", user);
     // Who painted how many goes too; the day's total for the site stays, so it is no way round the limit.
-    for (const table of ["versions", "stories", "pending", "scene_days"]) this.sql.exec(`DELETE FROM ${table} WHERE user = ?`, user);
+    for (const table of ["versions", "stories", "pending", "scene_days", "painted"]) this.sql.exec(`DELETE FROM ${table} WHERE user = ?`, user);
     return { ok: true, drop: gone.map(v => key(user, v.id, v.version)) };
   }
 }

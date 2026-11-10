@@ -67,6 +67,9 @@ struct Job {
     /// Painted by Caprice's server: its answer, still to come, and where the picture goes once
     /// it is rendered.
     online: Option<(Receiver<Answer>, Easel)>,
+    /// The name Caprice's server knows the painting by, to say once it is in the story that it
+    /// need wait there no longer.
+    online_id: Option<String>,
 }
 
 impl Drop for Job {
@@ -156,6 +159,9 @@ pub struct Backdrop {
     asked: String,
     /// How many scenes Caprice's server can still paint today, as it last said.
     pub left: Option<u32>,
+    /// The story the pictures waiting on Caprice's server were last asked for, and the asking.
+    recovered: Option<String>,
+    recovering: Option<Receiver<Answer>>,
     /// Put the keyboard on the description when the dialog opens.
     focus_field: bool,
     /// Following the writing: the document version last seen and when it changed (only edits
@@ -187,6 +193,8 @@ impl Default for Backdrop {
             job: None,
             asked: String::new(),
             left: None,
+            recovered: None,
+            recovering: None,
             focus_field: false,
             seen: None,
             edited_at: 0.0,
@@ -451,10 +459,19 @@ impl App {
             && let Some(server) = self.cloud.server.clone()
         {
             let (answer_tx, answer_rx) = channel();
+            // Named, and said which story and char it is for: should the page go before it comes
+            // (a reload, another story opened), the server keeps it until the story opens again.
+            let painting = crate::versions::new_id();
             if let Some(job) = &mut self.backdrop.job {
                 job.online = Some((answer_rx, tx));
+                job.online_id = Some(painting.clone());
             }
-            let headers = vec![("Content-Type", "text/plain; charset=utf-8".to_owned())];
+            let headers = vec![
+                ("Content-Type", "text/plain; charset=utf-8".to_owned()),
+                ("X-Caprice-Painting", painting),
+                ("X-Caprice-Story", self.story_id.clone()),
+                ("X-Caprice-At", at.to_string()),
+            ];
             server.send(Request { method: "POST", path: "/api/scene".into(), headers, body: Some(prompt.into_bytes()) }, answer_tx, wake);
             return;
         }
@@ -499,7 +516,7 @@ impl App {
         };
         let (tx, rx) = channel();
         let cancel = Arc::new(AtomicBool::new(false));
-        self.backdrop.job = Some(Job { rx, cancel: cancel.clone(), scene: id, people: Vec::new(), online: None });
+        self.backdrop.job = Some(Job { rx, cancel: cancel.clone(), scene: id, people: Vec::new(), online: None, online_id: None });
         (tx, cancel)
     }
 
@@ -774,6 +791,7 @@ impl App {
     /// Take in finished paintings and renderings, keep the drawings near the page shown rendered,
     /// and fade between drawings on the page shown.
     pub fn update_backdrop(&mut self, ctx: &egui::Context) {
+        self.recover_paintings(ctx);
         let now = ctx.input(|i| i.time);
         if self.backdrop.mode == Mode::Writing {
             self.follow_writing(ctx, now);
@@ -891,7 +909,12 @@ impl App {
         match job.rx.try_recv() {
             Ok(Ok((svg, image))) => {
                 let people = self.backdrop.job.as_mut().map(|j| std::mem::take(&mut j.people)).unwrap_or_default();
+                let online_id = self.backdrop.job.as_mut().and_then(|j| j.online_id.take());
                 self.backdrop.job = None;
+                // Kept below (`keep_painting`); the server's copy is no longer needed.
+                if let Some(painting) = online_id {
+                    self.forget_painting(&painting);
+                }
                 if let Some(scene) = self.doc.scene_mut(id) {
                     scene.people = people;
                     scene.versions.push(svg);
@@ -911,6 +934,76 @@ impl App {
             Err(std::sync::mpsc::TryRecvError::Empty) => return,
         }
         self.drop_unpainted_scenes();
+    }
+
+    /// Tell Caprice's server that a picture it kept is in the story now. Nothing to wait for: if
+    /// the request is lost, the picture is found again next time and is in the story already.
+    fn forget_painting(&self, painting: &str) {
+        if let (Some(server), Some(wake)) = (self.cloud.server.clone(), self.cloud.waker()) {
+            let request = Request { method: "DELETE", path: format!("/api/scenes/{painting}"), headers: Vec::new(), body: None };
+            server.send(request, channel().0, wake);
+        }
+    }
+
+    /// Once for each story opened while signed in, where Caprice's server paints: the pictures
+    /// that finished for it after the page went (reloaded, or another story opened while one was
+    /// painted). Each goes to the scene pinned where it was asked for, a new one if there is none
+    /// (an unpainted scene is not saved, R14), and is kept at once (`keep_painting`).
+    fn recover_paintings(&mut self, ctx: &egui::Context) {
+        if let Some(rx) = &self.backdrop.recovering {
+            let answer = match rx.try_recv() {
+                Ok(answer) => answer,
+                Err(std::sync::mpsc::TryRecvError::Empty) => return,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => Answer::default(),
+            };
+            self.backdrop.recovering = None;
+            #[derive(serde::Deserialize)]
+            struct Waiting {
+                id: String,
+                at: usize,
+                svg: String,
+            }
+            let Ok(waiting) = serde_json::from_slice::<Vec<Waiting>>(&answer.body) else { return };
+            // One still arriving in this very job is taken as it comes, not twice.
+            let arriving = self.backdrop.job.as_ref().and_then(|j| j.online_id.clone());
+            let mut found = false;
+            for w in waiting.into_iter().filter(|w| Some(&w.id) != arriving.as_ref()) {
+                let at = self.doc.para_start(w.at.min(self.doc.total_chars() - 1)).0;
+                match self.doc.scenes.iter_mut().find(|s| s.at == at) {
+                    Some(s) if !s.versions.contains(&w.svg) => {
+                        s.versions.push(w.svg);
+                        s.shown = s.versions.len() - 1;
+                        s.hidden = false;
+                    }
+                    Some(_) => {}
+                    None => {
+                        let (end, _) = self.doc.term_from(at, self.doc.char_to_byte(at));
+                        let id = self.doc.next_scene_id;
+                        self.doc.next_scene_id += 1;
+                        let subject = self.selected_passage(at, end);
+                        self.doc.scenes.push(Scene { id, at, versions: vec![w.svg], shown: 0, subject, hidden: false, people: Vec::new(), chosen: false });
+                    }
+                }
+                found = true;
+                self.forget_painting(&w.id);
+            }
+            if found {
+                self.backdrop.visible = true;
+                self.keep_painting();
+                self.status = "- a scene painted while you were away is back".into();
+            }
+            return;
+        }
+        let wanted = (!self.claude && self.cloud.who.is_some() && self.path.is_some() && self.can_edit()).then(|| self.story_id.clone());
+        if wanted.is_none() || wanted == self.backdrop.recovered {
+            return;
+        }
+        let (Some(server), Some(story)) = (self.cloud.server.clone(), wanted) else { return };
+        let (tx, rx) = channel();
+        let request = Request { method: "GET", path: format!("/api/scenes?story={story}"), headers: Vec::new(), body: None };
+        server.send(request, tx, crate::platform::Waker::new(ctx));
+        self.backdrop.recovering = Some(rx);
+        self.backdrop.recovered = Some(story);
     }
 
     /// A painting is kept at once, not when the story would save itself: it was paid for, and

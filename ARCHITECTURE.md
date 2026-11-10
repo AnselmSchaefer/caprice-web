@@ -476,9 +476,16 @@ is; callers that paint for a paragraph pass `para_start` themselves.
   saved, so it goes online soon after (R33); a new story without one goes on the shelf under the
   name it suggests (in the browser; on the desktop there is no shelf to put it on); and a version
   is kept, so dropping the changes since saving (R22) can bring it back. Autosave off, only the
-  version is kept. Still lost: a painting under way when the page is reloaded or another story
-  is opened (`open_scene` starts the backdrop afresh). Test:
-  `a_scene_painted_is_saved_at_once_and_a_new_story_goes_on_the_shelf_with_it`.
+  version is kept. Test: `a_scene_painted_is_saved_at_once_and_a_new_story_goes_on_the_shelf_with_it`.
+- **A picture that finishes after the page went is not lost** (a reload, or another story opened
+  while it was painted, as `open_scene` starts the backdrop afresh). Painted by Caprice's server,
+  each painting is named (`Job::online_id`) and says which story and char it is for; the server
+  keeps the picture (R33) until the app says it has it (`forget_painting`, once it is kept). On
+  opening a story, signed in and holding the pen, the app asks for those waiting
+  (`recover_paintings`): each goes to the scene at its char's paragraph, a new one if there is
+  none (an unpainted scene is not saved), and is kept at once. One arriving in the job under way
+  is not taken twice, nor a picture the scene has already. Test:
+  `a_scene_painted_while_the_page_went_comes_back_when_the_story_opens_again`.
 - Moving, hiding, deleting and stepping versions change `Doc::scenes` directly: like page
   settings, they are not undoable (R1) and do not paginate.
 - Tests: `the_picture_follows_the_caret_from_one_part_of_the_story_to_the_next`,
@@ -1754,6 +1761,10 @@ that costs money as it is asked:
   `Authorization: Bearer <ADMIN_TOKEN>` (a secret of 32 characters or more; without it there is no
   such request). It names no one: no name or email is kept anywhere. Deleting a writer's stories
   online deletes their counts too, but not the day's total.
+- **A finished picture waits in the Ledger until the app has it** (`keepPainted`, `painted`):
+  `PAINTED_HOURS` (48) at most, `PAINTED_PER_USER` (20), the oldest first, with only the story's
+  id and the scene's char, no text of the story. `GET /api/scenes?story=` lists them for the
+  writer, `DELETE /api/scenes/<id>` forgets one; deleting the stories online deletes them too.
 - `SCENES_OFF = "1"` stops painting at once; without a key nothing is painted. Neither touches
   stories online, nor `SYNC_OFF` painting.
 - The app reads `X-Caprice-Scenes-Left` (`platform::READ` names it, or the page cannot see it) and
@@ -1772,7 +1783,8 @@ writer paints one scene at a time", "too much to paint is refused before anythin
 "without a key, or switched off, no scene is painted", "when the credit is used up, painting is
 paused, and claude being down is said so", "the site's owner sees the scenes of each day by hashed
 id, and nobody else does", "a picture comes back without anything that could run or reach outside
-it". In the app: the `cloud::tests` (`decide`, names,
+it", "a picture painted waits for the app until it has it, and only for its writer", "pictures
+waiting are few for each writer, and go with the stories online". In the app: the `cloud::tests` (`decide`, names,
 keys), `in_the_browser_nothing_is_asked_of_the_server_until_the_writer_signs_in`,
 `a_story_saved_goes_online_a_little_later`, `a_story_newer_online_comes_down_onto_the_shelf_and_opens`,
 `the_open_story_changed_in_another_browser_is_shown_as_it_is_there`,
@@ -1834,6 +1846,15 @@ Plan and reasons: `LIVE_PLAN.md`.
 - **A device gone** keeps the pen for `LIVE_FREE_AFTER_MS` (30 s), then the first device there
   has it. A device that comes in to follow asks for the whole story at once: its shelf's copy is
   older than the holder's. A follower that hears nothing back asks again after 30 s.
+- **Out of reach, a device stays as it was** (a tab in the background, a phone asleep, the
+  network): its socket closing is not leaving the room. Following, it stays locked
+  (`LOCKED_WHILE_LOST`, as long as the room keeps a pen) with "Connecting again…"; holding, it
+  writes on, its edits waiting in the outbox for when it is back. It tries again at once, then
+  every `AGAIN_AFTER`. Unlocked at once, as it first was, it was written in while it heard
+  nothing, and coming back the holder's story replaced those words. **Words the room never had
+  are kept beside the story** (`keep_unsent`, "… (written here)") before a device follows again.
+  Going out of sight, the holder sends what it typed in the last second (`live_hidden`, from
+  `App::logic`), as no frame may come for a long time.
 - **The room costs requests, out of 100,000 a day for the whole site on the free plan** (stories
   online included): each message in is one, pings are answered without waking it, and it writes
   almost nothing (the batch number goes with the holder's socket, the day's count twenty at a
@@ -1855,6 +1876,8 @@ off switch stops them". In the app:
 `a_story_open_on_two_devices_is_written_on_one_and_followed_live_on_the_other`,
 `a_change_that_is_no_edit_reaches_the_following_device_as_the_whole_story`,
 `a_following_device_changes_nothing_with_its_tools_notes_or_scratchpad`,
+`a_following_device_out_of_reach_for_a_moment_stays_locked_and_follows_again`,
+`words_written_where_the_pen_was_lost_are_kept_beside_the_story`,
 `transfer_here_moves_the_pen_and_the_other_device_follows_what_is_written_here`.
 
 ## 5. Checklists for common changes

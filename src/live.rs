@@ -29,8 +29,12 @@ use crate::theme::pal;
 /// Seconds between the holder's batches: one a second at most, as each is a request to the room,
 /// out of a daily allowance for the whole site (R34).
 pub const BATCH_EVERY: f64 = 1.0;
-/// Seconds before trying the room again after it closed.
+/// Seconds before trying the room again after it closed: at once the first time, then this.
 const AGAIN_AFTER: f64 = 5.0;
+/// Seconds a device that was following stays locked while it cannot reach the room: as long as
+/// the room keeps the pen for a device gone (`LIVE_FREE_AFTER_MS`). Unlocked at once, it was
+/// written in while it heard nothing, and those words went nowhere.
+const LOCKED_WHILE_LOST: f64 = 30.0;
 /// Seconds a follower waits for the whole story it asked for before asking again.
 const ASK_AGAIN_AFTER: f64 = 30.0;
 /// A batch no bigger than this goes as it is; a bigger one (a long paste) goes as its hash only,
@@ -66,8 +70,9 @@ pub struct Live {
     claiming: Option<Receiver<Answer>>,
     /// Where the pen is writing, as its last batch said.
     pub writing_at: Option<usize>,
-    /// The room closed: when to try again.
+    /// The room closed: when to try again, and since when it has been out of reach.
     again_at: f64,
+    lost_at: Option<f64>,
 }
 
 /// A batch of edits, as the room passes it on.
@@ -100,6 +105,7 @@ impl Live {
             claiming: None,
             writing_at: None,
             again_at: f64::NEG_INFINITY,
+            lost_at: None,
         }
     }
 
@@ -113,9 +119,15 @@ impl Live {
         self.socket.is_some() && self.holder.as_ref().is_some_and(|(d, _)| *d == self.device)
     }
 
-    /// In a room where another device holds the pen.
+    /// In a room where another device holds the pen, or out of reach of it for a moment since.
     pub fn following(&self) -> bool {
-        self.socket.is_some() && self.holder.as_ref().is_some_and(|(d, _)| *d != self.device)
+        let here = self.socket.is_some() || self.lost_at.is_some_and(|t| self.now - t < LOCKED_WHILE_LOST);
+        here && self.holder.as_ref().is_some_and(|(d, _)| *d != self.device)
+    }
+
+    /// Following, but out of reach of the room: trying again.
+    pub fn reconnecting(&self) -> bool {
+        self.following() && self.socket.is_none()
     }
 
     /// Out of the room: as if it had never been in it.
@@ -162,11 +174,20 @@ impl App {
             match h {
                 Heard::Open => {}
                 Heard::Message(text) => self.heard(ctx, &text),
-                Heard::Closed(code) => {
+                // The day's messages ran out for this story: not again today, and the story is this
+                // device's meanwhile.
+                Heard::Closed(4002) => {
                     self.leave_room();
                     self.live.key = Some(key.clone());
-                    // The day's messages ran out for this story: not again today, or soon after.
-                    self.live.again_at = now + if code == 4002 { 3600.0 } else { AGAIN_AFTER };
+                    self.live.again_at = now + 3600.0;
+                }
+                // Out of reach (a tab in the background, a phone asleep, the network): it stays as
+                // it was, following or writing, and tries again at once, then every few seconds.
+                // Its edits wait in the outbox meanwhile.
+                Heard::Closed(_) => {
+                    self.live.socket = None;
+                    self.live.again_at = if self.live.lost_at.is_some() { now + AGAIN_AFTER } else { now };
+                    self.live.lost_at.get_or_insert(now);
                 }
             }
         }
@@ -196,12 +217,19 @@ impl App {
         let seq = m["seq"].as_u64().unwrap_or(0);
         match m["t"].as_str().unwrap_or_default() {
             "hello" => {
+                let was_in = self.live.lost_at.take().is_some();
                 self.live.holder = holder(&m);
-                self.live.seq = seq;
                 if self.live.holding() {
+                    // Back in time with the pen: on from the room's number, the edits made meanwhile next.
+                    self.live.seq = seq;
                     self.take_pen(false);
                 } else {
                     // Coming in to follow, this story is only the shelf's: the holder's comes first.
+                    // Back in it, words written here that the room never had are kept beside it.
+                    if was_in {
+                        self.keep_unsent();
+                    }
+                    self.live.seq = seq;
                     self.doc.outbox = None;
                     self.ask_whole();
                 }
@@ -260,7 +288,10 @@ impl App {
     /// This device holds the pen now. Having followed, its undo is not the story's any more, and
     /// the version online is learnt before anything of it is saved.
     fn take_pen(&mut self, followed: bool) {
-        self.doc.outbox = Some(Vec::new());
+        // Back with the pen after a moment out of reach, the edits made meanwhile are still to go.
+        if self.doc.outbox.is_none() {
+            self.doc.outbox = Some(Vec::new());
+        }
         self.live.hash = self.live_hash();
         self.live.fetching = None;
         self.live.waiting.clear();
@@ -330,6 +361,31 @@ impl App {
         if now.is_some() && now != *before {
             self.live.saving = None;
             self.live.say(json!({ "t": "saved", "version": now }));
+        }
+    }
+
+    /// Changes made here that the room never had (written while out of reach, then the pen had
+    /// moved on): the story as it is here goes on the shelf beside it, "… (written here)", before
+    /// the holder's replaces it. No word is lost, nothing is merged.
+    fn keep_unsent(&mut self) {
+        let unsent = self.doc.outbox.as_ref().is_some_and(|o| !o.is_empty()) || (self.live.hash != 0 && self.live_hash() != self.live.hash);
+        let Some(dir) = self.path.as_ref().and_then(|p| p.parent()).map(|d| d.to_path_buf()) else { return };
+        if !unsent {
+            return;
+        }
+        let copy = crate::platform::free_name(&dir, &format!("{} (written here).caprice", self.story_name()));
+        if let Ok(json) = serde_json::to_string_pretty(&self.doc_file())
+            && crate::platform::fs::write(&copy, json).is_ok()
+        {
+            self.status = format!("- what you wrote while away is kept as \u{201c}{}\u{201d}", crate::shelf::file_name(&copy.file_stem().unwrap_or_default().to_string_lossy()));
+        }
+    }
+
+    /// The page goes out of sight (`App::logic`, which runs then too): what was typed in the last
+    /// second goes now, as no frame may come to send it for a long time.
+    pub fn live_hidden(&mut self) {
+        if self.live.holding() && crate::platform::page_hidden() {
+            self.send_batch(f64::INFINITY);
         }
     }
 
@@ -441,9 +497,14 @@ impl App {
         }
         let name = self.live.holder.as_ref().map(|(_, n)| n.clone()).unwrap_or_default();
         let (mut go, mut take) = (false, false);
+        let lost = self.live.reconnecting();
         egui::Area::new(Id::new("live_bar")).anchor(Align2::CENTER_TOP, vec2(0.0, 52.0)).show(ctx, |ui| {
             egui::Frame::popup(ui.style()).fill(pal().dock).show(ui, |ui| {
                 ui.label(RichText::new(format!("Open for writing on another device ({name}). Editing is off here.")).color(pal().text));
+                if lost {
+                    ui.label(RichText::new("Connecting again\u{2026}").small().color(pal().text_dim));
+                    return;
+                }
                 ui.horizontal(|ui| {
                     if self.live.writing_at.is_some() {
                         go = ui.link("Go to where it is being written").clicked();

@@ -87,6 +87,15 @@ async function route(request, env) {
   // The user's id is no secret of theirs (a hash), and tells the app when someone else signs in.
   if (path === "/api/me") return json({ name: session.n, provider: session.p, user: session.u });
   if (path === "/api/scene") return method === "POST" ? scene(request, env, session.u) : text(405, "POST only");
+  if (path === "/api/scenes") return method === "GET" ? waiting(url, env, session.u) : text(405, "GET only");
+  const kept = path.match(/^\/api\/scenes\/([^/]+)$/);
+  if (kept) {
+    if (method !== "DELETE") return text(405, "DELETE only");
+    if (!PAINTING_ID.test(kept[1])) return text(400, "Not a painting's id");
+    const ledger = env.LEDGER.get(env.LEDGER.idFromName("ledger"));
+    await ledger.forgetPainted(session.u, kept[1]);
+    return new Response(null, { status: 204 });
+  }
 
   if (env.SYNC_OFF === "1") return text(503, "Stories online are switched off for now", { "Retry-After": "3600" });
   const ledger = env.LEDGER.get(env.LEDGER.idFromName("ledger"));
@@ -178,6 +187,18 @@ illustration: believable light, depth and texture rather than cartoon shapes.";
 // Said in the picture itself, for anyone who finds it outside Caprice: it was made by an AI.
 const MADE_BY = "<metadata>Made with AI: painted by Claude (Anthropic) for Caprice</metadata>";
 
+// The app names each painting, and says which story and char it is for, so that a picture that
+// finishes after the page went (a reload, another story opened) waits for it (`keepPainted`).
+const PAINTING_ID = /^[0-9a-z]{8,40}$/;
+
+async function waiting(url, env, user) {
+  const story = url.searchParams.get("story") ?? "";
+  if (!STORY_ID.test(story)) return text(400, "Not a story's id");
+  const ledger = env.LEDGER.get(env.LEDGER.idFromName("ledger"));
+  const answer = await ledger.paintedFor(user, story);
+  return answer.ok ? json(answer.painted) : refused(answer);
+}
+
 async function scene(request, env, user) {
   if (env.SCENES_OFF === "1") return text(503, "Painting scenes is switched off for now", { "Retry-After": "3600" });
   if (!env.ANTHROPIC_API_KEY) return text(503, "Painting scenes is not set up", { "Retry-After": "3600" });
@@ -195,6 +216,10 @@ async function scene(request, env, user) {
   try {
     const painted = await paint(prompt, env, l.SCENE_TOKENS);
     if (painted.error) return text(painted.error, painted.message, painted.retry ? { ...left, "Retry-After": String(painted.retry) } : left);
+    const id = request.headers.get("X-Caprice-Painting") ?? "";
+    const story = request.headers.get("X-Caprice-Story") ?? "";
+    const at = Number(request.headers.get("X-Caprice-At"));
+    if (PAINTING_ID.test(id) && STORY_ID.test(story) && Number.isInteger(at) && at >= 0) await ledger.keepPainted(user, id, story, at, painted.svg);
     return new Response(painted.svg, { headers: { "Content-Type": "image/svg+xml; charset=utf-8", ...left } });
   } finally {
     await ledger.painted(user);
