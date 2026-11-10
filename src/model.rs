@@ -81,8 +81,9 @@ impl ParaAttrs {
     }
 }
 
-/// Per-character formatting. `para` only means something on terminator characters.
-#[derive(Clone, PartialEq, Debug)]
+/// Per-character formatting. `para` only means something on terminator characters. Files keep
+/// it in runs (`fileio::Run`); a story live on several devices sends it as it is (R34).
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Style {
     pub font: Arc<str>,
     pub size: f32,
@@ -515,6 +516,9 @@ pub struct Doc {
     /// order: kept with the story so that taking text away never makes the garden shrink. The
     /// Magic City's streets have as many floors.
     pub garden: Vec<u32>,
+    /// While this device holds the pen of a story live on several (R34): every edit applied
+    /// since the last batch was sent. None otherwise. Not saved.
+    pub outbox: Option<Vec<crate::edit::Edit>>,
 }
 
 impl Doc {
@@ -540,6 +544,7 @@ impl Doc {
             next_box_id: 1,
             number_marks: Vec::new(),
             garden: Vec::new(),
+            outbox: None,
         }
     }
 

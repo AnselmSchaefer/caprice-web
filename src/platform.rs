@@ -329,6 +329,43 @@ pub fn send(request: Request, tx: std::sync::mpsc::Sender<Answer>, wake: Waker) 
     });
 }
 
+/// What a connection to a story's room heard (R34): it opened, a message, or it closed, with the
+/// code it closed with.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Heard {
+    Open,
+    Message(String),
+    Closed(u16),
+}
+
+/// A connection to a story's room on Caprice's server (`web/api/room.js`, R34), open until it is
+/// dropped: the page's WebSocket in the browser, a stand-in in tests. What it heard is taken each
+/// frame; it wakes the app when there is some.
+pub trait LiveSocket {
+    fn send(&self, text: &str);
+    fn take(&self) -> Vec<Heard>;
+}
+
+/// In the browser: a WebSocket to `path` on the page's own server. It sends "ping" now and then,
+/// answered by the room without waking it, so the connection stays open and costs nothing.
+#[cfg(target_arch = "wasm32")]
+pub fn live(path: &str, wake: Waker) -> Box<dyn LiveSocket> {
+    use wasm_bindgen::JsCast;
+    let wake = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || wake.wake()).into_js_value();
+    Box::new(browser::PageSocket(browser::live_open(path, wake.unchecked_ref())))
+}
+
+/// This browser and its system, as another device names it: "Firefox on Linux".
+#[cfg(target_arch = "wasm32")]
+pub fn device_name() -> String {
+    browser::device_name()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn device_name() -> String {
+    format!("Caprice on {}", std::env::consts::OS)
+}
+
 /// In the browser: leave the page for `path` on its own server (signing in, which comes back).
 #[cfg(target_arch = "wasm32")]
 pub fn go_to(path: &str) {
@@ -404,6 +441,47 @@ mod browser {
             window.open(url, "_blank");
             setTimeout(() => URL.revokeObjectURL(url), 600000);
         }
+        // A story's room (R34): its WebSocket, what it heard since last taken, and a ping now and
+        // then, which the room answers without waking.
+        const sockets = new Map();
+        let next_socket = 1;
+        export function live_open(path, wake) {
+            const id = next_socket++;
+            const s = { ws: new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + path), heard: [] };
+            const hear = h => { s.heard.push(h); wake(); };
+            s.ws.onopen = () => hear(["open"]);
+            s.ws.onmessage = e => { if (typeof e.data === "string" && e.data !== "pong") hear(["message", e.data]); };
+            s.ws.onclose = e => { clearInterval(s.ping); hear(["closed", e.code]); };
+            s.ping = setInterval(() => { if (s.ws.readyState === 1) s.ws.send("ping"); }, 25000);
+            sockets.set(id, s);
+            return id;
+        }
+        export function live_send(id, text) {
+            const s = sockets.get(id);
+            if (s && s.ws.readyState === 1) s.ws.send(text);
+        }
+        export function live_take(id) {
+            const s = sockets.get(id);
+            if (!s) return [];
+            const heard = s.heard;
+            s.heard = [];
+            return heard;
+        }
+        export function live_close(id) {
+            const s = sockets.get(id);
+            if (!s) return;
+            clearInterval(s.ping);
+            s.ws.onclose = null;
+            s.ws.close();
+            sockets.delete(id);
+        }
+        export function device_name() {
+            const ua = navigator.userAgent;
+            const browser = /Edg\//.test(ua) ? "Edge" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "a browser";
+            const system = /Android/.test(ua) ? "Android" : /iPhone|iPad|iPod/.test(ua) ? "iOS" : /Mac OS X/.test(ua) ? "macOS"
+                : /Windows/.test(ua) ? "Windows" : /CrOS/.test(ua) ? "ChromeOS" : /Linux/.test(ua) ? "Linux" : "another system";
+            return `${browser} on ${system}`;
+        }
         export function download(name, bytes) {
             const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)]));
             const a = document.createElement("a");
@@ -425,6 +503,11 @@ mod browser {
         fn js_show_pdf(bytes: &[u8]);
         #[wasm_bindgen(js_name = fetch_bytes, catch)]
         async fn js_fetch_bytes(url: &str) -> Result<JsValue, JsValue>;
+        pub fn live_open(path: &str, wake: &js_sys::Function) -> u32;
+        fn live_send(id: u32, text: &str);
+        fn live_take(id: u32) -> js_sys::Array;
+        fn live_close(id: u32);
+        pub fn device_name() -> String;
         #[wasm_bindgen(js_name = api_send)]
         fn js_api_send(method: &str, path: &str, names: js_sys::Array, values: js_sys::Array, body: Option<Box<[u8]>>, reads: js_sys::Array) -> js_sys::Promise;
     }
@@ -446,6 +529,35 @@ mod browser {
                 headers: headers.collect(),
                 body: js_sys::Uint8Array::new(&got.get(2)).to_vec(),
             }
+        }
+    }
+
+    /// A story's room's WebSocket, by the page's number for it; closed when dropped.
+    pub struct PageSocket(pub u32);
+
+    impl super::LiveSocket for PageSocket {
+        fn send(&self, text: &str) {
+            live_send(self.0, text);
+        }
+
+        fn take(&self) -> Vec<super::Heard> {
+            live_take(self.0)
+                .iter()
+                .filter_map(|h| {
+                    let h = js_sys::Array::from(&h);
+                    match h.get(0).as_string()?.as_str() {
+                        "open" => Some(super::Heard::Open),
+                        "message" => Some(super::Heard::Message(h.get(1).as_string()?)),
+                        _ => Some(super::Heard::Closed(h.get(1).as_f64().unwrap_or(0.0) as u16)),
+                    }
+                })
+                .collect()
+        }
+    }
+
+    impl Drop for PageSocket {
+        fn drop(&mut self) {
+            live_close(self.0);
         }
     }
 

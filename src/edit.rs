@@ -1,13 +1,47 @@
 //! The edit layer. Every change to the document goes through here as an `Edit`, so one place
 //! keeps notes anchored, remembers how to undo, and tells the rest of the app what changed.
 
+use serde::{Deserialize, Serialize};
+
 use crate::model::{Doc, Note, Style};
 
-/// A run of text together with its per-char styles.
-#[derive(Clone, Debug, Default, PartialEq)]
+/// A run of text together with its per-char styles. Sent to the other devices of a story live
+/// on several (R34) with its styles in runs, as most chars share the one before's.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(into = "PieceRuns", from = "PieceRuns")]
 pub struct Piece {
     pub text: String,
     pub styles: Vec<Style>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct PieceRuns {
+    text: String,
+    /// Each style, and for how many chars.
+    runs: Vec<(usize, Style)>,
+}
+
+impl From<Piece> for PieceRuns {
+    fn from(p: Piece) -> Self {
+        let mut runs: Vec<(usize, Style)> = Vec::new();
+        for s in p.styles {
+            match runs.last_mut() {
+                Some((n, last)) if *last == s => *n += 1,
+                _ => runs.push((1, s)),
+            }
+        }
+        PieceRuns { text: p.text, runs }
+    }
+}
+
+impl From<PieceRuns> for Piece {
+    fn from(r: PieceRuns) -> Self {
+        // No more styles than chars, whatever the runs say: a wrong one is refused later
+        // (`apply_live`), and a huge count must not take all the memory first.
+        let chars = r.text.chars().count();
+        let styles = r.runs.into_iter().flat_map(|(n, s)| std::iter::repeat_n(s, n.min(chars))).take(chars + 1).collect();
+        Piece { text: r.text, styles }
+    }
 }
 
 impl Piece {
@@ -20,7 +54,7 @@ impl Piece {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Edit {
     /// Replace `old` at char `at` with `new` (insert: `old` empty, delete: `new` empty).
     Replace { at: usize, old: Piece, new: Piece },
@@ -174,7 +208,34 @@ impl Doc {
         Some(caret)
     }
 
+    /// An edit made on the device holding the pen, followed here (R34): applied as it was there,
+    /// with no undo, if it fits this story; false, and nothing changed, if it does not (the
+    /// story here is not the one it was made to, or the edit is not one Caprice makes).
+    pub fn apply_live(&mut self, edit: &Edit) -> bool {
+        let total = self.total_chars();
+        let fits = match edit {
+            Edit::Replace { at, old, new } => {
+                let sound = |p: &Piece| p.text.chars().count() == p.styles.len();
+                // Never past or onto the mark every story ends with.
+                sound(old) && sound(new) && at + old.chars() < total && {
+                    let b = self.char_to_byte(*at);
+                    self.flow.text.get(b..b + old.text.len()) == Some(old.text.as_str())
+                }
+            }
+            Edit::Restyle { at, old, new } => old.len() == new.len() && at + new.len() <= total && self.flow.styles[*at..*at + old.len()] == old[..],
+        };
+        if fits {
+            self.apply_raw(edit);
+        }
+        fits
+    }
+
     fn apply_raw(&mut self, edit: &Edit) {
+        // Holding the pen of a story live on several devices: every change of the text, typed,
+        // undone or redone, goes to the others (R34).
+        if let Some(out) = &mut self.outbox {
+            out.push(edit.clone());
+        }
         match edit {
             Edit::Replace { at, old, new } => {
                 let b = self.char_to_byte(*at);

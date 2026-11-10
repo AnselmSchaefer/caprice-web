@@ -17,6 +17,7 @@ mod ideas;
 mod images;
 mod layout;
 mod leave;
+mod live;
 mod model;
 mod notes;
 mod numbers;
@@ -271,6 +272,8 @@ pub struct App {
     pub shelf: shelf::Shelf,
     /// The stories on the shelf kept online too, once signed in (`cloud.rs`, R33).
     pub cloud: cloud::Cloud,
+    /// The open story's room, when it is live on several devices (R34).
+    pub live: live::Live,
     /// The Print window and what it has chosen.
     pub print: print::Print,
     /// Which story this is, to keep its versions together (`versions.rs`).
@@ -390,6 +393,7 @@ impl App {
             dialog: None,
             shelf: shelf::Shelf::new(),
             cloud: cloud::Cloud::new(),
+            live: live::Live::new(),
             print: print::Print::new(),
             story_id: versions::new_id(),
             keep: versions::Keeper::new(),
@@ -635,6 +639,7 @@ impl App {
         }
         self.poll_dialog(&ctx);
         self.cloud_frame(&ctx);
+        self.live_frame(&ctx);
         self.guard_close(&ctx);
         self.ensure_textures(&ctx);
         // Opened without a file, the welcome page stands in for the desk until a story is chosen.
@@ -803,6 +808,7 @@ impl App {
         self.review_window(&ctx);
         self.ideas_window(&ctx);
         self.scene_panel(&ctx);
+        self.live_bar(&ctx);
         self.scene_list(&ctx);
         self.cast_window(&ctx);
         self.unsaved_prompt(&ctx);
@@ -7834,6 +7840,124 @@ mod tests {
         assert_eq!(stories_online(&server).len(), 1, "and it is one story, not two");
         std::fs::remove_dir_all(dir).unwrap();
         std::fs::remove_dir_all(elsewhere).unwrap();
+    }
+
+    /// The same story open on a laptop and a phone, both signed in to the same stand-in server:
+    /// written on the laptop, brought down onto the phone's shelf and opened there.
+    fn laptop_and_phone(name: &str) -> (Harness, Harness, std::rc::Rc<cloud::stand_in::StandIn>, Vec<std::path::PathBuf>) {
+        let mut laptop = Harness::new();
+        let here = with_shelf(&mut laptop, &format!("{name}-laptop"));
+        let server = online(&mut laptop, &here, true);
+        laptop.app.keep.autosave = true;
+        laptop.frames(12, vec![], Modifiers::NONE);
+        laptop.type_text("Once upon a time.");
+        laptop.save_on_shelf();
+        laptop.later(cloud::UP_AFTER + 1.0);
+
+        let mut phone = Harness::new();
+        let there = with_shelf(&mut phone, &format!("{name}-phone"));
+        std::fs::create_dir_all(&there).unwrap();
+        std::fs::write(there.join("cloud.json"), r#"{"signing_in":true}"#).unwrap();
+        phone.app.cloud = cloud::Cloud::with(Some(server.clone()), Some(there.join("cloud.json")));
+        phone.app.cloud.clock = Some(5000.0);
+        phone.app.keep.autosave = true;
+        phone.frames(12, vec![], Modifiers::NONE);
+        let ctx = phone.ctx.clone();
+        phone.app.open_path(&ctx, there.join("Once upon a time.caprice"));
+        phone.frames(3, vec![], Modifiers::NONE);
+        (laptop, phone, server, vec![here, there])
+    }
+
+    /// Both devices run a few frames, one after the other, as they would side by side.
+    fn side_by_side(a: &mut Harness, b: &mut Harness, frames: usize) {
+        for _ in 0..frames {
+            a.frames(1, vec![], Modifiers::NONE);
+            b.frames(1, vec![], Modifiers::NONE);
+        }
+    }
+
+    #[test]
+    fn a_story_open_on_two_devices_is_written_on_one_and_followed_live_on_the_other() {
+        let (mut laptop, mut phone, server, dirs) = laptop_and_phone("live-follow");
+        side_by_side(&mut laptop, &mut phone, 6);
+        assert!(laptop.app.can_edit(), "the laptop came first: it holds the pen");
+        assert!(!phone.app.can_edit(), "the phone follows");
+        assert!(phone.labels().contains("Editing is off here"), "and says so: {}", phone.labels());
+
+        // Typed on the laptop, it shows on the phone within a second or so.
+        laptop.type_text(" The end.");
+        laptop.wait(live::BATCH_EVERY + 0.1);
+        side_by_side(&mut laptop, &mut phone, 3);
+        assert_eq!(phone.text(), "Once upon a time. The end.");
+        // The phone cannot change it: typing, pasting and undo do nothing there.
+        phone.type_text("Hello");
+        phone.frames(1, vec![egui::Event::Paste("pasted".into())], Modifiers::NONE);
+        phone.key(Key::Z, Modifiers::COMMAND);
+        assert_eq!(phone.text(), "Once upon a time. The end.");
+        // An undo on the laptop is followed too.
+        laptop.key(Key::Z, Modifiers::COMMAND);
+        laptop.wait(live::BATCH_EVERY + 0.1);
+        side_by_side(&mut laptop, &mut phone, 3);
+        assert_eq!(phone.text(), laptop.text());
+        let said = server.0.borrow().rooms.borrow().values().flat_map(|r| r.said.clone()).collect::<Vec<_>>();
+        assert!(!said.iter().any(|(d, kind)| *d == phone.app.live.device && kind == "edits"), "the phone sent no edits: {said:?}");
+        for d in dirs {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+
+    #[test]
+    fn a_change_that_is_no_edit_reaches_the_following_device_as_the_whole_story() {
+        let (mut laptop, mut phone, _server, dirs) = laptop_and_phone("live-whole");
+        side_by_side(&mut laptop, &mut phone, 6);
+        // Page settings change outside `Doc::apply`: no edit is sent, only the story's hash.
+        let ctx = laptop.ctx.clone();
+        let mut setup = laptop.app.doc.setup.clone();
+        setup.margin_left += 20.0;
+        laptop.app.set_setup(&ctx, setup.clone());
+        laptop.wait(live::BATCH_EVERY + 0.1);
+        for _ in 0..4 {
+            side_by_side(&mut laptop, &mut phone, 3);
+            laptop.later(1.0);
+        }
+        assert_eq!(phone.app.doc.setup.margin_left, setup.margin_left, "the phone fetched the whole story");
+        assert_eq!(phone.app.live_hash(), laptop.app.live_hash(), "and is the same story again");
+        assert!(!phone.app.can_edit(), "still following");
+        for d in dirs {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+
+    #[test]
+    fn transfer_here_moves_the_pen_and_the_other_device_follows_what_is_written_here() {
+        let (mut laptop, mut phone, server, dirs) = laptop_and_phone("live-transfer");
+        side_by_side(&mut laptop, &mut phone, 6);
+        laptop.type_text(" Typed just before.");
+        // Transfer here on the phone: what the laptop typed comes over first, then the pen.
+        phone.click_widget("Transfer here");
+        side_by_side(&mut laptop, &mut phone, 6);
+        assert!(phone.app.can_edit() && !laptop.app.can_edit(), "the phone writes, the laptop follows");
+        assert_eq!(phone.text(), "Once upon a time. Typed just before.", "nothing typed on the laptop is lost");
+        assert!(laptop.labels().contains("Editing is off here"));
+
+        // It writes at its own caret, where its reader was: here, the end.
+        phone.key(Key::End, Modifiers::COMMAND);
+        phone.type_text(" Then the phone.");
+        phone.wait(live::BATCH_EVERY + 0.1);
+        side_by_side(&mut laptop, &mut phone, 3);
+        assert_eq!(laptop.text(), "Once upon a time. Typed just before. Then the phone.");
+
+        // It saves itself and goes online from the phone, as one story, not two.
+        phone.wait(versions::SAVE_AFTER + 1.0);
+        phone.wait(versions::SAVE_AFTER + 1.0);
+        phone.later(cloud::UP_AFTER + 1.0);
+        laptop.later(1.0);
+        let online = stories_online(&server);
+        assert_eq!(online.len(), 1, "one story: {:?}", online.iter().map(|(n, _)| n).collect::<Vec<_>>());
+        assert!(online[0].1.contains("Then the phone."), "with the phone's words");
+        for d in dirs {
+            let _ = std::fs::remove_dir_all(d);
+        }
     }
 
     #[test]

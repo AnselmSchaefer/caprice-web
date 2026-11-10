@@ -20,7 +20,7 @@ use eframe::egui::{self, Color32, CornerRadius, FontId, Id, Painter, Pos2, Sense
 use serde::{Deserialize, Serialize};
 
 use crate::App;
-use crate::platform::{Answer, Request, Waker, fs};
+use crate::platform::{Answer, LiveSocket, Request, Waker, fs};
 
 /// Seconds after a save before it goes up: the writer often saves again soon.
 pub const UP_AFTER: f64 = 20.0;
@@ -34,6 +34,8 @@ pub trait Server {
     fn send(&self, request: Request, tx: Sender<Answer>, wake: Waker);
     /// Leave the page for a path on the server: signing in, which comes back to the page.
     fn go_to(&self, path: &str);
+    /// Into a story's room, where the devices it is open on meet (R34).
+    fn live(&self, path: &str, wake: Waker) -> Box<dyn LiveSocket>;
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -47,6 +49,10 @@ impl Server for Page {
 
     fn go_to(&self, path: &str) {
         crate::platform::go_to(path);
+    }
+
+    fn live(&self, path: &str, wake: Waker) -> Box<dyn LiveSocket> {
+        crate::platform::live(path, wake)
     }
 }
 
@@ -148,7 +154,7 @@ fn id_of(bytes: &[u8]) -> String {
 }
 
 /// A story's name as a header can carry it (the server reads it with `decodeURIComponent`).
-fn encode(name: &str) -> String {
+pub fn encode(name: &str) -> String {
     let mut out = String::new();
     for b in name.bytes() {
         if b.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&b) {
@@ -234,6 +240,9 @@ pub struct Cloud {
     wake: Option<Waker>,
     /// The open story was changed online and brought down: it is shown again from its file.
     reload: bool,
+    /// The story on the shelf at this path follows another device live (R34): it is neither
+    /// sent up nor brought down meanwhile, as the device holding the pen keeps it online.
+    pub skip: Option<PathBuf>,
     begun: bool,
     was_hidden: bool,
     asked_providers: bool,
@@ -268,6 +277,7 @@ impl Cloud {
             too_big: BTreeMap::new(),
             wake: None,
             reload: false,
+            skip: None,
             begun: false,
             was_hidden: false,
             asked_providers: false,
@@ -275,7 +285,43 @@ impl Cloud {
         }
     }
 
-    fn now(&self) -> f64 {
+    /// The key a story on the shelf has online: its record's, or one made from its id and name.
+    pub fn key_for(&self, path: &Path, id: &str) -> String {
+        let recorded = self.kept.stories.iter().find(|(_, r)| r.path == path).map(|(k, _)| k.clone());
+        recorded.unwrap_or_else(|| key(id, &story_name(path)))
+    }
+
+    /// The version online the shelf's story at this key was last known to agree with.
+    pub fn version_of(&self, key: &str) -> Option<&str> {
+        self.kept.stories.get(key).map(|r| r.version.as_str())
+    }
+
+    /// Say that the story at `key` agrees with a version online, as a device taking the pen of a
+    /// story it followed does (R34): its own changes go up over that version, not beside it.
+    pub fn agree(&mut self, key: String, record: Record) {
+        self.kept.stories.insert(key, record);
+        self.keep();
+    }
+
+    /// Is the shelf's story at `path` online as it is, under `key`: nothing of it to send up?
+    pub fn is_up(&self, key: &str, path: &Path) -> bool {
+        let file = fs::read(path).ok().map(|b| fingerprint(&b));
+        self.kept.stories.get(key).is_some_and(|r| r.path == path && Some(r.hash) == file)
+    }
+
+    /// The means to wake the app, once a frame has given it.
+    pub fn waker(&self) -> Option<Waker> {
+        self.wake.clone()
+    }
+
+    /// Look at once, not on the next round: a story saved must go up now (R34).
+    pub fn up_now(&mut self) {
+        if self.who.is_some() {
+            self.due_now();
+        }
+    }
+
+    pub fn now(&self) -> f64 {
         self.clock.unwrap_or_else(|| crate::platform::since_epoch().as_secs_f64())
     }
 
@@ -596,6 +642,10 @@ impl App {
                 hash: fingerprint(bytes),
                 open_unsaved: open_unsaved && self.path.as_deref() == Some(path.as_path()),
             });
+            // Following another device live: that device keeps it online.
+            if shelf.is_some_and(|(_, path, _)| cloud.skip.as_ref() == Some(path)) {
+                continue;
+            }
             let there = online.iter().find(|o| o.id == key);
             let known = cloud.kept.stories.get(&key);
             if let (Some(l), Some(big)) = (&local, cloud.too_big.get(&key))
@@ -852,9 +902,11 @@ fn story_name(path: &Path) -> String {
 pub mod stand_in {
     use std::cell::RefCell;
     use std::collections::BTreeMap;
+    use std::rc::Rc;
     use std::sync::mpsc::Sender;
 
-    use super::{Answer, Request, Server, Waker, encode};
+    use super::{Answer, LiveSocket, Request, Server, Waker, encode};
+    use crate::platform::Heard;
 
     #[derive(Default)]
     pub struct Online {
@@ -868,6 +920,8 @@ pub mod stand_in {
         pub went_to: Vec<String>,
         /// An answer to give every story request instead: its status, Retry-After, and what it says.
         pub refuse: Option<(u16, u32, String)>,
+        /// The stories' rooms, as `web/api/room.js` keeps them (R34).
+        pub rooms: Rooms,
         /// Scenes painted, of the day's 50, and an answer to give instead of a painting.
         pub painted: u32,
         pub no_painting: Option<(u16, String)>,
@@ -960,6 +1014,138 @@ pub mod stand_in {
 
         fn go_to(&self, path: &str) {
             self.0.borrow_mut().went_to.push(path.into());
+        }
+
+        fn live(&self, path: &str, _wake: Waker) -> Box<dyn LiveSocket> {
+            let rooms = self.0.borrow().rooms.clone();
+            Box::new(Device::join(rooms, path))
+        }
+    }
+
+    /// A story's room as `web/api/room.js` keeps it, with no time in it: a device going frees
+    /// the pen at once, and the holder always answers.
+    #[derive(Default)]
+    pub struct Room {
+        /// Each device here: its id, name, and what it has heard and not yet taken.
+        pub devices: Vec<(String, String, Inbox)>,
+        pub pen: Option<(String, String)>,
+        pub seq: u64,
+        pub version: Option<String>,
+        asked: Option<(String, String)>,
+        /// Every message the room was sent, as (device, kind).
+        pub said: Vec<(String, String)>,
+    }
+
+    pub type Rooms = Rc<RefCell<BTreeMap<String, Room>>>;
+    type Inbox = Rc<RefCell<Vec<Heard>>>;
+
+    impl Room {
+        fn tell(&self, device: &str, message: serde_json::Value) {
+            if let Some((.., heard)) = self.devices.iter().find(|(d, ..)| d == device) {
+                heard.borrow_mut().push(Heard::Message(message.to_string()));
+            }
+        }
+
+        fn everyone(&self, message: serde_json::Value, but: &str) {
+            for (d, ..) in self.devices.iter().filter(|(d, ..)| d != but) {
+                self.tell(d, message.clone());
+            }
+        }
+
+        fn pen_to(&mut self, device: String, name: String) {
+            let message = serde_json::json!({ "t": "pen", "holder": device, "name": name, "seq": self.seq, "version": self.version });
+            self.pen = Some((device, name));
+            self.everyone(message, "");
+        }
+    }
+
+    /// One device in a room.
+    pub struct Device {
+        rooms: Rooms,
+        key: String,
+        id: String,
+        heard: Inbox,
+    }
+
+    impl Device {
+        fn join(rooms: Rooms, path: &str) -> Self {
+            let (key, query) = path.trim_start_matches("/api/live/").split_once('?').unwrap_or_default();
+            let field = |name: &str| query.split('&').find_map(|f| f.strip_prefix(&format!("{name}="))).map(super::decode).unwrap_or_default();
+            let (id, name) = (field("device"), field("name"));
+            let heard = Rc::new(RefCell::new(vec![Heard::Open]));
+            let mut all = rooms.borrow_mut();
+            let room = all.entry(key.to_owned()).or_default();
+            if let Some(i) = room.devices.iter().position(|(d, ..)| *d == id) {
+                room.devices.remove(i).2.borrow_mut().push(Heard::Closed(4000));
+            }
+            room.devices.push((id.clone(), name.clone(), heard.clone()));
+            if room.pen.is_none() {
+                room.pen = Some((id.clone(), name));
+            }
+            let (holder, holder_name) = room.pen.clone().unwrap_or_default();
+            let hello = serde_json::json!({ "t": "hello", "you": id, "holder": holder, "name": holder_name, "seq": room.seq, "version": room.version });
+            room.tell(&id, hello);
+            drop(all);
+            Device { rooms, key: key.to_owned(), id, heard }
+        }
+    }
+
+    impl LiveSocket for Device {
+        fn send(&self, text: &str) {
+            let mut all = self.rooms.borrow_mut();
+            let Some(room) = all.get_mut(&self.key) else { return };
+            let Ok(m) = serde_json::from_str::<serde_json::Value>(text) else { return };
+            let kind = m["t"].as_str().unwrap_or_default().to_owned();
+            room.said.push((self.id.clone(), kind.clone()));
+            let holding = room.pen.as_ref().is_some_and(|(d, _)| *d == self.id);
+            let holder = room.pen.clone().map(|(d, _)| d).unwrap_or_default();
+            match kind.as_str() {
+                "edits" if !holding => room.tell(&self.id, serde_json::json!({ "t": "refused", "why": "not the pen", "seq": room.seq })),
+                "edits" if m["seq"].as_u64() != Some(room.seq + 1) => {
+                    room.tell(&self.id, serde_json::json!({ "t": "refused", "why": "out of order", "seq": room.seq }))
+                }
+                "edits" => {
+                    room.seq += 1;
+                    let mut on = m.clone();
+                    on["t"] = "edits".into();
+                    room.everyone(on, &self.id);
+                }
+                "take" if !holding => {
+                    let me = room.devices.iter().find(|(d, ..)| *d == self.id).map(|(d, n, _)| (d.clone(), n.clone()));
+                    room.asked = me;
+                    room.tell(&holder, serde_json::json!({ "t": "give" }));
+                }
+                "given" if holding => {
+                    if let Some((d, n)) = room.asked.take() {
+                        room.pen_to(d, n);
+                    }
+                }
+                "saved" if holding => {
+                    room.version = m["version"].as_str().map(str::to_owned);
+                    let message = serde_json::json!({ "t": "version", "version": room.version, "seq": room.seq });
+                    room.everyone(message, &self.id);
+                }
+                "whole" if !holding => room.tell(&holder, serde_json::json!({ "t": "save" })),
+                _ => {}
+            }
+        }
+
+        fn take(&self) -> Vec<Heard> {
+            std::mem::take(&mut *self.heard.borrow_mut())
+        }
+    }
+
+    impl Drop for Device {
+        fn drop(&mut self) {
+            let mut all = self.rooms.borrow_mut();
+            let Some(room) = all.get_mut(&self.key) else { return };
+            room.devices.retain(|(d, ..)| *d != self.id);
+            if room.pen.as_ref().is_some_and(|(d, _)| *d == self.id) {
+                room.pen = None;
+                if let Some((d, n, _)) = room.devices.first().cloned() {
+                    room.pen_to(d, n);
+                }
+            }
         }
     }
 }

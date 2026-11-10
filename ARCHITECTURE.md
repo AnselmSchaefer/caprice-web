@@ -99,8 +99,10 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `platform/fs.rs` | Files: the system's on the desktop; in the browser, kept in memory by path and mirrored to IndexedDB (R31) |
 | `platform/worker.rs` | In the browser, a Web Worker for each piece of background work, started from `web/worker.js` with nothing evaluated (R31) |
 | `shelf.rs` | Stories kept in the browser: saving asks for a name, opening lists them (with an upload), each answering the waiting file dialog with a path (R31) |
-| `cloud.rs` | Stories online: signing in and out, what to do with each story (`decide`), one request at a time, `cloud.json`, the Stories online window; a stand-in server for tests (R33) |
+| `cloud.rs` | Stories online: signing in and out, what to do with each story (`decide`), one request at a time, `cloud.json`, the Stories online window; a stand-in server and story rooms for tests (R33, R34) |
+| `live.rs` | A story live on several devices: the room's connection, the pen, batches of edits out, following them in, the hash check and the whole story, the bar and Transfer here (R34) |
 | `web/api/worker.js` | The Worker's own requests, `/api/*` only: signing in with Google or GitHub, the session cookie, stories online in R2, scenes Claude paints for the browser (R33) |
+| `web/api/room.js` | The Durable Object `StoryRoom`, one per story of each writer: the devices it is open on, the pen, batches passed on (R34) |
 | `web/api/ledger.js` | The Durable Object `Ledger`: who has signed up, the current version and history of each story online, the day's scenes, every limit (R33) |
 
 ---
@@ -1788,6 +1790,62 @@ keys), `in_the_browser_nothing_is_asked_of_the_server_until_the_writer_signs_in`
 is asked signed out, and the app's header on what is.
 
 ---
+
+### R34 — One pen per story: one device writes, the others follow, nothing is merged
+
+A story on the shelf, open on several devices of a writer signed in, meets in its room
+(`web/api/room.js`, `StoryRoom`, named from the session's user and the story's key online, so only
+that writer's devices meet there). One device holds the pen; the others follow and cannot edit.
+Plan and reasons: `LIVE_PLAN.md`.
+
+- **Every change of the text goes through `Doc::apply_raw`** (typed, grouped, undone, redone), so
+  that is where the holder gathers what to send (`Doc::outbox`). It sends a batch at most every
+  `BATCH_EVERY` (a second), numbered, with `App::live_hash` after it; the room passes it on and
+  refuses one from a follower or out of order.
+- **A follower applies a batch only as it was made** (`Doc::apply_live`: the old text must be
+  there, nothing touches the final mark), with no undo, the pages worked out from the edit (R3),
+  its caret and selection moved with the text. Anything else (a gap, an edit that does not fit,
+  a hash that differs) and it asks for the whole story: the holder saves, it goes up (R33), and
+  the follower fetches that version (`take_whole`). So **what changes the story outside
+  `Doc::apply` needs nothing more**: page settings, notes, boxes, the cast and scenes reach the
+  followers that way. `live_hash` is the document only (`DocFile::from_doc`, no garden): what
+  is one device's own (the scene being described, Show pictures) must stay out of it, or the
+  devices would never agree.
+- **Following, the story is the holder's**: editing is off (`App::can_edit`; `process_input`
+  keeps only events that read, `reads_only`), and nothing is saved, kept as a version or sent
+  online from here (`keep_safe`, `save_before_leaving`, `page_hidden`, and `Cloud::skip` in
+  `plan`). Its `saved_hash` follows each batch, so it is never "unsaved" and leaving asks nothing.
+  Anything new that changes the story must check `can_edit` (still to do: the toolbar, menus and
+  panels; meanwhile a change there is found by the hash and replaced by the holder's story).
+- **Transfer here** (`take`): the holder sends its last batch, then gives the pen (`given`), or
+  loses it after `LIVE_HAND_OVER_MS`. A device that takes the pen of a story it followed clears
+  its undo and first learns the version online (`take_claim`, `Cloud::agree`), so its saving
+  goes up over that version, not beside it as a story changed in two places (R33). It writes at
+  its own caret, where its reader was.
+- **A device gone** keeps the pen for `LIVE_FREE_AFTER_MS` (30 s), then the first device there
+  has it. A device that comes in to follow asks for the whole story at once: its shelf's copy is
+  older than the holder's. A follower that hears nothing back asks again after 30 s.
+- **The room costs requests, out of 100,000 a day for the whole site on the free plan** (stories
+  online included): each message in is one, pings are answered without waking it, and it writes
+  almost nothing (the batch number goes with the holder's socket, the day's count twenty at a
+  time). `SITE_LIVE_PER_DAY` and `ROOM_MESSAGES_PER_DAY` bound it; `LIVE_OFF = "1"` stops it.
+- **Only the writer's own devices**: the WebSocket cannot carry `X-Caprice`, so `connect` checks
+  its `Origin`, then the session; the room hears who from the Worker, never from the device, and
+  refuses a socket whose session has run out.
+- The browser's side is `platform::live` (a WebSocket per room, `PageSocket`) and
+  `platform::device_name`; tests use `cloud::stand_in`'s rooms, with no time in them.
+
+Tests: in `api.test.mjs`, "the first device holds the pen, the others follow, and every edit
+reaches them", "a follower cannot write, and a batch out of order is refused", "only the writer's
+own devices meet in a story's room", "transfer here: the writer sends its last batch, gives the
+pen, and everyone is told", "a writer that does not answer loses the pen after the hand-over
+time", "a writer gone for a while frees the pen; back sooner, it keeps it", "a follower that lost
+its way has the writer save, and is told what to fetch", "a story's messages for the day run out,
+and too big a message is not taken", "the site's live connections for the day run out, and the
+off switch stops them". In the app:
+`a_story_open_on_two_devices_is_written_on_one_and_followed_live_on_the_other`,
+`a_change_that_is_no_edit_reaches_the_following_device_as_the_whole_story`,
+`transfer_here_moves_the_pen_and_the_other_device_follows_what_is_written_here`.
 
 ## 5. Checklists for common changes
 

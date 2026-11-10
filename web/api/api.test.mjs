@@ -61,10 +61,10 @@ function providers(request) {
 async function start(t, vars = {}) {
   const mf = new Miniflare(convertV4MiniflareOptions({
     modulesRoot: fileURLToPath(new URL(".", import.meta.url)),
-    modules: ["worker.js", "ledger.js"].map(m => ({ type: "ESModule", path: fileURLToPath(new URL(m, import.meta.url)) })),
+    modules: ["worker.js", "ledger.js", "room.js"].map(m => ({ type: "ESModule", path: fileURLToPath(new URL(m, import.meta.url)) })),
     compatibilityDate: DATE,
     r2Buckets: ["STORIES"],
-    durableObjects: { LEDGER: { className: "Ledger", useSQLite: true } },
+    durableObjects: { LEDGER: { className: "Ledger", useSQLite: true }, ROOMS: { className: "StoryRoom", useSQLite: true } },
     bindings: {
       SESSION_SECRET: "a test's own secret, long enough to sign with",
       GOOGLE_CLIENT_ID: "google-app", GOOGLE_CLIENT_SECRET: "google-secret",
@@ -557,4 +557,184 @@ test("a picture comes back without anything that could run or reach outside it",
   for (const kept of ['fill="url(#g)"', 'xlink:href="#g"', 'href="data:image/png;base64,', "<linearGradient", "<rect"]) {
     assert.ok(svg.includes(kept), `${kept} is kept: ${svg}`);
   }
+});
+
+// A device opening story `key` live, as the writer of `cookie`: its socket, every message it was
+// sent, and a way to wait for the next of a kind.
+async function device(mf, cookie, key, id, name = "Firefox on Linux", headers = {}) {
+  const r = await mf.dispatchFetch(`${SITE}/api/live/${key}?device=${id}&name=${encodeURIComponent(name)}`, {
+    headers: { Upgrade: "websocket", Origin: SITE, Cookie: cookie, ...headers },
+  });
+  if (r.status !== 101) return { status: r.status, said: await r.text() };
+  const ws = r.webSocket;
+  const got = [];
+  const waiting = [];
+  ws.addEventListener("message", e => {
+    const m = JSON.parse(e.data);
+    got.push(m);
+    for (const w of waiting.splice(0)) w();
+  });
+  let closed = null;
+  ws.addEventListener("close", e => { closed = e.code; for (const w of waiting.splice(0)) w(); });
+  ws.accept();
+  const next = async (t, ms = 2000) => {
+    const end = Date.now() + ms;
+    for (;;) {
+      const i = got.findIndex(m => m.t === t);
+      if (i >= 0) return got.splice(i, 1)[0];
+      if (closed !== null || Date.now() > end) return null;
+      await Promise.race([new Promise(r => waiting.push(r)), new Promise(r => setTimeout(r, end - Date.now()))]);
+    }
+  };
+  return { status: 101, ws, got, next, say: m => ws.send(JSON.stringify(m)), closed: () => closed };
+}
+
+async function liveWriter(mf, sub, name) {
+  const { session } = await signIn(mf, sub, name);
+  return session;
+}
+
+test("the first device holds the pen, the others follow, and every edit reaches them", async t => {
+  const mf = await start(t);
+  const ada = await liveWriter(mf, "1", "Ada");
+  const laptop = await device(mf, ada, "story-1", "laptop0001", "Firefox on Linux");
+  const hello = await laptop.next("hello");
+  assert.deepEqual([hello.you, hello.holder, hello.seq], ["laptop0001", "laptop0001", 0], "the first one holds the pen");
+  const phone = await device(mf, ada, "story-1", "phone00001", "Chrome on Android");
+  const tablet = await device(mf, ada, "story-1", "tablet0001", "Safari on iOS");
+  for (const d of [phone, tablet]) {
+    const h = await d.next("hello");
+    assert.deepEqual([h.holder, h.name], ["laptop0001", "Firefox on Linux"], "the others are told who writes");
+  }
+  laptop.say({ t: "edits", seq: 1, edits: [{ at: 0, text: "Once" }], hash: "h1", at: 4 });
+  laptop.say({ t: "edits", seq: 2, edits: [{ at: 4, text: " upon" }], hash: "h2", at: 9 });
+  for (const d of [phone, tablet]) {
+    assert.deepEqual((await d.next("edits")).edits, [{ at: 0, text: "Once" }]);
+    const second = await d.next("edits");
+    assert.deepEqual([second.seq, second.hash, second.at], [2, "h2", 9], "in order, with the hash and where it is written");
+  }
+  assert.equal(await laptop.next("edits", 200), null, "the writer is not sent its own");
+});
+
+test("a follower cannot write, and a batch out of order is refused", async t => {
+  const mf = await start(t);
+  const ada = await liveWriter(mf, "1", "Ada");
+  const laptop = await device(mf, ada, "story-1", "laptop0001");
+  const phone = await device(mf, ada, "story-1", "phone00001");
+  await laptop.next("hello");
+  await phone.next("hello");
+  phone.say({ t: "edits", seq: 1, edits: ["sneaked in"], hash: "x" });
+  assert.equal((await phone.next("refused")).why, "not the pen");
+  laptop.say({ t: "edits", seq: 5, edits: ["skipped"], hash: "x" });
+  assert.deepEqual(await laptop.next("refused"), { t: "refused", why: "out of order", seq: 0 });
+  assert.equal(await phone.next("edits", 300), null, "neither reached anyone");
+  laptop.say({ t: "edits", seq: 1, edits: ["fine"], hash: "x" });
+  assert.equal((await phone.next("edits")).seq, 1);
+});
+
+test("only the writer's own devices meet in a story's room", async t => {
+  const mf = await start(t);
+  const ada = await liveWriter(mf, "1", "Ada");
+  const eve = await liveWriter(mf, "2", "Eve");
+  const mine = await device(mf, ada, "story-1", "laptop0001");
+  await mine.next("hello");
+  const theirs = await device(mf, eve, "story-1", "evedevice1");
+  assert.equal((await theirs.next("hello")).holder, "evedevice1", "the same key is another room for another writer");
+  mine.say({ t: "edits", seq: 1, edits: ["private"], hash: "x" });
+  assert.equal(await theirs.next("edits", 300), null, "and hears nothing of it");
+
+  assert.equal((await device(mf, "", "story-1", "nobody0001")).status, 401, "no session");
+  assert.equal((await device(mf, ada, "story-1", "laptop0002", "x", { Origin: "https://elsewhere.test" })).status, 403, "another site");
+  assert.equal((await device(mf, ada, "Not.An_Id", "laptop0003")).status, 400, "not a story's id");
+  assert.equal((await device(mf, ada, "story-1", "x")).status, 400, "not a device's id");
+  const plain = await mf.dispatchFetch(`${SITE}/api/live/story-1?device=laptop0001`, { headers: { Origin: SITE, Cookie: ada } });
+  assert.equal(plain.status, 426, "only a WebSocket");
+});
+
+test("transfer here: the writer sends its last batch, gives the pen, and everyone is told", async t => {
+  const mf = await start(t);
+  const ada = await liveWriter(mf, "1", "Ada");
+  const laptop = await device(mf, ada, "story-1", "laptop0001", "Firefox on Linux");
+  const phone = await device(mf, ada, "story-1", "phone00001", "Chrome on Android");
+  const tablet = await device(mf, ada, "story-1", "tablet0001", "Safari on iOS");
+  for (const d of [laptop, phone, tablet]) await d.next("hello");
+  phone.say({ t: "take" });
+  assert.ok(await laptop.next("give"), "the writer is asked to give the pen");
+  laptop.say({ t: "edits", seq: 1, edits: ["last words"], hash: "x" });
+  laptop.say({ t: "given" });
+  for (const d of [phone, tablet, laptop]) {
+    const pen = await d.next("pen");
+    assert.deepEqual([pen.holder, pen.name, pen.seq], ["phone00001", "Chrome on Android", 1], "the phone writes, on from batch 1");
+  }
+  phone.say({ t: "edits", seq: 2, edits: ["from the phone"], hash: "y" });
+  assert.equal((await laptop.next("edits")).edits[0], "from the phone", "the laptop follows now");
+});
+
+test("a writer that does not answer loses the pen after the hand-over time", async t => {
+  const mf = await start(t, { LIVE_HAND_OVER_MS: "300" });
+  const ada = await liveWriter(mf, "1", "Ada");
+  const laptop = await device(mf, ada, "story-1", "laptop0001");
+  const phone = await device(mf, ada, "story-1", "phone00001");
+  await laptop.next("hello");
+  await phone.next("hello");
+  phone.say({ t: "take" });
+  await laptop.next("give");
+  assert.equal((await phone.next("pen", 3000)).holder, "phone00001", "asleep, it has the pen taken all the same");
+});
+
+test("a writer gone for a while frees the pen; back sooner, it keeps it", async t => {
+  const mf = await start(t, { LIVE_FREE_AFTER_MS: "500" });
+  const ada = await liveWriter(mf, "1", "Ada");
+  let laptop = await device(mf, ada, "story-1", "laptop0001");
+  const phone = await device(mf, ada, "story-1", "phone00001");
+  await laptop.next("hello");
+  await phone.next("hello");
+  laptop.ws.close();
+  await new Promise(r => setTimeout(r, 100));
+  laptop = await device(mf, ada, "story-1", "laptop0001");
+  assert.equal((await laptop.next("hello")).holder, "laptop0001", "a reload keeps the pen");
+  laptop.ws.close();
+  assert.equal((await phone.next("pen", 3000)).holder, "phone00001", "gone long enough, the pen is free");
+});
+
+test("a follower that lost its way has the writer save, and is told what to fetch", async t => {
+  const mf = await start(t);
+  const ada = await liveWriter(mf, "1", "Ada");
+  const laptop = await device(mf, ada, "story-1", "laptop0001");
+  const phone = await device(mf, ada, "story-1", "phone00001");
+  await laptop.next("hello");
+  await phone.next("hello");
+  phone.say({ t: "whole" });
+  assert.ok(await laptop.next("save"), "the writer is asked to save");
+  laptop.say({ t: "saved", version: "v7" });
+  assert.equal((await phone.next("version")).version, "v7");
+  const tablet = await device(mf, ada, "story-1", "tablet0001");
+  assert.equal((await tablet.next("hello")).version, "v7", "a device coming later starts from it too");
+});
+
+test("a story's messages for the day run out, and too big a message is not taken", async t => {
+  const mf = await start(t, { ROOM_MESSAGES_PER_DAY: "2", LIVE_MESSAGE_BYTES: "100" });
+  const ada = await liveWriter(mf, "1", "Ada");
+  const laptop = await device(mf, ada, "story-1", "laptop0001");
+  await laptop.next("hello");
+  laptop.ws.send("x".repeat(101));
+  await laptop.next("never", 300);
+  assert.equal(laptop.closed(), 1009, "too big: closed");
+  const again = await device(mf, ada, "story-1", "laptop0001");
+  await again.next("hello");
+  again.say({ t: "edits", seq: 1, edits: [], hash: "a" });
+  again.say({ t: "edits", seq: 2, edits: [], hash: "b" });
+  again.say({ t: "edits", seq: 3, edits: [], hash: "c" });
+  await again.next("never", 300);
+  assert.equal(again.closed(), 4002, "the day's messages ran out");
+  assert.equal((await device(mf, ada, "story-1", "phone00001")).status, 503, "and no one comes in until tomorrow");
+});
+
+test("the site's live connections for the day run out, and the off switch stops them", async t => {
+  const mf = await start(t, { SITE_LIVE_PER_DAY: "1" });
+  const ada = await liveWriter(mf, "1", "Ada");
+  assert.equal((await device(mf, ada, "story-1", "laptop0001")).status, 101);
+  assert.equal((await device(mf, ada, "story-1", "phone00001")).status, 503);
+  const off = await start(t, { LIVE_OFF: "1" });
+  assert.equal((await device(off, await liveWriter(off, "1", "Ada"), "story-1", "laptop0001")).status, 503);
 });

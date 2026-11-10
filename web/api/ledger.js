@@ -32,6 +32,14 @@ const DEFAULTS = {
   SCENE_TOKENS: 32_000,
   // How many days the scenes painted, by hashed id, are kept for /api/admin/scenes.
   SCENE_DAYS: 30,
+  // A story live on several devices (room.js): connections a day for the site, messages a day
+  // for one story, the most one message holds, how long a device holding the pen may be gone
+  // before another has it, and how long the holder has to hand it over.
+  SITE_LIVE_PER_DAY: 5_000,
+  ROOM_MESSAGES_PER_DAY: 20_000,
+  LIVE_MESSAGE_BYTES: 256_000,
+  LIVE_FREE_AFTER_MS: 30_000,
+  LIVE_HAND_OVER_MS: 3_000,
 };
 
 export function limits(env) {
@@ -242,6 +250,16 @@ export class Ledger extends DurableObject {
       d.by.push({ user: r.user, scenes: r.n });
     }
     return { ok: true, limit: this.limits.SITE_SCENES_PER_DAY, days };
+  }
+
+  // A device opening a story live (room.js): counted against the site's connections for the day.
+  goLive(user, now = Date.now()) {
+    if (!this.known(user)) return { error: 401, message: "Not signed in" };
+    if (this.count(now, "live") >= this.limits.SITE_LIVE_PER_DAY) {
+      return { error: 503, message: "Live editing is paused until tomorrow", retry: untilTomorrow(now) };
+    }
+    this.bump(now, "live");
+    return { ok: true };
   }
 
   // The painting is over, however it went: the writer may ask for the next.

@@ -79,7 +79,7 @@ impl App {
     }
 
     /// The caret may sit anywhere in the text except after the final paragraph mark.
-    fn max_caret(&self) -> usize {
+    pub(crate) fn max_caret(&self) -> usize {
         self.doc.total_chars() - 1
     }
 
@@ -544,7 +544,11 @@ impl App {
         if ctx.egui_wants_keyboard_input() {
             return; // the search box, a note or a number field has the keyboard
         }
-        let events = ctx.input(|i| i.events.clone());
+        let mut events = ctx.input(|i| i.events.clone());
+        // Another device holds the pen (R34): reading, moving, selecting and copying only.
+        if !self.can_edit() {
+            events.retain(reads_only);
+        }
         for e in events {
             match e {
                 Event::Text(t) => {
@@ -1172,3 +1176,18 @@ impl App {
     }
 }
 
+/// An event that only reads the story, as a device following another may do (R34): copying, and
+/// keys that move, select, find or print, not ones that change it.
+fn reads_only(e: &Event) -> bool {
+    match e {
+        Event::Copy => true,
+        Event::Key { key, modifiers, .. } => {
+            let moves = matches!(
+                key,
+                Key::ArrowLeft | Key::ArrowRight | Key::ArrowUp | Key::ArrowDown | Key::Home | Key::End | Key::PageUp | Key::PageDown | Key::Escape
+            );
+            moves && !modifiers.alt || modifiers.command && matches!(key, Key::A | Key::C | Key::F | Key::P | Key::Plus | Key::Minus | Key::Equals | Key::Num0)
+        }
+        _ => !matches!(e, Event::Text(_) | Event::Paste(_) | Event::Cut | Event::Ime(_)),
+    }
+}

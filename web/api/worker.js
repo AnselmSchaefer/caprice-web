@@ -7,8 +7,9 @@
 // from that and the story's checked id. Before anything reaches R2 the Ledger (ledger.js) says
 // whether the limits allow it, so R2 stays inside its free amounts.
 import { Ledger, key, limits } from "./ledger.js";
+import { StoryRoom } from "./room.js";
 
-export { Ledger };
+export { Ledger, StoryRoom };
 
 const SESSION = "__Host-caprice";
 const SIGNING_IN = "__Host-caprice-signin";
@@ -27,7 +28,8 @@ export default {
       console.error("api:", new URL(request.url).pathname, e?.message);
       response = text(500, "Something went wrong");
     }
-    return guarded(response);
+    // A WebSocket handed on as it is: copying the answer would lose it.
+    return response.status === 101 ? response : guarded(response);
   },
 };
 
@@ -60,6 +62,10 @@ async function route(request, env) {
     if (method !== "GET") return text(405, "GET only");
     return signIn[1] === "login" ? login(signIn[2], url, env) : callback(signIn[2], url, request, env);
   }
+
+  // A story live on several devices: a WebSocket, which cannot carry X-Caprice, so its Origin does.
+  const live = path.match(/^\/api\/live\/([^/]+)$/);
+  if (live) return connect(request, env, url, live[1]);
 
   // For the site's owner, with ADMIN_TOKEN, from a terminal: not the app, and no session.
   if (path === "/api/admin/scenes") return admin(request, env);
@@ -250,6 +256,28 @@ function clean(svg) {
   } while (svg !== before);
   // A tag left open or closed alone: no script can follow it, but it goes too.
   return svg.replace(/<\/?(script|foreignObject)\b[^>]*>/gi, "");
+}
+
+// Into a story's room (room.js), named from the session's user and the story's key, so only the
+// writer's own devices meet there. The device says its id (random, kept in the browser) and its
+// name ("Firefox on Linux"); the room hears who and until when from here, never from the device.
+async function connect(request, env, url, key) {
+  if (request.method !== "GET") return text(405, "GET only");
+  if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") return text(426, "Only a WebSocket");
+  if (request.headers.get("Origin") !== url.origin) return text(403, "Not from Caprice");
+  if (!STORY_ID.test(key)) return text(400, "Not a story's id");
+  const session = await opened(request, SESSION, env);
+  if (!session) return text(401, "Not signed in");
+  if (env.SYNC_OFF === "1" || env.LIVE_OFF === "1") return text(503, "Live editing is switched off for now", { "Retry-After": "3600" });
+  const device = url.searchParams.get("device") ?? "";
+  if (!/^[0-9a-z]{8,40}$/.test(device)) return text(400, "Not a device's id");
+  const name = (url.searchParams.get("name") ?? "").replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 60) || "another device";
+  const ledger = env.LEDGER.get(env.LEDGER.idFromName("ledger"));
+  const allowed = await ledger.goLive(session.u);
+  if (!allowed.ok) return refused(allowed);
+  const room = env.ROOMS.get(env.ROOMS.idFromName(`${session.u}/${key}`));
+  const headers = { Upgrade: "websocket", "X-Room-User": session.u, "X-Device": device, "X-Device-Name": name, "X-Until": String(session.x) };
+  return room.fetch("https://room/", { headers });
 }
 
 // The scenes painted lately, by hashed id: `curl -H "Authorization: Bearer $TOKEN" <site>/api/admin/scenes`.

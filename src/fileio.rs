@@ -427,6 +427,14 @@ impl App {
     }
 
     /// A fingerprint of what saving would write, to tell whether anything changed since.
+    /// The story as two devices of a story live on several must agree on it (R34): the document
+    /// only, without what is this device's own (the scene being described, which pictures show)
+    /// or what each grows for itself (the garden).
+    pub fn live_hash(&self) -> u64 {
+        let file = DocFile { garden: Vec::new(), ..DocFile::from_doc(&self.doc) };
+        crate::cloud::fingerprint(serde_json::to_string(&file).unwrap_or_default().as_bytes())
+    }
+
     pub fn content_hash(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();

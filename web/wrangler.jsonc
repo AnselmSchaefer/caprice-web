@@ -14,10 +14,11 @@
   // The stories: private, reached only through the Worker.
   "r2_buckets": [{ "binding": "STORIES", "bucket_name": "caprice-stories" }],
   // Who has signed up, which version of each story is current, and every limit (api/ledger.js).
-  "durable_objects": { "bindings": [{ "name": "LEDGER", "class_name": "Ledger" }] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Ledger"] }],
+  // And each story's room, where the devices it is open on meet (api/room.js).
+  "durable_objects": { "bindings": [{ "name": "LEDGER", "class_name": "Ledger" }, { "name": "ROOMS", "class_name": "StoryRoom" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Ledger"] }, { "tag": "v2", "new_sqlite_classes": ["StoryRoom"] }],
   // Variables set in the dashboard stay across deploys: SYNC_OFF = "1" switches stories online off,
-  // SCENES_OFF = "1" painting scenes.
+  // SCENES_OFF = "1" painting scenes, LIVE_OFF = "1" stories live on several devices.
   "keep_vars": true,
   "vars": {
     // Not secrets: they are in the sign-in links. The secrets are `wrangler secret put`:
@@ -41,6 +42,12 @@
     // about $1.30 with Opus 5.5 (usually $0.25-0.45).
     "SITE_SCENES_PER_DAY": "10",
     "SCENE_PROMPT_BYTES": "160000",
-    "SCENE_TOKENS": "32000"
+    "SCENE_TOKENS": "32000",
+    // A story live on several devices: connections a day for the site, messages a day for one
+    // story. Durable Objects on the free plan allow 100,000 requests a day for the whole site,
+    // stories online included, and each message in is one: a writer sends at most one a second
+    // while typing, a few thousand in a day of writing. See LIVE_PLAN.md.
+    "SITE_LIVE_PER_DAY": "1000",
+    "ROOM_MESSAGES_PER_DAY": "5000"
   }
 }

@@ -184,7 +184,8 @@ impl App {
     /// version if the story changed and none was kept for `KEEP_EVERY`.
     pub fn keep_safe(&mut self, ctx: &egui::Context) {
         let now = ctx.input(|i| i.time);
-        if now - self.keep.checked_at < CHECK_EVERY {
+        // Following another device (R34): the story is that device's to save and keep.
+        if now - self.keep.checked_at < CHECK_EVERY || !self.can_edit() {
             return;
         }
         self.keep.checked_at = now;
@@ -220,7 +221,7 @@ impl App {
     /// and a version kept now, while the page still runs, rather than waiting for its time. Shown
     /// again, nothing happens. Called from `eframe::App::logic`, which runs while hidden too.
     pub fn page_hidden(&mut self, hidden: bool) {
-        if hidden && !self.keep.hidden {
+        if hidden && !self.keep.hidden && self.can_edit() {
             self.save_before_leaving();
             self.keep_now();
             // Saved, leaving loses nothing: no need to wait for the next look to say so.
@@ -268,7 +269,7 @@ impl App {
 
     /// Before opening another story or closing, a story with a file is saved, rather than asked about.
     pub fn save_before_leaving(&mut self) {
-        if self.keep.autosave && self.path.is_some() && self.unsaved() {
+        if self.keep.autosave && self.path.is_some() && self.unsaved() && self.can_edit() {
             self.save_quietly();
         }
     }
