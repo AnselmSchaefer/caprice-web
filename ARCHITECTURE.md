@@ -106,6 +106,7 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `web/api/room.js` | The Durable Object `StoryRoom`, one per story of each writer: the devices it is open on, the pen, batches passed on (R34) |
 | `web/api/failure.js` | What a failed request answers: Cloudflare's daily limit said plainly, with when it lifts; any other fault, "Something went wrong" (R34) |
 | `web/api/ledger.js` | The Durable Object `Ledger`: who has signed up, the current version and history of each story online, the day's scenes, every limit (R33) |
+| `web/api/tally.js` | The day's scenes counted in R2 as well, with conditional writes, for when the Ledger cannot be reached (R33, R34) |
 
 ---
 
@@ -1807,6 +1808,18 @@ that costs money as it is asked:
   it (declined, cut off, no SVG): Claude bills the asking, so the count is a count of what is
   billed. The Ledger is one object, so two writers asking for the last scene at once cannot both
   have it. A new request that has Claude do something needs its own count there, before the call.
+- **Painting goes on without the Ledger, and the day's scenes still bound it** (`tally.js`). Once
+  Cloudflare's daily Durable Object requests are used up (R34) the Ledger answers nothing, but a
+  scene needs only Claude. So each scene the Ledger counts is copied to one small object in R2
+  (`noted`), and while the Ledger throws `OVER_LIMIT` the scene is counted there alone (`tally`),
+  from where the Ledger's count stopped, with R2's conditional writes (`etagMatches`, or
+  `etagDoesNotMatch: "*"` for the first) in place of the Ledger's one call at a time: a count
+  changed meanwhile is read again. Nothing else is asked of the Ledger then: not the one painting
+  at a time for each writer, not `keepPainted` (the picture comes back at once, unkept), not the
+  hashed counts. A session still to be recorded (`k`, signed in without the Ledger) paints too,
+  and is recorded later. Anything new in `scene` that asks the Ledger goes through
+  `unlessOverLimit`, or the picture already paid for is lost to a 503. Test: "with the ledger out
+  of reach scenes are still painted, and the day's scenes still bound them".
 - **The most one scene costs is the Worker's, never the app's**: `SCENE_PROMPT_BYTES` refuses a
   bigger request before anything is counted, and `SCENE_TOKENS` is `max_tokens` (thinking counts
   in it). With Opus 5.5 ($4 and $20 a million tokens in and out) that is at most about $1.30 a
@@ -1938,8 +1951,10 @@ Plan and reasons: `LIVE_PLAN.md`.
   then refuses every Durable Object request until midnight UTC, and the Worker's catch-all answered
   "Something went wrong", which looked like a broken sign-in. Its error (`OVER_LIMIT`) now answers
   503 saying what happened and when it lifts, with `Retry-After` until midnight UTC, so the app
-  pauses stories online that long and shows the words (online backup is off, R33; a painting:
-  "no picture: …"). Signing in still works then (R33). `/api/me` needs no Durable Object and
+  pauses stories online that long and shows the words (online backup is off, R33). Signing in and
+  painting scenes still work then (R33, `tally.js`), so the words name only stories online; the
+  status line wraps them to the window and shows a long message longer (`update_title_and_toast`,
+  test `a_long_message_is_shown_whole_in_a_narrow_window_and_stays_long_enough_to_read`). `/api/me` needs no Durable Object and
   still answers. Any other fault still says only "Something went wrong". Test:
   "cloudflare's daily limit is said plainly, with when it lifts, and other faults say only that".
 - **Only the writer's own devices**: the WebSocket cannot carry `X-Caprice`, so `connect` checks
@@ -2042,7 +2057,7 @@ user, its R2 reads and writes counted by the Ledger first, deleted with the user
 test that its limit refuses and leaves R2 alone (R33). Then `node --test web/api/api.test.mjs`.
 
 **Something new the Worker asks Claude for** (like the scenes): a count in the Ledger that says yes
-before the call and is never given back, its size and `max_tokens` fixed in the Worker, only the
+before the call and is never given back (and in R2 for a day without the Ledger, `tally.js`), its size and `max_tokens` fixed in the Worker, only the
 result sent back, a stand-in answer in `api.test.mjs` and in `cloud::stand_in` (R33).
 
 **Something new pinned to the text** (like notes and scenes): move it in `apply_raw` and in

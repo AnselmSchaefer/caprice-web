@@ -8,7 +8,8 @@
 // whether the limits allow it, so R2 stays inside its free amounts.
 import { Ledger, key, limits } from "./ledger.js";
 import { StoryRoom } from "./room.js";
-import { failure } from "./failure.js";
+import { failure, OVER_LIMIT } from "./failure.js";
+import { noted, tally } from "./tally.js";
 
 export { Ledger, StoryRoom };
 
@@ -92,7 +93,14 @@ async function route(request, env) {
 
   // Signed in while the Ledger could not be reached (`callback`): the sign-up is recorded now,
   // before anything the Ledger keeps, and the session no longer says it is still to be.
-  const answer = await env.LEDGER.get(env.LEDGER.idFromName("ledger")).signIn(session.u);
+  let answer;
+  try {
+    answer = await env.LEDGER.get(env.LEDGER.idFromName("ledger")).signIn(session.u);
+  } catch (e) {
+    // Still out of reach: a scene is painted without it (tally.js), and recorded another time.
+    if (path === "/api/scene" && overLimit(e)) return signedIn(request, env, url, session);
+    throw e;
+  }
   if (!answer.ok) return refused(answer);
   const { k: _, ...recorded } = session;
   const renewed = set(SESSION, await sealed(recorded, env), Math.max(0, Math.floor((session.x - Date.now()) / 1000)));
@@ -232,21 +240,41 @@ async function scene(request, env, user) {
   if (!prompt.trim() || new TextEncoder().encode(prompt).length > l.SCENE_PROMPT_BYTES) return text(413, "There is too much to paint at once");
 
   const ledger = env.LEDGER.get(env.LEDGER.idFromName("ledger"));
-  const allowed = await ledger.paint(user);
+  // The Ledger out of reach for the day (Cloudflare's limit): the scene is counted in R2 instead,
+  // and nothing else is asked of the Ledger, so the picture comes back all the same (tally.js).
+  let allowed = await unlessOverLimit(() => ledger.paint(user));
+  const down = allowed === undefined;
+  if (down) allowed = await tally(env.STORIES, l.SITE_SCENES_PER_DAY);
   if (!allowed.ok) return refused(allowed);
   const left = { "X-Caprice-Scenes-Left": String(allowed.left) };
   try {
+    // What the Ledger counted, R2 counts from should the Ledger go later in the day.
+    if (!down) await noted(env.STORIES, l.SITE_SCENES_PER_DAY - allowed.left).catch(e => console.error("scene: not noted:", e?.message));
     const painted = await paint(prompt, env, l.SCENE_TOKENS);
     if (painted.error) return text(painted.error, painted.message, painted.retry ? { ...left, "Retry-After": String(painted.retry) } : left);
     const id = request.headers.get("X-Caprice-Painting") ?? "";
     const story = request.headers.get("X-Caprice-Story") ?? "";
     const at = Number(request.headers.get("X-Caprice-At"));
-    if (PAINTING_ID.test(id) && STORY_ID.test(story) && Number.isInteger(at) && at >= 0) await ledger.keepPainted(user, id, story, at, painted.svg);
+    // Without the Ledger the picture is not kept for a reload: it is paid for, so it comes back now.
+    if (!down && PAINTING_ID.test(id) && STORY_ID.test(story) && Number.isInteger(at) && at >= 0) {
+      await unlessOverLimit(() => ledger.keepPainted(user, id, story, at, painted.svg));
+    }
     return new Response(painted.svg, { headers: { "Content-Type": "image/svg+xml; charset=utf-8", ...left } });
   } finally {
-    await ledger.painted(user);
+    if (!down) await unlessOverLimit(() => ledger.painted(user));
   }
 }
+
+// A call to a Durable Object, or undefined once Cloudflare's daily limit refuses it (`OVER_LIMIT`).
+async function unlessOverLimit(call) {
+  try {
+    return await call();
+  } catch (e) {
+    if (!overLimit(e)) throw e;
+  }
+}
+
+const overLimit = e => OVER_LIMIT.test(e?.message ?? "");
 
 // Claude's answer in one piece, not streamed: the Worker waits for it without using its CPU
 // time (10 ms a request on the free plan), where reading thousands of streamed events would not.

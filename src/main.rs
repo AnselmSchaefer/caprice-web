@@ -441,15 +441,20 @@ impl App {
             self.status_at = now;
         }
         let age = now - self.status_at;
-        const SHOW_FOR: f64 = 4.0;
-        if !self.shown_status.is_empty() && age < SHOW_FOR {
-            let text = self.shown_status.trim_start_matches(['-', ' ']).to_owned();
-            let fade = (((SHOW_FOR - age) / 0.6) as f32).clamp(0.0, 1.0);
-            let galley = ui.painter().layout_no_wrap(text, egui::FontId::proportional(13.0), theme::pal().text.gamma_multiply(fade));
+        let text = self.shown_status.trim_start_matches(['-', ' ']).to_owned();
+        // A long message (a limit of the server's, with when it lifts) stays long enough to be read.
+        let show_for = (4.0 + text.chars().count() as f64 / 40.0).min(12.0);
+        if !text.is_empty() && age < show_for {
+            let fade = (((show_for - age) / 0.6) as f32).clamp(0.0, 1.0);
+            // Wrapped to the window, never wider than a comfortable line, so no end of it is cut off.
+            let wrap = (area.width() - 56.0).clamp(120.0, 640.0);
+            let font = egui::FontId::proportional(13.0);
+            let galley = ui.painter().layout(text, font, theme::pal().text.gamma_multiply(fade), wrap);
             let size = galley.size() + egui::vec2(28.0, 14.0);
             let above = if self.bar.side == ui::BarSide::Bottom { ui::DOCK_H } else { 0.0 };
-            let center = egui::pos2(area.center().x, area.bottom() - ui::DOCK_GAP - above - 26.0);
-            let pill = Rect::from_center_size(center, size);
+            // Its bottom where a one-line message's is, so more lines grow upwards, not over the bar.
+            let bottom = area.bottom() - ui::DOCK_GAP - above - 10.0;
+            let pill = Rect::from_center_size(egui::pos2(area.center().x, bottom - size.y / 2.0), size);
             ui.painter().rect_filled(pill, 12.0, theme::pal().dock.gamma_multiply(fade));
             ui.painter().rect_stroke(pill, 12.0, egui::Stroke::new(1.0, theme::pal().dock_edge.gamma_multiply(fade)), egui::StrokeKind::Inside);
             ui.painter().galley(pill.center() - galley.size() / 2.0, galley, theme::pal().text);
@@ -1758,6 +1763,27 @@ mod tests {
         h.click_widget("More tools");
         assert!(h.app.more_tools);
         assert_eq!(painted_name(&h).1, room);
+    }
+
+    #[test]
+    fn a_long_message_is_shown_whole_in_a_narrow_window_and_stays_long_enough_to_read() {
+        let mut h = Harness::new();
+        h.width = 700.0;
+        h.frames(3, vec![], Modifiers::NONE);
+        let said = "Caprice's server has used up what its host, Cloudflare, allows it in a day. Stories online are off \
+            until midnight UTC, in about 6 hours. What you write stays safe in this browser.";
+        h.app.status = format!("- {said}");
+        h.frames(2, vec![], Modifiers::NONE);
+        let shown = h.painted.iter().find_map(|cs| match &cs.shape {
+            egui::Shape::Text(t) if t.galley.job.text == said => Some(t.visual_bounding_rect()),
+            _ => None,
+        });
+        let shown = shown.expect("the message is shown");
+        assert!(shown.left() >= 0.0 && shown.right() <= h.width, "it fits the window: {shown:?}");
+        assert!(shown.height() > 20.0, "on more than one line: {shown:?}");
+        h.time += 6.0;
+        h.frames(1, vec![], Modifiers::NONE);
+        assert!(painted_texts(&h).iter().any(|t| t == said), "still there after 6 seconds");
     }
 
     #[test]

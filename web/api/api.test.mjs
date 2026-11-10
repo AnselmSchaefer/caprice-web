@@ -66,7 +66,7 @@ const opened = new WeakMap();
 async function start(t, vars = {}, down = false) {
   const mf = new Miniflare(convertV4MiniflareOptions({
     modulesRoot: fileURLToPath(new URL(".", import.meta.url)),
-    modules: [...(down ? ["ledger-down.mjs"] : []), "worker.js", "ledger.js", "room.js", "failure.js"].map(m => ({ type: "ESModule", path: fileURLToPath(new URL(m, import.meta.url)) })),
+    modules: [...(down ? ["ledger-down.mjs"] : []), "worker.js", "ledger.js", "room.js", "failure.js", "tally.js"].map(m => ({ type: "ESModule", path: fileURLToPath(new URL(m, import.meta.url)) })),
     compatibilityDate: DATE,
     r2Buckets: ["STORIES"],
     durableObjects: { LEDGER: { className: down ? "DownLedger" : "Ledger", useSQLite: true }, ROOMS: { className: "StoryRoom", useSQLite: true } },
@@ -595,6 +595,35 @@ test("when the credit is used up, painting is paused, and claude being down is s
   const down = await paint(api);
   assert.equal(down.status, 502);
   assert.equal(await down.text(), "Claude could not be asked");
+});
+
+test("with the ledger out of reach scenes are still painted, and the day's scenes still bound them", async t => {
+  const mf = await start(t, { SITE_SCENES_PER_DAY: "5" }, true);
+  const namespace = await mf.getDurableObjectNamespace("LEDGER");
+  const ledger = namespace.get(namespace.idFromName("ledger"));
+  const ada = await writer(mf, "1", "Ada");
+  assert.equal((await paint(ada)).headers.get("X-Caprice-Scenes-Left"), "4", "counted by the ledger");
+
+  await ledger.down(true);
+  assert.equal((await ada("/api/stories")).status, 503, "stories online wait for it");
+  const got = await paint(ada);
+  assert.equal(got.status, 200, "a scene does not");
+  assert.ok((await got.text()).startsWith("<svg"));
+  assert.equal(got.headers.get("X-Caprice-Scenes-Left"), "3", "counted on from the ledger's count");
+  const bob = await writer(mf, "2", "Bob");
+  assert.equal((await paint(bob)).status, 200, "one signed in meanwhile, still to be recorded, paints too");
+
+  // Two writers asking for the last scenes at once: no more than there are.
+  const asked = await Promise.all([paint(ada), paint(bob), paint(ada)]);
+  assert.deepEqual(asked.map(a => a.status).sort(), [200, 200, 503]);
+  const refused = await paint(bob);
+  assert.equal(refused.status, 503);
+  assert.match(await refused.text(), /No more scenes today/);
+  assert.ok(Number(refused.headers.get("Retry-After")) <= 86_400, "until tomorrow");
+  assert.equal(claude.asked.length, 5, "claude was asked for the day's five, no more");
+
+  await ledger.down(false);
+  assert.equal((await ada("/api/stories")).status, 200, "and stories online come back");
 });
 
 test("the site's owner sees the scenes of each day by hashed id, and nobody else does", async t => {
