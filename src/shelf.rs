@@ -24,8 +24,8 @@ pub struct Shelf {
 enum Asking {
     /// A name to save the story under.
     Name { name: String, tx: Sender<Option<PathBuf>>, focused: bool },
-    /// Which story to open.
-    Open { stories: Vec<Kept>, tx: Sender<Option<PathBuf>> },
+    /// Which story to open; and whether to delete one, when its delete button was pressed.
+    Open { stories: Vec<Kept>, tx: Sender<Option<PathBuf>>, deleting: Option<PathBuf> },
 }
 
 /// A story on the shelf.
@@ -65,7 +65,7 @@ impl Shelf {
             })
             .collect();
         stories.sort_by_key(|k| std::cmp::Reverse(k.changed));
-        self.asking = Some(Asking::Open { stories, tx });
+        self.asking = Some(Asking::Open { stories, tx, deleting: None });
     }
 }
 
@@ -76,6 +76,28 @@ pub(crate) fn file_name(name: &str) -> String {
 }
 
 impl App {
+    /// Delete a story on the shelf: from this browser, from the stories last opened, and online,
+    /// where the writer's other devices learn of it and delete theirs (R33). The open story is
+    /// never deleted. It stays in the Versions window, to bring back.
+    pub fn delete_story(&mut self, path: &std::path::Path) {
+        if self.path.as_deref() == Some(path) {
+            return;
+        }
+        self.cloud.deleted(path);
+        self.forget_story(path);
+        self.status = "- deleted".into();
+    }
+
+    /// The story at `path` goes from the shelf and the list, kept among the versions first.
+    pub(crate) fn forget_story(&mut self, path: &std::path::Path) {
+        if let Ok(json) = crate::platform::fs::read_to_string(path) {
+            let name = path.file_stem().map_or(String::new(), |s| s.to_string_lossy().into_owned());
+            self.keep_deleted(&json, name);
+        }
+        let _ = crate::platform::fs::remove_file(path);
+        self.start.forget(path);
+    }
+
     /// The shelf's question, while it asks one.
     pub fn shelf_window(&mut self, ctx: &egui::Context) {
         let (Some(dir), Some(asking)) = (self.shelf.dir.clone(), self.shelf.asking.as_mut()) else { return };
@@ -83,6 +105,8 @@ impl App {
         let mut open = true;
         let mut answer: Option<Option<PathBuf>> = None;
         let mut upload = false;
+        let mut delete = None;
+        let shown = self.path.clone();
         let title = if matches!(asking, Asking::Name { .. }) { "Save in this browser" } else { "Open a story" };
         egui::Window::new(title)
             .id(Id::new("shelf"))
@@ -117,13 +141,25 @@ impl App {
                         }
                     });
                 }
-                Asking::Open { stories, .. } => {
+                Asking::Open { stories, deleting, .. } => {
                     if stories.is_empty() {
                         ui.weak("No story is kept in this browser yet.");
                     }
                     let now = crate::platform::since_epoch().as_secs();
                     egui::ScrollArea::vertical().id_salt("shelf_stories").max_height(320.0).show(ui, |ui| {
                         for k in stories.iter() {
+                            if deleting.as_ref() == Some(&k.path) {
+                                ui.label(format!("Delete \u{201c}{}\u{201d} here, and online on every device? It stays under File \u{203a} Versions.", k.name));
+                                ui.horizontal(|ui| {
+                                    if ui.button(egui::RichText::new("Delete").color(crate::leave::WARN)).clicked() {
+                                        delete = Some(k.path.clone());
+                                    }
+                                    if ui.button("Keep").clicked() {
+                                        *deleting = None;
+                                    }
+                                });
+                                continue;
+                            }
                             ui.horizontal(|ui| {
                                 if ui.button(&k.name).on_hover_text("Open this story").clicked() {
                                     answer = Some(Some(k.path.clone()));
@@ -133,6 +169,11 @@ impl App {
                                 }
                                 if let Some(online) = k.online {
                                     ui.weak(format!("\u{00b7} {online}"));
+                                }
+                                // Not the story open: it is being written in.
+                                let gone = egui::Button::new(egui::RichText::new("Delete\u{2026}").weak()).frame(false);
+                                if shown.as_ref() != Some(&k.path) && ui.add(gone).on_hover_text("Delete this story here and online").clicked() {
+                                    *deleting = Some(k.path.clone());
                                 }
                             });
                         }
@@ -146,6 +187,13 @@ impl App {
             });
         if !open || ctx.input(|i| i.key_pressed(Key::Escape)) {
             answer = answer.or(Some(None));
+        }
+        if let Some(path) = delete {
+            self.delete_story(&path);
+            if let Some(Asking::Open { stories, deleting, .. }) = &mut self.shelf.asking {
+                stories.retain(|k| k.path != path);
+                *deleting = None;
+            }
         }
         if upload {
             // The picker answers the same waiting dialog, once the file is in.

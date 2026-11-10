@@ -412,6 +412,8 @@ pub enum Leaving {
     Close,
     /// Beginning a new blank story (in the browser's File menu).
     New,
+    /// Closing the story, back to the welcome page (in the browser: its File menu, and back).
+    Home,
 }
 
 /// A file dialog showing on its own thread.
@@ -508,6 +510,17 @@ impl App {
             self.leaving = Some(Leaving::New);
         } else {
             self.leave(ctx, Leaving::New);
+        }
+    }
+
+    /// Close the story and go back to the welcome page, first asking about unsaved changes, as
+    /// opening another does.
+    pub fn close_story(&mut self, ctx: &egui::Context) {
+        self.save_before_leaving();
+        if self.unsaved() || self.changed_since_saved() {
+            self.leaving = Some(Leaving::Home);
+        } else {
+            self.leave(ctx, Leaving::Home);
         }
     }
 
@@ -613,6 +626,15 @@ impl App {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             Leaving::New => self.begin(ctx, crate::start::Kind::Blank),
+            // The story is put away: a blank page lies under the welcome, with no file, so it is
+            // out of its live room and nothing of it is open to the stories online.
+            Leaving::Home => {
+                self.keep_now();
+                self.begin(ctx, crate::start::Kind::Blank);
+                self.start.open = true;
+                self.start.stories = None;
+                self.status.clear();
+            }
         }
     }
 

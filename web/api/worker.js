@@ -104,7 +104,9 @@ async function route(request, env) {
   if (path === "/api/stories") {
     if (method === "GET") {
       const answer = await ledger.list(user);
-      return answer.ok ? json(answer.stories) : refused(answer);
+      if (!answer.ok) return refused(answer);
+      // `?gone=1`: with the stories deleted lately, for the app to delete its copies too.
+      return json(url.searchParams.get("gone") === "1" ? { stories: answer.stories, gone: answer.gone } : answer.stories);
     }
     if (method === "DELETE") {
       const answer = await ledger.removeAll(user);

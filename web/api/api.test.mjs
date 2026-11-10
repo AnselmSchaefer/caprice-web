@@ -390,6 +390,27 @@ test("a story deleted online is gone from r2, history and all", async t => {
   assert.deepEqual(await (await api("/api/stories")).json(), []);
 });
 
+test("a story deleted is listed as gone for the writer's other devices, until it is saved again", async t => {
+  const mf = await start(t);
+  const api = await writer(mf, "1", "Ada");
+  const other = await writer(mf, "2", "Bea");
+  const { version } = await (await saveNew(api, "a", story("v1"))).json();
+  await saveNew(api, "b", story("b"));
+  assert.equal((await api("/api/stories/a", { method: "DELETE", headers: { "If-Match": `"${version}"` } })).status, 204);
+  const listed = await (await api("/api/stories?gone=1")).json();
+  assert.deepEqual(listed.stories.map(s => s.id), ["b"]);
+  assert.deepEqual(listed.gone, [{ id: "a", version }], "with the version it was when it went");
+  assert.deepEqual((await (await other("/api/stories?gone=1")).json()).gone, [], "only to its own writer");
+  assert.deepEqual((await (await api("/api/stories")).json()).map(s => s.id), ["b"], "without asking, the list as before");
+  // Written in on another device meanwhile, it comes back, and is no longer gone.
+  assert.equal((await saveNew(api, "a", story("v2"))).status, 200);
+  assert.deepEqual((await (await api("/api/stories?gone=1")).json()).gone, []);
+  const { version: b } = (await (await api("/api/stories?gone=1")).json()).stories.find(s => s.id === "b");
+  await api("/api/stories/b", { method: "DELETE", headers: { "If-Match": `"${b}"` } });
+  assert.equal((await api("/api/stories", { method: "DELETE" })).status, 204);
+  assert.deepEqual((await (await api("/api/stories?gone=1")).json()).gone, [], "deleting them all forgets what went");
+});
+
 test("the off switch stops stories online at once", async t => {
   const mf = await start(t, { SYNC_OFF: "1" });
   const api = await writer(mf, "1", "Ada");

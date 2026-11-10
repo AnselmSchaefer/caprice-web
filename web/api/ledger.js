@@ -36,6 +36,9 @@ const DEFAULTS = {
   // this many hours at most, and this many for each writer.
   PAINTED_HOURS: 48,
   PAINTED_PER_USER: 20,
+  // A story deleted is listed as gone for this many days, so the writer's other devices delete
+  // their copy too rather than put it back.
+  GONE_DAYS: 180,
   // A story live on several devices (room.js): connections a day for the site, messages a day
   // for one story, the most one message holds, how long a device holding the pen may be gone
   // before another has it, and how long the holder has to hand it over.
@@ -86,6 +89,7 @@ export class Ledger extends DurableObject {
       CREATE TABLE IF NOT EXISTS recent (user TEXT, at INTEGER);
       CREATE TABLE IF NOT EXISTS painting (user TEXT PRIMARY KEY, until INTEGER);
       CREATE TABLE IF NOT EXISTS scene_days (day TEXT, user TEXT, n INTEGER NOT NULL, PRIMARY KEY (day, user));
+      CREATE TABLE IF NOT EXISTS gone (user TEXT, id TEXT, version TEXT, at INTEGER, PRIMARY KEY (user, id));
       CREATE TABLE IF NOT EXISTS painted (user TEXT, id TEXT, story TEXT, at INTEGER, svg TEXT, made INTEGER,
         PRIMARY KEY (user, id));
     `);
@@ -120,10 +124,13 @@ export class Ledger extends DurableObject {
     return { ok: true };
   }
 
-  list(user) {
+  // The writer's stories, and the ones deleted lately with the version each was when it went.
+  list(user, now = Date.now()) {
     if (!this.known(user)) return { error: 401, message: "Not signed in" };
     const stories = this.rows("SELECT id, name, version, modified, size FROM stories WHERE user = ? ORDER BY modified DESC", user);
-    return { ok: true, stories };
+    this.sql.exec("DELETE FROM gone WHERE at <= ?", now - this.limits.GONE_DAYS * DAY);
+    const gone = this.rows("SELECT id, version FROM gone WHERE user = ?", user);
+    return { ok: true, stories, gone };
   }
 
   // Which version of a story to read from R2, counted against the day's reads.
@@ -203,6 +210,8 @@ export class Ledger extends DurableObject {
     this.sql.exec(`INSERT INTO stories VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (user, id)
       DO UPDATE SET name = excluded.name, version = excluded.version, modified = excluded.modified, size = excluded.size`,
       user, id, name, version, now, pending.size);
+    // Saved again after it was deleted (written in somewhere meanwhile): it is no longer gone.
+    this.sql.exec("DELETE FROM gone WHERE user = ? AND id = ?", user, id);
     const [, before, ...older] = this.rows("SELECT version, at FROM versions WHERE user = ? AND id = ? ORDER BY at DESC, version DESC", user, id);
     const kept = before ? [before] : [];
     const drop = [];
@@ -298,7 +307,9 @@ export class Ledger extends DurableObject {
     this.sql.exec("DELETE FROM painting WHERE user = ?", user);
   }
 
-  remove(user, id, ifMatch) {
+  // One story deleted: its copies go from R2, and it is listed as gone (`list`), so that a device
+  // whose copy is the version deleted deletes it too.
+  remove(user, id, ifMatch, now = Date.now()) {
     if (!this.known(user)) return { error: 401, message: "Not signed in" };
     const story = this.rows("SELECT version FROM stories WHERE user = ? AND id = ?", user, id)[0];
     if (!story) return { error: 404, message: "No such story online" };
@@ -306,6 +317,7 @@ export class Ledger extends DurableObject {
     const gone = this.rows("SELECT version FROM versions WHERE user = ? AND id = ?", user, id);
     this.sql.exec("DELETE FROM versions WHERE user = ? AND id = ?", user, id);
     this.sql.exec("DELETE FROM stories WHERE user = ? AND id = ?", user, id);
+    this.sql.exec("INSERT OR REPLACE INTO gone VALUES (?, ?, ?, ?)", user, id, story.version, now);
     return { ok: true, drop: gone.map(v => key(user, id, v.version)) };
   }
 
@@ -313,7 +325,7 @@ export class Ledger extends DurableObject {
     if (!this.known(user)) return { error: 401, message: "Not signed in" };
     const gone = this.rows("SELECT id, version FROM versions WHERE user = ?", user);
     // Who painted how many goes too; the day's total for the site stays, so it is no way round the limit.
-    for (const table of ["versions", "stories", "pending", "scene_days", "painted"]) this.sql.exec(`DELETE FROM ${table} WHERE user = ?`, user);
+    for (const table of ["versions", "stories", "pending", "gone", "scene_days", "painted"]) this.sql.exec(`DELETE FROM ${table} WHERE user = ?`, user);
     return { ok: true, drop: gone.map(v => key(user, v.id, v.version)) };
   }
 }

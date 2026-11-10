@@ -1047,7 +1047,25 @@ file dialog, or a story that cannot be read, leaves the page up.
   was last opened (`Keeper::now`, so tests set the clock), newest first, at most `REMEMBER`. What
   the page tells about each (words, chapters, post-its, paper, first words, when changed) is read
   from the files once, when it first shows (`Start::stories`), never each frame. A file moved or
-  deleted since is left out of what is shown, not out of the list.
+  deleted since is left out of what is shown, not out of the list. **With a shelf (in the browser)
+  the page shows every story kept there** (`Start::listed`, "Your stories"): the ones last opened
+  first, then the rest, last changed first, said to be opened only if they were on the list. A
+  browser has no other place to find a story, and a duplicate kept "from another browser" must
+  be in reach to delete.
+- **Coming back to it closes the story** (`close_story`, `Leaving::Home`): File › Close story
+  with a shelf, and in the browser the back button (a phone's too). It asks about changes as
+  opening another does, then keeps a version, puts a blank page under the welcome (`begin`, so
+  there is no file: the story is out of its live room, R34, and nothing of it is open to `plan`,
+  R33) and reads the list again. The back button is `platform::story_shown` / `went_back`: while
+  a story shows the page's history has one entry for it, pushed once; closing from the menu leaves
+  it there, as taking it away (`history.back()`) would arrive late and could close the next story.
+  Tests press it with `platform::press_back`; `web/smoke.mjs` presses the real one.
+- **A row of the list can go** (`Row`, `Start::asking`): its button asks in the row itself, then
+  with a shelf deletes the story (`delete_story`: from the shelf, the list and online, R33), and
+  without one only takes it off the list (`Start::forget`): on the desktop the file is the
+  writer's own. "Open a story" on the shelf offers the same for every story but the open one. A
+  story deleted is kept among the versions with no file (`keep_deleted`), so the Versions window
+  lists it as a story never saved, to bring back.
 - **Tests never write it behind your back**: `Harness::new` sets no file and an empty list; the
   tests about it use `Start::kept_in` with a folder of their own. What the page paints is read
   with `Harness::painted_texts` / `painted_at`; the kinds and stories are buttons for `click_widget`.
@@ -1055,7 +1073,10 @@ file dialog, or a story that cannot be read, leaves the page up.
   `the_sheet_chosen_flies_to_the_desk_while_the_welcome_fades`,
   `nothing_lies_on_the_desk_where_the_sheet_chosen_lands_until_it_lands`,
   `a_new_novel_begins_on_book_pages_at_chapter_one_and_a_journal_at_today`,
-  `escape_on_the_welcome_page_begins_a_blank_story`.
+  `escape_on_the_welcome_page_begins_a_blank_story`,
+  `in_the_browser_back_and_close_story_go_back_to_the_welcome_page`,
+  `in_the_browser_open_a_story_offers_to_delete_every_story_but_the_open_one`,
+  `in_the_browser_the_welcome_page_shows_every_story_kept_here_after_the_ones_last_opened`.
 
 ### R28 — The cast peeks out: a puppet in parts, behind the page, only while the writer rests
 
@@ -1711,7 +1732,13 @@ In the app (`cloud.rs`) **the shelf is where a story is; online is a copy, and n
   story with changes not saved), the record of when the two sides last agreed, and the version
   online. Changed on both sides, or never agreed and different, the copy online is saved beside
   the shelf's as "<name> (from another browser)"; the shelf's goes up over it. A story only on one
-  side goes to the other, even if it was deleted there. Something new that writes stories on the
+  side goes to the other, even if it was deleted there, **unless it was deleted on purpose**: a
+  story deleted here (`delete_story`) is named in `cloud.json` (`deleting`, with the version it
+  agreed with) until `DELETE` has gone, and is neither sent up nor brought down meanwhile. The
+  Ledger then lists it as gone (`GET /api/stories?gone=1`, `GONE_DAYS`), with that version, and
+  another device whose copy is that version, unchanged since, deletes its own (`Do::Delete`); one
+  written in since puts it back, and an open one waits until it is closed. A story changed online
+  before the delete arrives (412) is kept, and comes down again. Something new that writes stories on the
   shelf needs nothing more: a changed file is found by its fingerprint (`fingerprint`, stable in
   every browser), not by being told.
 - **The open story is never written over** while it has changes not saved: the copy from online
@@ -1776,7 +1803,8 @@ are refused", "requests from another site are refused", "a sign-in not started h
 "a save must say which copy it replaces, and a stale one is refused", "the site's writes for the
 day pause everyone, and leave r2 alone", "the site's room is shared by everyone", "a writer's room
 drops their oldest history first, then refuses", "only caprice stories, within the size limit, are
-kept", "the off switch stops stories online at once", "a scene is painted for a writer signed in, and only
+kept", "a story deleted is listed as gone for the writer's other devices, until it is saved
+again", "the off switch stops stories online at once", "a scene is painted for a writer signed in, and only
 the picture comes back", "the site's scenes for the day run out for everyone, and claude is not
 asked again", "a painting that fails or is declined still counts, since claude was asked", "a
 writer paints one scene at a time", "too much to paint is refused before anything is counted",
@@ -1792,6 +1820,8 @@ keys), `in_the_browser_nothing_is_asked_of_the_server_until_the_writer_signs_in`
 `words_typed_and_not_yet_saved_are_never_written_over_by_a_story_from_online`,
 `a_limit_pauses_stories_online_and_they_go_up_once_it_lifts`,
 `signing_out_keeps_the_stories_in_this_browser_and_sends_nothing_more`,
+`a_story_deleted_on_the_welcome_page_goes_here_online_and_on_the_writer_s_other_devices`,
+`a_story_deleted_on_another_device_and_written_in_here_meanwhile_is_kept`,
 `deleting_the_stories_online_signs_out_and_leaves_them_here`,
 `in_a_new_browser_the_stories_from_online_are_on_the_welcome_page`,
 `signed_in_the_welcome_greets_the_writer_by_their_first_name`,

@@ -369,6 +369,8 @@ enum FileAction {
     Download,
     /// With a shelf (in the browser): a new blank story.
     New,
+    /// With a shelf (in the browser): back to the welcome page and every story.
+    Close,
     /// With a shelf and a server (in the browser): the Stories online window.
     Online,
 }
@@ -711,8 +713,9 @@ impl App {
             // keeps it for a new window.)
             let download = cfg!(target_arch = "wasm32").then_some(("Download a copy (.caprice)", "", FileAction::Download));
             let new = self.shelf.dir.is_some().then_some(("New", "", FileAction::New));
+            let close = self.shelf.dir.is_some().then_some(("Close story", "", FileAction::Close));
             let online = (self.shelf.dir.is_some() && self.cloud.server.is_some()).then_some(("Stories online\u{2026}", "", FileAction::Online));
-            for (label, shortcut, action) in new.into_iter().chain(items).chain(download).chain(online) {
+            for (label, shortcut, action) in new.into_iter().chain(close).chain(items).chain(download).chain(online) {
                 let button = egui::Button::new(label).shortcut_text(shortcut).frame(false);
                 if ui.add(button).clicked() {
                     out.file = Some(action);
@@ -997,6 +1000,7 @@ impl App {
             Some(FileAction::Revert) => self.drop_changes(ctx),
             Some(FileAction::Info) => self.open_info(),
             Some(FileAction::New) => self.new_story(ctx),
+            Some(FileAction::Close) => self.close_story(ctx),
             Some(FileAction::Online) => self.cloud.open = true,
             #[cfg(target_arch = "wasm32")]
             Some(FileAction::Download) => self.download_story(),

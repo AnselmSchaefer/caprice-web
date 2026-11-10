@@ -14,7 +14,7 @@ use crate::start::{Kind, Sheet};
 use crate::theme::pal;
 
 /// The colour of the button that throws changes away.
-const WARN: Color32 = Color32::from_rgb(236, 128, 116);
+pub(crate) const WARN: Color32 = Color32::from_rgb(236, 128, 116);
 
 /// What the dialog tells about the story, worked out once for each state of it.
 #[derive(Clone)]
@@ -83,6 +83,7 @@ impl App {
             Leaving::Open => "before opening another story",
             Leaving::Close => "before Caprice closes",
             Leaving::New => "before beginning a new story",
+            Leaving::Home => "before going back to your stories",
         };
         let (title, said, change) = match &self.path {
             None => (

@@ -118,6 +118,7 @@ fn main() {
                     let mut app = start_app(cc);
                     app.start.open = true;
                     platform::frame_on_visibility_change(&cc.egui_ctx);
+                    platform::frame_on_back(&cc.egui_ctx);
                     platform::note_what_presses();
                     Ok(Box::new(app))
                 }),
@@ -643,6 +644,11 @@ impl App {
         self.live_frame(&ctx);
         self.guard_close(&ctx);
         self.ensure_textures(&ctx);
+        // The browser's back button (a phone's) closes the story, as "Close story" does (R27).
+        if platform::went_back() && !self.start.open && self.leaving.is_none() && self.dialog.is_none() {
+            self.close_story(&ctx);
+        }
+        platform::story_shown(!self.start.open);
         // Opened without a file, the welcome page stands in for the desk until a story is chosen.
         if self.start.open {
             if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::O)) {
@@ -8270,6 +8276,157 @@ mod tests {
         assert!(h.app.cloud.who.is_none(), "and signed out, so they are not put back");
         assert!(h.labels().contains("Your stories online are deleted"), "the writer is told");
         assert!(dir.join("Mine alone.caprice").exists(), "still here");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn in_the_browser_back_and_close_story_go_back_to_the_welcome_page() {
+        let dir = test_dir("back-home");
+        let mut h = started_without_a_file(&dir);
+        h.app.shelf.dir = Some(dir.join("shelf"));
+        h.click_widget("Blank page");
+        h.frames((start::FLIGHT * 60.0) as usize + 2, vec![], Modifiers::NONE);
+        h.type_text("Back to the start.");
+        h.save_on_shelf();
+
+        // Saved: back goes straight to the welcome page, which offers the story to open again.
+        platform::press_back();
+        h.frames(3, vec![], Modifiers::NONE);
+        assert!(h.app.start.open, "the welcome page shows");
+        assert!(h.app.path.is_none() && h.text().is_empty(), "the story is put away");
+        assert!(h.painted_texts().contains("Back to the start"), "and is among the stories: {}", h.painted_texts());
+        h.click_widget("Back to the start");
+        h.frames((start::FLIGHT * 60.0) as usize + 2, vec![], Modifiers::NONE);
+        assert_eq!(h.text(), "Back to the start.");
+
+        // With changes not saved, it asks first; going on writing stays.
+        h.type_text(" More.");
+        platform::press_back();
+        h.frames(3, vec![], Modifiers::NONE);
+        assert_eq!(h.app.leaving, Some(fileio::Leaving::Home), "it asks");
+        assert!(h.labels().contains("before going back to your stories"), "{}", h.labels());
+        h.click_widget("Cancel");
+        assert!(!h.app.start.open && h.text().contains("More."), "still writing");
+
+        // The File menu closes it too, and saving on the way keeps the words.
+        h.click_widget("File");
+        h.click_widget("Close story ");
+        h.click_widget("Save");
+        h.frames(3, vec![], Modifiers::NONE);
+        assert!(h.app.start.open);
+        let kept = std::fs::read_to_string(dir.join("shelf").join("Back to the start.caprice")).unwrap();
+        assert!(kept.contains(" More.Back to the start."), "saved before it closed");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn in_the_browser_the_welcome_page_shows_every_story_kept_here_after_the_ones_last_opened() {
+        let dir = test_dir("welcome-all");
+        let shelf = dir.join("shelf");
+        let mut there = Harness::new();
+        there.app.shelf.dir = Some(shelf.clone());
+        there.frames(3, vec![], Modifiers::NONE);
+        there.type_text("Opened long ago.");
+        there.save_on_shelf();
+
+        // Its list knows nothing of that story: it was saved by another run, and pushed out since.
+        let mut h = started_without_a_file(&dir);
+        h.app.shelf.dir = Some(shelf.clone());
+        h.app.start.stories = None;
+        h.frames(2, vec![], Modifiers::NONE);
+        let shown = h.painted_texts();
+        assert!(shown.contains("YOUR STORIES"), "{shown}");
+        assert!(shown.contains("Opened long ago"), "every story kept here is on the page: {shown}");
+        assert!(!shown.contains("Opened just now"), "not said to be opened lately: {shown}");
+        h.click_widget("Opened long ago");
+        h.frames((start::FLIGHT * 60.0) as usize + 2, vec![], Modifiers::NONE);
+        assert_eq!(h.text(), "Opened long ago.", "and it opens from there");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_story_deleted_on_the_welcome_page_goes_here_online_and_on_the_writer_s_other_devices() {
+        let mut there = Harness::new();
+        let elsewhere = with_shelf(&mut there, "delete-there");
+        let server = online(&mut there, &elsewhere, true);
+        there.frames(12, vec![], Modifiers::NONE);
+        there.type_text("Not worth keeping.");
+        there.save_on_shelf();
+        there.later(cloud::UP_AFTER + 1.0);
+        // Put away there: a story open waits until it is closed.
+        there.click_widget("File");
+        there.click_widget("Close story ");
+        assert!(there.app.start.open);
+
+        let dir = test_dir("delete-here");
+        let mut h = started_without_a_file(&dir);
+        h.app.shelf.dir = Some(dir.join("shelf"));
+        (h.app.keep.dir, h.app.keep.clock) = (Some(dir.join("versions")), Some(5_000_000));
+        std::fs::write(dir.join("cloud.json"), r#"{"signing_in":true}"#).unwrap();
+        h.app.cloud = cloud::Cloud::with(Some(server.clone()), Some(dir.join("cloud.json")));
+        h.app.cloud.clock = Some(5000.0);
+        h.frames(12, vec![], Modifiers::NONE);
+        assert!(h.painted_texts().contains("Not worth keeping"), "come down from online");
+
+        h.click_widget("Delete\u{2026}");
+        assert!(h.painted_texts().contains("Delete it here and online, on every device?"), "it asks first");
+        h.click_widget("Keep");
+        assert!(dir.join("shelf").join("Not worth keeping.caprice").exists(), "kept");
+        h.click_widget("Delete\u{2026}");
+        h.click_widget("Delete");
+        assert!(!dir.join("shelf").join("Not worth keeping.caprice").exists(), "gone from this browser");
+        assert!(!h.painted_texts().contains("Not worth keeping"), "and from the welcome page");
+        h.later(1.0);
+        assert!(stories_online(&server).is_empty(), "and online");
+        let versions = std::fs::read_dir(dir.join("versions")).unwrap().count();
+        assert_eq!(versions, 1, "it stays among the versions, to bring back");
+        h.later(cloud::LOOK_EVERY + 1.0);
+        assert!(!dir.join("shelf").join("Not worth keeping.caprice").exists(), "and does not come back");
+
+        there.later(cloud::LOOK_EVERY + 1.0);
+        assert!(!elsewhere.join("Not worth keeping.caprice").exists(), "the other device deletes it too");
+        assert!(stories_online(&server).is_empty(), "rather than put it back");
+        std::fs::remove_dir_all(dir).unwrap();
+        std::fs::remove_dir_all(elsewhere).unwrap();
+    }
+
+    #[test]
+    fn a_story_deleted_on_another_device_and_written_in_here_meanwhile_is_kept() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "delete-kept");
+        let server = online(&mut h, &dir, true);
+        h.frames(12, vec![], Modifiers::NONE);
+        h.type_text("Still writing this.");
+        h.save_on_shelf();
+        h.later(cloud::UP_AFTER + 1.0);
+        let key = server.0.borrow().stories.keys().next().unwrap().clone();
+        server.delete(&key);
+        h.type_text(" And more.");
+        h.key(Key::S, Modifiers::COMMAND);
+        h.later(cloud::UP_AFTER + 1.0);
+        assert!(dir.join("Still writing this.caprice").exists(), "kept here");
+        let online = stories_online(&server);
+        assert!(online.len() == 1 && online[0].1.contains("And more."), "and online again: {online:?}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn in_the_browser_open_a_story_offers_to_delete_every_story_but_the_open_one() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "shelf-delete");
+        h.frames(3, vec![], Modifiers::NONE);
+        h.type_text("The first.");
+        h.save_on_shelf();
+        h.file_new();
+        h.type_text("The second.");
+        h.save_on_shelf();
+        h.key(Key::O, Modifiers::COMMAND);
+        h.frames(2, vec![], Modifiers::NONE);
+        assert_eq!(h.labels().matches("Delete\u{2026}").count(), 1, "the open story is not offered: {}", h.labels());
+        h.click_widget("Delete\u{2026}");
+        h.click_widget("Delete");
+        assert!(!dir.join("The first.caprice").exists() && dir.join("The second.caprice").exists());
+        assert!(!h.labels().contains("The first"), "gone from the list");
         std::fs::remove_dir_all(dir).unwrap();
     }
 

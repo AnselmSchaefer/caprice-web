@@ -6,7 +6,7 @@
 //!
 //! The stories opened or saved lately are a list of paths, with when each was last opened, in the
 //! app's data folder beside the versions; the newest first. A file moved or deleted since is left
-//! out of the page.
+//! out of the page. In the browser every other story kept there follows them.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -371,6 +371,8 @@ pub struct Start {
     pub flight: Option<Flight>,
     /// When it first showed, in frame time (the emblem's clock).
     shown_at: Option<f64>,
+    /// The story whose row asks whether to delete it.
+    pub asking: Option<PathBuf>,
 }
 
 impl Start {
@@ -381,7 +383,7 @@ impl Start {
     /// The list kept in `file`.
     pub fn kept_in(file: Option<PathBuf>) -> Self {
         let recent = file.as_ref().and_then(|f| fs::read_to_string(f).ok()).and_then(|j| serde_json::from_str(&j).ok());
-        Self { open: false, file, recent: recent.unwrap_or_default(), stories: None, flight: None, shown_at: None }
+        Self { open: false, file, recent: recent.unwrap_or_default(), stories: None, flight: None, shown_at: None, asking: None }
     }
 
     /// A story was opened or saved, at `now`: it goes to the top of the list.
@@ -399,6 +401,35 @@ impl Start {
             let _ = file.parent().map(fs::create_dir_all);
             let _ = fs::write(file, json);
         }
+    }
+
+    /// The stories the page shows: the ones last opened, newest first; with a shelf (in the
+    /// browser) then every other story kept there, the last changed first, so that none is out
+    /// of reach (one opened before is `opened` 0: it was not, on this list).
+    pub fn listed(&self, shelf: Option<&Path>) -> Vec<Lately> {
+        let mut list = self.recent.clone();
+        let mut others: Vec<(Option<u64>, PathBuf)> = shelf
+            .and_then(|dir| fs::read_dir(dir).ok())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|p| p.extension().is_some_and(|e| e == "caprice"))
+            .map(|p| fs::canonicalize(&p))
+            .filter(|p| !list.iter().any(|l| l.path == *p))
+            .map(|p| (fs::modified(&p), p))
+            .collect();
+        others.sort_by_key(|(changed, _)| std::cmp::Reverse(*changed));
+        list.extend(others.into_iter().map(|(_, path)| Lately { path, opened: 0 }));
+        list
+    }
+
+    /// A story is deleted, or taken off the list: it is left out from now on.
+    pub fn forget(&mut self, path: &Path) {
+        let path = fs::canonicalize(path);
+        self.recent.retain(|l| l.path != path);
+        if let (Some(file), Ok(json)) = (&self.file, serde_json::to_string(&self.recent)) {
+            let _ = fs::write(file, json);
+        }
+        self.stories = None;
     }
 
     /// The sheet chosen is still in the air at `now` (frame time): the desk shows no page where it
@@ -477,6 +508,17 @@ enum Chosen {
     Browse,
     Story(PathBuf, Rect),
     SignIn,
+    /// Delete the story (with a shelf), or take it off the list (without one).
+    Delete(PathBuf),
+}
+
+/// What was done with a story's row.
+enum Row {
+    Open(Rect),
+    /// Its delete button: the row asks whether to.
+    Ask,
+    Delete,
+    Keep,
 }
 
 impl App {
@@ -512,7 +554,7 @@ impl App {
     pub fn welcome(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
         if self.start.stories.is_none() {
-            self.start.stories = Some(self.start.recent.iter().filter_map(read_story).collect());
+            self.start.stories = Some(self.start.listed(self.shelf.dir.as_deref()).iter().filter_map(read_story).collect());
         }
         let now = ctx.input(|i| i.time);
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
@@ -528,7 +570,17 @@ impl App {
             }
             Some(Chosen::Browse) => self.open(&ctx),
             Some(Chosen::SignIn) => self.sign_in("google"),
+            Some(Chosen::Delete(path)) => {
+                self.start.asking = None;
+                // On the desktop the file is the writer's own, among their files: only the list forgets it.
+                if self.shelf.dir.is_some() {
+                    self.delete_story(&path);
+                } else {
+                    self.start.forget(&path);
+                }
+            }
             Some(Chosen::Story(path, rect)) => {
+                self.start.asking = None;
                 // A story that cannot be read says so and leaves the page up to choose another.
                 self.open_path(&ctx, path.clone());
                 let sheet = self.start.stories.iter().flatten().find(|s| s.path == path).map(|s| s.sheet.clone());
@@ -638,7 +690,7 @@ impl App {
             ui.add_space(26.0);
 
             // The stories last opened.
-            let r = heading(ui, left, full, "Last opened");
+            let r = heading(ui, left, full, if self.shelf.dir.is_some() { "Your stories" } else { "Last opened" });
             let open_at = Rect::from_min_size(pos2(left + col - 160.0, r.center().y - 15.0), vec2(160.0, 30.0));
             let open = ui.put(open_at, egui::Button::new("Open another\u{2026}"));
             if open.on_hover_text("Find a story in your files (Ctrl+O)").clicked() && !waiting {
@@ -650,9 +702,15 @@ impl App {
                 let (r, _) = ui.allocate_exact_size(vec2(full, g.size().y + 8.0), Sense::hover());
                 ui.painter().galley(pos2(left, r.top() + 4.0), g, pal().text_dim);
             }
+            let shelf = self.shelf.dir.is_some();
             for st in &stories {
-                if let Some(at) = story_row(ui, st, left, col, full, &serif, now, sense, live) {
-                    chosen = Some(Chosen::Story(st.path.clone(), at));
+                let asking = self.start.asking.as_ref() == Some(&st.path);
+                match story_row(ui, st, (left, col, full), &serif, now, sense, live && !waiting, (asking, shelf)) {
+                    Some(Row::Open(at)) => chosen = Some(Chosen::Story(st.path.clone(), at)),
+                    Some(Row::Ask) => self.start.asking = Some(st.path.clone()),
+                    Some(Row::Keep) => self.start.asking = None,
+                    Some(Row::Delete) => chosen = Some(Chosen::Delete(st.path.clone())),
+                    None => {}
                 }
                 ui.add_space(10.0 - ui.spacing().item_spacing.y);
             }
@@ -715,9 +773,14 @@ impl App {
     }
 }
 
-/// One story last opened: its first page, what it is and holds, and when. Where its sheet lies, if clicked.
+/// One story last opened: its first page, what it is and holds, and when; at the bottom on the
+/// right, the way to delete it (with a shelf; without one, to take it off the list), which asks
+/// first in the row itself. What was done with it, and where its sheet lies if it was opened.
 #[allow(clippy::too_many_arguments)]
-fn story_row(ui: &mut Ui, st: &Story, left: f32, col: f32, full: f32, serif: &egui::FontFamily, now: u64, sense: Sense, live: bool) -> Option<Rect> {
+fn story_row(
+    ui: &mut Ui, st: &Story, (left, col, full): (f32, f32, f32), serif: &egui::FontFamily, now: u64, sense: Sense, live: bool,
+    (asking, shelf): (bool, bool),
+) -> Option<Row> {
     let row_h = 118.0;
     let (r, _) = ui.allocate_exact_size(vec2(full, row_h), Sense::hover());
     let row = Rect::from_min_size(pos2(left, r.top()), vec2(col, row_h));
@@ -735,7 +798,10 @@ fn story_row(ui: &mut Ui, st: &Story, left: f32, col: f32, full: f32, serif: &eg
     let right_w = 190.0_f32.min(col * 0.3);
     let x = row.left() + 16.0 + 64.0 + 20.0;
     let text_w = row.right() - right_w - 24.0 - x;
-    let mut whens = vec![format!("Opened {}", crate::versions::ago(st.opened, now))];
+    let mut whens = Vec::new();
+    if st.opened > 0 {
+        whens.push(format!("Opened {}", crate::versions::ago(st.opened, now)));
+    }
     if let Some(c) = st.changed {
         whens.push(format!("Changed {}", crate::versions::ago(c, now)));
     }
@@ -748,7 +814,12 @@ fn story_row(ui: &mut Ui, st: &Story, left: f32, col: f32, full: f32, serif: &eg
         y += 20.0;
     }
     let name = galley(ui, &st.name, FontId::new(20.0, serif.clone()), pal().text, text_w, 1, false);
-    let excerpt = if st.excerpt.is_empty() { "Nothing written yet.".to_owned() } else { format!("\u{201c}{}\u{201d}", st.excerpt) };
+    let excerpt = match (asking, shelf) {
+        (true, true) => "Delete it here and online, on every device? It stays under File \u{203a} Versions.".to_owned(),
+        (true, false) => "Take it off this list? The file stays where it is.".to_owned(),
+        _ if st.excerpt.is_empty() => "Nothing written yet.".to_owned(),
+        _ => format!("\u{201c}{}\u{201d}", st.excerpt),
+    };
     let excerpt = galley(ui, excerpt, FontId::proportional(13.0), pal().text.gamma_multiply(0.72), text_w, 2, true);
     let meta = galley(ui, holds(st), FontId::proportional(12.0), pal().text_dim, text_w, 1, false);
     let mut y = row.top() + 14.0;
@@ -759,7 +830,35 @@ fn story_row(ui: &mut Ui, st: &Story, left: f32, col: f32, full: f32, serif: &eg
     y += excerpt_h + 6.0;
     p.galley(pos2(x, y), meta, pal().text_dim);
     let clicked = resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(st.path.display().to_string()).clicked();
-    clicked.then_some(at)
+    let mut done = clicked.then_some(Row::Open(at));
+    if live {
+        // Laid over the row, so a press on them is theirs, not the row's; their text ends where the
+        // lines above it do.
+        let font = FontId::proportional(12.5);
+        let pad = ui.spacing().button_padding.x;
+        let mut right = row.right() - 16.0 + pad;
+        let mut button = |ui: &mut Ui, text: &str, color: Color32| {
+            let w = ui.painter().layout_no_wrap(text.to_owned(), font.clone(), color).size().x + 2.0 * pad;
+            let at = Rect::from_min_size(pos2(right - w, row.bottom() - 34.0), vec2(w, 24.0));
+            right -= w + 8.0;
+            ui.put(at, egui::Button::new(egui::RichText::new(text).font(font.clone()).color(color)).frame(false))
+        };
+        let gone = if shelf { "Delete" } else { "Remove" };
+        if asking {
+            if button(ui, "Keep", pal().text).clicked() {
+                done = Some(Row::Keep);
+            }
+            if button(ui, gone, crate::leave::WARN).clicked() {
+                done = Some(Row::Delete);
+            }
+        } else {
+            let tip = if shelf { "Delete this story here and online" } else { "Take this story off the list" };
+            if button(ui, &format!("{gone}\u{2026}"), pal().text_dim).on_hover_text(tip).clicked() {
+                done = Some(Row::Ask);
+            }
+        }
+    }
+    done
 }
 
 /// A section's small heading, across the column; its row.

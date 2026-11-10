@@ -197,6 +197,53 @@ pub fn warn_on_leaving(on: bool) {
     let _ = on;
 }
 
+thread_local! {
+    /// The page's history has an entry for the story shown (`story_shown`), on top.
+    static ENTRY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Tests press the browser's back button here.
+    #[cfg(not(target_arch = "wasm32"))]
+    static BACK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// In the browser: whether a story is shown, rather than the welcome page. While one is, the
+/// page's history has an entry for it, so that the browser's back button (a phone's) comes to
+/// Caprice (`went_back`) rather than leaving the page. Closing the story from the File menu leaves
+/// the entry there: taken away later (`history.back()`), its going back would arrive late and
+/// could close the next story.
+pub fn story_shown(shown: bool) {
+    if shown && !ENTRY.with(|e| e.replace(true)) {
+        #[cfg(target_arch = "wasm32")]
+        browser::story_entry();
+    }
+}
+
+/// Was the browser's back button pressed since last asked? Its entry is gone then.
+pub fn went_back() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    let back = browser::took_back();
+    #[cfg(not(target_arch = "wasm32"))]
+    let back = BACK.with(|b| b.replace(false));
+    if back {
+        ENTRY.with(|e| e.set(false));
+    }
+    back
+}
+
+/// Tests press the browser's back button.
+#[cfg(test)]
+pub fn press_back() {
+    BACK.with(|b| b.set(true));
+}
+
+/// In the browser: a frame as soon as the back button is pressed.
+#[cfg(target_arch = "wasm32")]
+pub fn frame_on_back(ctx: &egui::Context) {
+    use wasm_bindgen::JsCast;
+    let ctx = ctx.clone();
+    let wake = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || ctx.request_repaint()).into_js_value();
+    browser::on_back(wake.unchecked_ref());
+}
+
 /// A file dialog to show: the kinds of file it offers, and the name it suggests.
 #[derive(Clone, Default)]
 pub struct Dialog {
@@ -389,6 +436,12 @@ mod browser {
     #[wasm_bindgen(inline_js = r#"
         let warn = false;
         export function warn_on_leaving(on) { warn = on; }
+        // While a story is shown the page's history has an entry for it: back (a phone's too)
+        // takes it away, and Caprice hears of it rather than the page going.
+        let went_back = false;
+        export function story_entry() { history.pushState({ caprice: "story" }, ""); }
+        export function took_back() { const was = went_back; went_back = false; return was; }
+        export function on_back(wake) { addEventListener("popstate", () => { went_back = true; wake(); }); }
         if (typeof document !== "undefined") {
             addEventListener("beforeunload", e => { if (warn) { e.preventDefault(); e.returnValue = ""; } });
             const ours = new Set(["z", "y", "enter", "l", "e", "j", "b", "i", "u", "a", "f", "h", "n", "p", "=", "+", "-", "0"]);
@@ -499,6 +552,9 @@ mod browser {
         #[wasm_bindgen(js_name = download)]
         fn js_download(name: &str, bytes: &[u8]);
         pub fn warn_on_leaving(on: bool);
+        pub fn story_entry();
+        pub fn took_back() -> bool;
+        pub fn on_back(wake: &js_sys::Function);
         #[wasm_bindgen(js_name = show_pdf)]
         fn js_show_pdf(bytes: &[u8]);
         #[wasm_bindgen(js_name = fetch_bytes, catch)]

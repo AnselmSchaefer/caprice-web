@@ -73,13 +73,24 @@ struct Kept {
     signing_in: bool,
     #[serde(default)]
     stories: BTreeMap<String, Record>,
+    /// Stories deleted here, by their name online, with the version deleted: to delete online.
+    #[serde(default)]
+    deleting: BTreeMap<String, String>,
 }
 
-/// A story the server has.
+/// A story the server has, or had: one deleted is listed as gone with the version it was.
 #[derive(Deserialize)]
 struct Online {
     id: String,
     version: String,
+}
+
+/// What the server lists: its stories, and the ones deleted lately (`?gone=1`).
+#[derive(Deserialize)]
+struct Listed {
+    stories: Vec<Online>,
+    #[serde(default)]
+    gone: Vec<Online>,
 }
 
 /// Who is signed in.
@@ -102,19 +113,25 @@ pub enum Do {
     KeepBoth,
     /// Gone from both sides: its record goes too.
     Forget,
+    /// Deleted on another device, and the same here: it is deleted here too, once it is not open.
+    Delete,
 }
 
-/// The story on the shelf: what its file holds, and whether it is open with changes not yet saved.
+/// The story on the shelf: what its file holds, and whether it is open (with changes not yet saved).
 pub struct Local {
     pub hash: u64,
+    pub open: bool,
     pub open_unsaved: bool,
 }
 
 /// What to do with a story, from the shelf's file, the record of when the two sides last agreed,
-/// and the version online now. Whatever happens, no words are lost: a story only on one side goes
-/// to the other, even if it was deleted there.
-pub fn decide(local: Option<&Local>, known: Option<&Record>, online: Option<&str>) -> Do {
+/// the version online now, and the version it was when it was deleted online, if it was. Whatever
+/// happens, no words are lost: a story only on one side goes to the other, even if it was deleted
+/// there, unless it was deleted as it is here.
+pub fn decide(local: Option<&Local>, known: Option<&Record>, online: Option<&str>, gone: Option<&str>) -> Do {
     match (local, known, online) {
+        // Open, it waits until it is closed: written in by then, it goes up again.
+        (Some(l), Some(k), None) if gone == Some(k.version.as_str()) && l.hash == k.hash => if l.open { Do::Nothing } else { Do::Delete },
         (Some(_), _, None) => Do::Upload,
         (None, _, None) => Do::Forget,
         (None, _, Some(_)) => Do::Download,
@@ -198,6 +215,8 @@ enum Task {
     Download { key: String, to: Option<PathBuf> },
     /// The copy online may hold other words than the shelf's: fetch it and see.
     Compare { key: String, path: PathBuf },
+    /// A story deleted here goes online too, if it is still the version deleted.
+    Delete { key: String, version: String },
 }
 
 /// The request waiting for its answer.
@@ -207,6 +226,7 @@ enum Asking {
     List,
     Get(Task),
     Put(Task, u64),
+    Delete(String),
     Logout,
     DeleteAll,
 }
@@ -307,6 +327,17 @@ impl Cloud {
     pub fn is_up(&self, key: &str, path: &Path) -> bool {
         let file = fs::read(path).ok().map(|b| fingerprint(&b));
         self.kept.stories.get(key).is_some_and(|r| r.path == path && Some(r.hash) == file)
+    }
+
+    /// The story at `path` is being deleted here: online it goes next, if it is there. Its record
+    /// goes now, so that it is neither sent up nor brought down meanwhile.
+    pub fn deleted(&mut self, path: &Path) {
+        let Some(key) = self.kept.stories.iter().find(|(_, r)| r.path == path).map(|(k, _)| k.clone()) else { return };
+        if let Some(record) = self.kept.stories.remove(&key) {
+            self.kept.deleting.insert(key, record.version);
+            self.keep();
+            self.up_now();
+        }
     }
 
     /// The means to wake the app, once a frame has given it.
@@ -492,7 +523,7 @@ impl App {
             self.start_task(task);
         } else if cloud.who.is_some() && cloud.next_round.is_some_and(|t| cloud.now() >= t) {
             cloud.next_round = None;
-            cloud.send(Asking::List, Cloud::get("/api/stories"));
+            cloud.send(Asking::List, Cloud::get("/api/stories?gone=1"));
         }
     }
 
@@ -512,6 +543,11 @@ impl App {
             Task::Download { key, .. } | Task::Compare { key, .. } => {
                 let request = Cloud::get(format!("/api/stories/{key}"));
                 self.cloud.send(Asking::Get(task), request);
+            }
+            Task::Delete { key, version } => {
+                let headers = vec![("If-Match", format!("\"{version}\""))];
+                let request = Request { method: "DELETE", path: format!("/api/stories/{key}"), headers, body: None };
+                self.cloud.send(Asking::Delete(key.clone()), request);
             }
         }
     }
@@ -564,8 +600,11 @@ impl App {
                 if self.cloud.refused(&answer) {
                     return;
                 }
-                match serde_json::from_slice::<Vec<Online>>(&answer.body) {
-                    Ok(online) => self.plan(online),
+                // A server from before stories were listed as gone lists the stories alone.
+                let listed = serde_json::from_slice::<Listed>(&answer.body)
+                    .or_else(|_| serde_json::from_slice::<Vec<Online>>(&answer.body).map(|stories| Listed { stories, gone: Vec::new() }));
+                match listed {
+                    Ok(listed) => self.plan(listed),
                     Err(_) => self.cloud.pause(&answer, "The server had a problem: trying again soon.".into()),
                 }
             }
@@ -606,6 +645,19 @@ impl App {
                 }
             }
             Asking::Put(..) => {}
+            Asking::Delete(key) => {
+                if self.cloud.refused(&answer) {
+                    return;
+                }
+                // Deleted, or gone already; or changed on another device since, and then it is kept,
+                // and comes down again as a story of its own: no words are lost.
+                if answer.status == 412 {
+                    self.cloud.told = Some("A story you deleted was changed on another device meanwhile, so it is kept.".into());
+                }
+                self.cloud.kept.deleting.remove(&key);
+                self.cloud.keep();
+                self.cloud.due_now();
+            }
         }
     }
 
@@ -625,7 +677,8 @@ impl App {
     }
 
     /// From the list of what is online and what is on the shelf, the work to do.
-    fn plan(&mut self, online: Vec<Online>) {
+    fn plan(&mut self, listed: Listed) {
+        let Listed { stories: online, gone } = listed;
         let Some(dir) = self.shelf.dir.clone() else { return };
         let here = self.shelf_stories(&dir);
         let open_unsaved = self.unsaved();
@@ -636,11 +689,19 @@ impl App {
         keys.dedup();
         let cloud = &mut self.cloud;
         cloud.tasks.clear();
+        // What was deleted here goes first; until it has, it is neither sent up nor brought down.
+        for (key, version) in &cloud.kept.deleting {
+            cloud.tasks.push_back(Task::Delete { key: key.clone(), version: version.clone() });
+        }
+        let mut deleted = Vec::new();
         for key in keys {
+            if cloud.kept.deleting.contains_key(&key) {
+                continue;
+            }
             let shelf = here.iter().find(|(k, ..)| *k == key);
-            let local = shelf.map(|(_, path, bytes)| Local {
-                hash: fingerprint(bytes),
-                open_unsaved: open_unsaved && self.path.as_deref() == Some(path.as_path()),
+            let local = shelf.map(|(_, path, bytes)| {
+                let open = self.path.as_deref() == Some(path.as_path());
+                Local { hash: fingerprint(bytes), open, open_unsaved: open_unsaved && open }
             });
             // Following another device live: that device keeps it online.
             if shelf.is_some_and(|(_, path, _)| cloud.skip.as_ref() == Some(path)) {
@@ -653,10 +714,15 @@ impl App {
             {
                 continue;
             }
-            match decide(local.as_ref(), known, there.map(|o| o.version.as_str())) {
+            let went = gone.iter().find(|o| o.id == key).map(|o| o.version.as_str());
+            match decide(local.as_ref(), known, there.map(|o| o.version.as_str()), went) {
                 Do::Nothing => {}
                 Do::Forget => {
                     cloud.kept.stories.remove(&key);
+                }
+                Do::Delete => {
+                    cloud.kept.stories.remove(&key);
+                    deleted.extend(shelf.map(|(_, path, _)| path.clone()));
                 }
                 Do::Upload => {
                     let (_, path, _) = shelf.expect("an upload is of a story on the shelf");
@@ -677,6 +743,9 @@ impl App {
         cloud.next_round = Some(cloud.now() + LOOK_EVERY);
         if cloud.tasks.is_empty() && cloud.now() >= cloud.paused_until {
             cloud.note = None;
+        }
+        for path in deleted {
+            self.forget_story(&path);
         }
     }
 
@@ -718,7 +787,7 @@ impl App {
                     self.keep_both(&dir, &key, &path, &name, &bytes, &version);
                 }
             }
-            Task::Upload { .. } => {}
+            Task::Upload { .. } | Task::Delete { .. } => {}
         }
     }
 
@@ -915,6 +984,8 @@ pub mod stand_in {
         pub providers: Vec<String>,
         /// Each story online: its name, version and file.
         pub stories: BTreeMap<String, (String, String, Vec<u8>)>,
+        /// Stories deleted, with the version each was.
+        pub gone: BTreeMap<String, String>,
         /// Every request, as "GET /api/me".
         pub asked: Vec<String>,
         pub went_to: Vec<String>,
@@ -944,6 +1015,14 @@ pub mod stand_in {
             o.versions += 1;
             let version = format!("v{}", o.versions);
             o.stories.insert(key.into(), (name.into(), version, bytes.into()));
+        }
+
+        /// Another browser deletes a story online.
+        pub fn delete(&self, key: &str) {
+            let mut o = self.0.borrow_mut();
+            if let Some((_, version, _)) = o.stories.remove(key) {
+                o.gone.insert(key.into(), version);
+            }
         }
 
         fn answer(&self, r: Request) -> Answer {
@@ -988,12 +1067,28 @@ pub mod stand_in {
             if let Some((code, retry, said)) = &o.refuse {
                 return Answer { status: *code, headers: vec![("Retry-After".into(), retry.to_string())], body: said.clone().into_bytes() };
             }
+            let listed = |o: &Online| {
+                o.stories.iter().map(|(id, (name, version, _))| serde_json::json!({ "id": id, "name": name, "version": version })).collect::<Vec<_>>()
+            };
             match (r.method, r.path.strip_prefix("/api/stories").unwrap_or("")) {
-                ("GET", "") => json(serde_json::json!(o.stories.iter()
-                    .map(|(id, (name, version, _))| serde_json::json!({ "id": id, "name": name, "version": version }))
-                    .collect::<Vec<_>>())),
+                ("GET", "") => json(serde_json::json!(listed(&o))),
+                ("GET", "?gone=1") => {
+                    let gone: Vec<_> = o.gone.iter().map(|(id, version)| serde_json::json!({ "id": id, "version": version })).collect();
+                    json(serde_json::json!({ "stories": listed(&o), "gone": gone }))
+                }
                 ("DELETE", "") => {
                     o.stories.clear();
+                    o.gone.clear();
+                    status(204)
+                }
+                ("DELETE", key) => {
+                    let key = &key[1..];
+                    let Some((_, version, _)) = o.stories.get(key).cloned() else { return status(404) };
+                    if header("If-Match").as_deref().map(|t| t.trim_matches('"')) != Some(version.as_str()) {
+                        return status(412);
+                    }
+                    o.stories.remove(key);
+                    o.gone.insert(key.into(), version);
                     status(204)
                 }
                 ("GET", key) => match o.stories.get(&key[1..]) {
@@ -1019,6 +1114,7 @@ pub mod stand_in {
                     let version = format!("v{}", o.versions);
                     let name = super::decode(&header("X-Caprice-Name").unwrap_or_default());
                     o.stories.insert(key.into(), (name, version.clone(), r.body.unwrap_or_default()));
+                    o.gone.remove(key);
                     json(serde_json::json!({ "version": version }))
                 }
                 _ => status(404),
@@ -1198,7 +1294,7 @@ mod tests {
     use super::*;
 
     fn local(hash: u64) -> Local {
-        Local { hash, open_unsaved: false }
+        Local { hash, open: false, open_unsaved: false }
     }
 
     fn record(hash: u64, version: &str) -> Record {
@@ -1207,28 +1303,39 @@ mod tests {
 
     #[test]
     fn a_story_only_on_one_side_goes_to_the_other() {
-        assert_eq!(decide(Some(&local(1)), None, None), Do::Upload, "new here");
-        assert_eq!(decide(Some(&local(1)), Some(&record(1, "v1")), None), Do::Upload, "gone online: put back, not lost");
-        assert_eq!(decide(None, None, Some("v1")), Do::Download, "new online");
-        assert_eq!(decide(None, Some(&record(1, "v1")), Some("v1")), Do::Download, "gone from the shelf: brought back");
-        assert_eq!(decide(None, Some(&record(1, "v1")), None), Do::Forget, "gone from both");
+        assert_eq!(decide(Some(&local(1)), None, None, None), Do::Upload, "new here");
+        assert_eq!(decide(Some(&local(1)), Some(&record(1, "v1")), None, None), Do::Upload, "gone online: put back, not lost");
+        assert_eq!(decide(None, None, Some("v1"), None), Do::Download, "new online");
+        assert_eq!(decide(None, Some(&record(1, "v1")), Some("v1"), None), Do::Download, "gone from the shelf: brought back");
+        assert_eq!(decide(None, Some(&record(1, "v1")), None, None), Do::Forget, "gone from both");
     }
 
     #[test]
     fn a_story_changed_on_one_side_follows_it_and_on_both_is_kept_twice() {
         let known = record(1, "v1");
-        assert_eq!(decide(Some(&local(1)), Some(&known), Some("v1")), Do::Nothing, "the same on both");
-        assert_eq!(decide(Some(&local(2)), Some(&known), Some("v1")), Do::Upload, "saved here");
-        assert_eq!(decide(Some(&local(1)), Some(&known), Some("v2")), Do::Download, "saved elsewhere");
-        assert_eq!(decide(Some(&local(2)), Some(&known), Some("v2")), Do::KeepBoth, "saved in both");
-        assert_eq!(decide(Some(&local(1)), None, Some("v1")), Do::KeepBoth, "never agreed: compared");
+        assert_eq!(decide(Some(&local(1)), Some(&known), Some("v1"), None), Do::Nothing, "the same on both");
+        assert_eq!(decide(Some(&local(2)), Some(&known), Some("v1"), None), Do::Upload, "saved here");
+        assert_eq!(decide(Some(&local(1)), Some(&known), Some("v2"), None), Do::Download, "saved elsewhere");
+        assert_eq!(decide(Some(&local(2)), Some(&known), Some("v2"), None), Do::KeepBoth, "saved in both");
+        assert_eq!(decide(Some(&local(1)), None, Some("v1"), None), Do::KeepBoth, "never agreed: compared");
     }
 
     #[test]
     fn a_story_open_with_changes_not_yet_saved_is_never_written_over() {
-        let open = Local { hash: 1, open_unsaved: true };
-        assert_eq!(decide(Some(&open), Some(&record(1, "v1")), Some("v2")), Do::KeepBoth);
-        assert_eq!(decide(Some(&open), Some(&record(1, "v1")), Some("v1")), Do::Nothing, "it goes up once saved");
+        let open = Local { hash: 1, open: true, open_unsaved: true };
+        assert_eq!(decide(Some(&open), Some(&record(1, "v1")), Some("v2"), None), Do::KeepBoth);
+        assert_eq!(decide(Some(&open), Some(&record(1, "v1")), Some("v1"), None), Do::Nothing, "it goes up once saved");
+    }
+
+    #[test]
+    fn a_story_deleted_on_another_device_goes_here_too_unless_it_changed_and_waits_while_open() {
+        let known = record(1, "v1");
+        assert_eq!(decide(Some(&local(1)), Some(&known), None, Some("v1")), Do::Delete, "deleted as it is here");
+        assert_eq!(decide(Some(&local(2)), Some(&known), None, Some("v1")), Do::Upload, "written in here since: put back");
+        assert_eq!(decide(Some(&local(1)), Some(&known), None, Some("v0")), Do::Upload, "deleted before this version");
+        assert_eq!(decide(Some(&local(1)), None, None, Some("v1")), Do::Upload, "never agreed: kept");
+        let open = Local { hash: 1, open: true, open_unsaved: false };
+        assert_eq!(decide(Some(&open), Some(&known), None, Some("v1")), Do::Nothing, "open here: not yet");
     }
 
     #[test]

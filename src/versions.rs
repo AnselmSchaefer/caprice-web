@@ -287,6 +287,22 @@ impl App {
         }
     }
 
+    /// A story deleted from the shelf (`json`, its file) stays among the versions: as a story of
+    /// its own in the Versions window, with no file, to bring back.
+    pub fn keep_deleted(&mut self, json: &str, name: String) {
+        let Some(id) = serde_json::from_str::<DocFile>(json).ok().map(|f| f.id).filter(|id| !id.is_empty()) else { return };
+        let Some(dir) = self.keep.dir.as_ref().map(|d| d.join(&id)) else { return };
+        let newest = versions_in(&dir).pop().and_then(|(_, file)| fs::read_to_string(file).ok());
+        if newest.as_deref() != Some(json) {
+            let mut now = self.keep.now();
+            while fs::exists(dir.join(format!("{now}.caprice"))) {
+                now += 1;
+            }
+            let _ = fs::create_dir_all(&dir).and_then(|()| fs::write(dir.join(format!("{now}.caprice")), json));
+        }
+        let _ = fs::write(dir.join("story.json"), serde_json::to_string(&About { name, path: None }).unwrap_or_default());
+    }
+
     fn keep_version(&mut self, json: &str) {
         let Some(dir) = self.keep.dir.as_ref().map(|d| d.join(&self.story_id)) else { return };
         // Two in one second (going back, then opening the list) must not write over each other.
