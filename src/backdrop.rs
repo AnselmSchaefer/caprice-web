@@ -12,17 +12,19 @@
 //! instead (`/api/scene`, R33), for writers signed in, while the day's scenes last.
 //!
 //! Drawings are rendered on a background thread when a page near the one shown needs them, and
-//! only those near are kept as textures.
+//! only those near are kept as textures. Parts of a drawing may move a little: clouds, wings,
+//! smoke (see `motion.rs`).
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-use eframe::egui::{self, Color32, ColorImage, Id, Key, Modifiers, Pos2, Rect, Shape, TextureHandle, TextureOptions, epaint::Mesh, pos2};
+use eframe::egui::{self, Color32, ColorImage, Id, Key, Modifiers, Pos2, Rect, Shape, TextureHandle, TextureOptions};
 
 use crate::App;
 use crate::claude::{Outcome, run_claude};
+use crate::motion::{Drawn, Layered, layered};
 use crate::model::{Character, Doc, IMAGE_CHAR, PAGE_BREAK, Scene, is_terminator};
 use crate::theme::pal;
 use crate::platform::{Answer, Request, fs};
@@ -40,6 +42,8 @@ const THUMB_WIDTH: f32 = 120.0;
 const NEAR: usize = 2;
 /// How many full-size drawings are kept rendered at most, besides those near the page shown.
 const KEEP: usize = 6;
+/// Seconds between frames while the scene on the page shown moves.
+const MOVE_FRAME: f64 = 0.05;
 
 /// The model that paints the scenes.
 pub const MODEL: &str = "claude-opus-5-5";
@@ -49,7 +53,7 @@ pub const SYSTEM: &str = "You are a skilled illustrator who paints with SVG code
     illustration: believable light, depth and texture rather than cartoon shapes.";
 
 /// A painted scene: its drawing, and the drawing rendered.
-pub type Painted = (String, ColorImage);
+pub type Painted = (String, Layered);
 
 /// Where a painting goes once it is done, or why there is none.
 type Easel = Sender<Result<Painted, String>>;
@@ -106,7 +110,7 @@ impl Drop for Reading {
 struct Rendered {
     key: DrawingKey,
     thumb: bool,
-    image: Result<ColorImage, String>,
+    image: Result<Layered, String>,
 }
 
 /// Where new scenes come from.
@@ -142,10 +146,12 @@ pub struct Backdrop {
     pub mode: Mode,
     /// The pictures show behind the pages.
     pub visible: bool,
+    /// Their parts that can move do.
+    pub moving: bool,
     /// What the writer wants to see.
     pub description: String,
     /// Drawings rendered: full size behind the pages, small in the list.
-    textures: HashMap<DrawingKey, TextureHandle>,
+    textures: HashMap<DrawingKey, Drawn>,
     thumbs: HashMap<DrawingKey, TextureHandle>,
     /// Drawings being rendered, or that could not be, so they are not tried again and again.
     rendering: HashSet<(DrawingKey, bool)>,
@@ -183,6 +189,7 @@ impl Default for Backdrop {
             list: false,
             mode: Mode::Described,
             visible: true,
+            moving: true,
             description: String::new(),
             textures: HashMap::new(),
             thumbs: HashMap::new(),
@@ -246,7 +253,9 @@ fn scene_prompt(subject: &Subject, size: egui::Vec2, named: &[&Character]) -> St
         - A harmonious, natural palette with enough contrast to read when shown faintly.\n\
         - No text, letters or numbers. No scripts, links, external references or embedded images.\n\
         - At most about 30 KB.\n\
-        Reply with only the SVG code."
+        {}\
+        Reply with only the SVG code.",
+        crate::motion::PROMPT
     )
 }
 
@@ -258,7 +267,7 @@ fn draw_scene(prompt: &str, cancel: &AtomicBool) -> Result<Option<Painted>, Stri
         Outcome::Refused => Err("Claude declined to draw this scene".into()),
         Outcome::Finished => {
             let svg = extract_svg(&reply).ok_or("Claude's reply held no picture")?;
-            rasterize(svg, RENDER_WIDTH).map(|image| Some((svg.to_owned(), image)))
+            layered(svg, RENDER_WIDTH).map(|image| Some((svg.to_owned(), image)))
         }
     }
 }
@@ -303,24 +312,6 @@ fn read_sentences(prompt: &str, n: usize, cancel: &AtomicBool) -> Result<Vec<usi
     }
 }
 
-/// `image` stretched over `rect` through `map`, in strips so it bends with a turning page.
-fn strip_mesh(texture: &TextureHandle, rect: Rect, tint: Color32, map: &dyn Fn(Pos2) -> Pos2) -> Mesh {
-    const STRIPS: usize = 12;
-    let mut mesh = Mesh::with_texture(texture.id());
-    for k in 0..=STRIPS {
-        let f = k as f32 / STRIPS as f32;
-        let x = rect.left() + rect.width() * f;
-        mesh.vertices.push(egui::epaint::Vertex { pos: map(pos2(x, rect.top())), uv: pos2(f, 0.0), color: tint });
-        mesh.vertices.push(egui::epaint::Vertex { pos: map(pos2(x, rect.bottom())), uv: pos2(f, 1.0), color: tint });
-        if k > 0 {
-            let b = (k * 2) as u32;
-            mesh.add_triangle(b - 2, b - 1, b);
-            mesh.add_triangle(b - 1, b + 1, b);
-        }
-    }
-    mesh
-}
-
 /// The scenes' settings as kept in a document file. Older files also hold their one scene's
 /// drawing here; it opens as a scene pinned to the start of the story.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Default)]
@@ -332,6 +323,9 @@ pub struct SceneFile {
     pub description: String,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub hidden: bool,
+    /// The pictures stand still.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub still: bool,
 }
 
 impl Doc {
@@ -385,7 +379,8 @@ impl Backdrop {
 
     /// What is kept in the document file besides the scenes, if anything.
     pub fn to_file(&self) -> Option<SceneFile> {
-        (!self.description.trim().is_empty() || !self.visible).then(|| SceneFile { svg: None, description: self.description.clone(), hidden: !self.visible })
+        let file = SceneFile { svg: None, description: self.description.clone(), hidden: !self.visible, still: !self.moving };
+        (file != SceneFile::default()).then_some(file)
     }
 
     /// What Claude was last asked to paint.
@@ -402,13 +397,13 @@ impl Backdrop {
 
     /// Render the drawing `svg` of `key` on a background thread, unless it is or has been already.
     fn render(&mut self, ctx: &egui::Context, key: DrawingKey, svg: &str, thumb: bool) {
-        let have = if thumb { &self.thumbs } else { &self.textures };
-        if have.contains_key(&key) || !self.rendering.insert((key, thumb)) {
+        let have = if thumb { self.thumbs.contains_key(&key) } else { self.textures.contains_key(&key) };
+        if have || !self.rendering.insert((key, thumb)) {
             return;
         }
         let (tx, wake, svg) = (self.rendered.0.clone(), crate::platform::Waker::new(ctx), svg.to_owned());
         crate::platform::spawn(move || {
-            let image = rasterize(&svg, if thumb { THUMB_WIDTH } else { RENDER_WIDTH });
+            let image = if thumb { rasterize(&svg, THUMB_WIDTH).map(Layered::still) } else { layered(&svg, RENDER_WIDTH) };
             let _ = tx.send(Rendered { key, thumb, image });
             wake.wake();
         });
@@ -524,7 +519,7 @@ impl App {
     #[cfg(test)]
     pub fn fake_painting(&mut self, c: usize, svg: &str) {
         let (tx, _) = self.pin_painting("a test", self.doc.para_start(c).0);
-        tx.send(Ok((svg.to_owned(), rasterize(svg, RENDER_WIDTH).unwrap()))).unwrap();
+        tx.send(Ok((svg.to_owned(), layered(svg, RENDER_WIDTH).unwrap()))).unwrap();
     }
 
     /// The passage `a..b` painted as `paint_passage` paints it, with the people it finds, as if
@@ -537,7 +532,7 @@ impl App {
         if let Some(job) = &mut self.backdrop.job {
             job.people = people;
         }
-        tx.send(Ok((svg.to_owned(), rasterize(svg, RENDER_WIDTH).unwrap()))).unwrap();
+        tx.send(Ok((svg.to_owned(), layered(svg, RENDER_WIDTH).unwrap()))).unwrap();
     }
 
     /// Start painting for char `c` without finishing, as if Claude were still at it.
@@ -584,6 +579,12 @@ impl App {
     #[cfg(test)]
     pub fn shown_scene(&self) -> Option<DrawingKey> {
         self.backdrop.on_target.and_then(|(page, key)| (page == self.target).then_some(key)?)
+    }
+
+    /// The parts that move of the drawing shown behind the page shown, and their textures.
+    #[cfg(test)]
+    pub fn shown_parts(&self) -> Vec<(crate::motion::Motion, egui::TextureId)> {
+        self.shown_scene().and_then(|k| self.backdrop.textures.get(&k)).map_or(Vec::new(), Drawn::part_textures)
     }
 
     /// A scene whose first drawing was never finished (stopped, failed) is no scene. Those of the
@@ -733,7 +734,8 @@ impl App {
     /// writing, what is already written counts as drawn: only writing on brings pictures.
     pub fn open_scene(&mut self, file: Option<SceneFile>) {
         let file = file.unwrap_or_default();
-        self.backdrop = Backdrop { mode: self.backdrop.mode, description: file.description, visible: !file.hidden, ..Backdrop::default() };
+        let (visible, moving) = (!file.hidden, !file.still);
+        self.backdrop = Backdrop { mode: self.backdrop.mode, description: file.description, visible, moving, ..Backdrop::default() };
         if let Some(svg) = file.svg.filter(|_| self.doc.scenes.is_empty()) {
             let id = self.doc.next_scene_id;
             self.doc.next_scene_id += 1;
@@ -801,8 +803,11 @@ impl App {
             match r.image {
                 Ok(image) => {
                     self.backdrop.rendering.remove(&(r.key, r.thumb));
-                    let texture = ctx.load_texture("scene", image, TextureOptions::LINEAR);
-                    if r.thumb { &mut self.backdrop.thumbs } else { &mut self.backdrop.textures }.insert(r.key, texture);
+                    if r.thumb {
+                        self.backdrop.thumbs.insert(r.key, ctx.load_texture("scene", image.still, TextureOptions::LINEAR));
+                    } else {
+                        self.backdrop.textures.insert(r.key, Drawn::load(ctx, image));
+                    }
                 }
                 Err(e) => self.status = format!("- a scene could not be shown: {e}"),
             }
@@ -851,6 +856,12 @@ impl App {
         } else {
             b.fade = None;
         }
+        // A picture that moves on the page shown is drawn again and again, while it can be seen.
+        let shown = b.on_target.and_then(|t| t.1).into_iter().chain(b.fade.and_then(|f| f.0));
+        let moves = b.visible && b.moving && shown.filter_map(|k| b.textures.get(&k)).any(Drawn::moves);
+        if moves && !ctx.input(|i| i.viewport().minimized.unwrap_or(false)) {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(MOVE_FRAME));
+        }
 
         // Only the drawings near the page shown, and the ones fading, stay rendered.
         if b.textures.len() > near.len() + KEEP {
@@ -875,7 +886,7 @@ impl App {
             200 => {
                 let wake = crate::platform::Waker::new(ctx);
                 crate::platform::spawn(move || {
-                    let _ = tx.send(rasterize(&said, RENDER_WIDTH).map(|image| (said, image)));
+                    let _ = tx.send(layered(&said, RENDER_WIDTH).map(|image| (said, image)));
                     wake.wake();
                 });
                 return;
@@ -920,8 +931,7 @@ impl App {
                     scene.versions.push(svg);
                     scene.shown = scene.versions.len() - 1;
                     scene.hidden = false;
-                    let texture = ctx.load_texture("scene", image, TextureOptions::LINEAR);
-                    self.backdrop.textures.insert((id, scene.shown), texture);
+                    self.backdrop.textures.insert((id, scene.shown), Drawn::load(ctx, image));
                     self.backdrop.visible = true;
                     self.keep_painting();
                 }
@@ -1080,6 +1090,8 @@ impl App {
             }
             ui.separator();
             ui.add_enabled(count > 0, egui::Checkbox::new(&mut b.visible, "Show pictures"));
+            let moving_tip = "Clouds drift, wings beat, smoke rises from chimneys, lights flicker: whatever Claude marked in the picture as moving";
+            ui.add_enabled(count > 0 && b.visible, egui::Checkbox::new(&mut b.moving, "Pictures move")).on_hover_text(moving_tip);
             if ui.add_enabled(has_picture, egui::Button::new("Save picture as\u{2026}").frame(false)).clicked() {
                 save = true;
                 ui.close();
@@ -1365,15 +1377,17 @@ impl App {
             let v = (255.0 * shade).clamp(0.0, 255.0) as u8;
             Color32::from_rgb(v, v, v).gamma_multiply(a * alpha * OPACITY)
         };
-        let mesh = |key: Option<DrawingKey>, a: f32| key.and_then(|k| b.textures.get(&k)).map(|t| Shape::mesh(strip_mesh(t, rect, tint(a), map)));
+        let now = ctx.input(|inp| inp.time);
+        let time = b.moving.then_some(now);
+        let shapes = |key: Option<DrawingKey>, a: f32| key.and_then(|k| b.textures.get(&k)).map(|d| d.shapes(rect, tint(a), map, time)).unwrap_or_default();
         match b.on_target {
             Some((page, shown)) if page == i => {
-                let Some((from, since)) = b.fade else { return mesh(shown, 1.0).into_iter().collect() };
-                let t = ((ctx.input(|inp| inp.time) - since) / FADE).clamp(0.0, 1.0) as f32;
+                let Some((from, since)) = b.fade else { return shapes(shown, 1.0) };
+                let t = ((now - since) / FADE).clamp(0.0, 1.0) as f32;
                 let t = t * t * (3.0 - 2.0 * t);
-                mesh(from, 1.0 - t).into_iter().chain(mesh(shown, t)).collect()
+                shapes(from, 1.0 - t).into_iter().chain(shapes(shown, t)).collect()
             }
-            _ => mesh(self.scene_key_of_page(i), 1.0).into_iter().collect(),
+            _ => shapes(self.scene_key_of_page(i), 1.0),
         }
     }
 }
@@ -1414,7 +1428,9 @@ mod tests {
         crate::claude::allow_live();
         let passage = "Far away, a lone ship fought its way through a storm on the open sea.";
         let prompt = scene_prompt(&Subject::Passage(passage.into()), egui::vec2(595.0, 842.0), &[]);
-        let (_, image) = draw_scene(&prompt, &AtomicBool::new(false)).unwrap().unwrap();
+        let (svg, painted) = draw_scene(&prompt, &AtomicBool::new(false)).unwrap().unwrap();
+        println!("moving parts: {:?}", painted.layers.iter().map(|l| l.motion).collect::<Vec<_>>());
+        let image = rasterize(&svg, RENDER_WIDTH).unwrap();
         let path = std::env::temp_dir().join("caprice-live-scene.png");
         let rgba: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
         image::save_buffer(&path, &rgba, image.size[0] as u32, image.size[1] as u32, image::ColorType::Rgba8).unwrap();

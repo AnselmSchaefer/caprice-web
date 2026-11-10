@@ -86,6 +86,7 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `print.rs` | The Print window; pages drawn into a PDF (krilla) from `PageLayout::ink`; printers and jobs through CUPS (`Spooler`) |
 | `claude.rs` | Pen loop or cursor selection → passage → `claude -p` → streamed answer panel, a conversation; story notes |
 | `backdrop.rs` | Scenes Claude paints (SVG), pinned to the story, faintly behind the pages; the Scene menu and list |
+| `motion.rs` | Scenes that move a little: the parts Claude marks by id (drift, wing, sway, smoke, flicker, shimmer), rendered apart from the still picture and moved every frame |
 | `cast.rs` | The cast: people found by name in what is painted, their looks and model sheets in the scene's prompt; the Cast window and its example |
 | `start.rs` | The welcome page when Caprice opens without a file: kinds of new story (`Kind`), the stories last opened with what they hold, the sheet flying to the desk; the list of stories last opened, kept in the data folder |
 | `peek.rs` | The cast peeking out from behind the page: the puppet asked of Claude, cut into parts, who peeks when, where they look, the peek drawn |
@@ -486,6 +487,25 @@ is; callers that paint for a paragraph pass `para_start` themselves.
   none (an unpainted scene is not saved), and is kept at once. One arriving in the job under way
   is not taken twice, nor a picture the scene has already. Test:
   `a_scene_painted_while_the_page_went_comes_back_when_the_story_opens_again`.
+- **The world in a picture moves a little; the people never do** (`motion.rs`). Claude puts
+  each part that could move in a group named by how it moves (`motion::PROMPT`: `move-wing-1-310-240`
+  is a wing turning about its shoulder at 310,240), and marks chimney tops, whose smoke Caprice
+  draws itself. A drawing is rendered once (`layered`, on the thread, wherever `rasterize` was
+  used for the page behind): the still picture is the SVG with those groups cut out, and each part
+  is rendered alone, cropped, in its place. `Drawn::shapes` moves the parts by the clock as
+  textures, through the same `map` as the picture, so they turn with the page. What does not fit:
+  an unknown kind, a wing or sway whose point is far from its part (`NEAR_PART`), a part usvg
+  cannot find, stays in the still picture; a mistake costs movement, never the picture. The
+  wings of one creature (shoulders within `ONE_CREATURE`) beat together. Only full-size drawings
+  are layered: the list's small pictures, Save picture and the cast's sheets are whole, still.
+  A moving picture on the page shown asks for a frame every `MOVE_FRAME` (not while minimized);
+  nothing else does. "Pictures move" in the Scene menu (`Backdrop::moving`, kept as
+  `SceneFile::still`) stops them, parts drawn where painted and no smoke. A change to what is
+  marked goes in `PROMPT`, `parse_id` and `pose` together. Scenes are not printed, so print needs
+  nothing. Tests: `the_parts_that_move_are_taken_out_of_the_still_picture`,
+  `a_creatures_wings_beat_together_each_upward_on_its_own_side`,
+  `a_picture_with_nothing_marked_is_all_still`,
+  `the_picture_on_the_page_shown_beats_its_wings_and_drifts_its_clouds_until_told_to_stand_still`.
 - Moving, hiding, deleting and stepping versions change `Doc::scenes` directly: like page
   settings, they are not undoable (R1) and do not paginate.
 - Tests: `the_picture_follows_the_caret_from_one_part_of_the_story_to_the_next`,
@@ -1925,6 +1945,10 @@ a channel out, a `platform::Waker` to ask for a frame; nothing behind a lock sha
 `poll_dialog`; it reads or writes through `platform::fs`. Decide what it is in the browser: a pick
 (from the page's picker, in `/uploads`) or a file given (`/downloads`), and add it to `smoke.mjs`.
 
+**A new way for a scene's parts to move**: its line in `motion::PROMPT`, its id in `parse_id`
+(and the check of its point, if it has one, in `layered`), a `Motion`, its movement in `pose`
+(or drawn by Caprice, like `smoke`), and a part of it in `NIGHT` for the tests (R14).
+
 **A new paragraph attribute** (like line spacing or chapter title): `ParaAttrs` → `run_format` /
 `paragraph_job` → the toolbar (`ui.rs`) → file format default (R9) → Word mapping (R10) → whether
 it changes drop caps (`has_drop_cap`) or the contents (`chapters`). The brush copies it with the
@@ -2231,5 +2255,12 @@ result sent back, a stand-in answer in `api.test.mjs` and in `cloud::stand_in` (
   signed in (Google), the count is in the Ledger before Claude is asked and counts failures too,
   and each request's cost is fixed in the Worker, so 50 scenes are a ceiling on the bill. "Follow
   my writing" stays off in the browser: it would use the day's scenes in minutes (R33).
+- **2026-11-10 — Moving scenes: Claude marks the parts, Caprice moves them.** Asked for: a
+  dragon's wings beating, smoke from chimneys, clouds drifting. resvg runs no SVG animation, and
+  rendering the picture anew each frame (blurs, turbulence) is far too slow, in the browser above
+  all. So the picture is rendered once in layers and the parts move as textures; the kinds of
+  movement are few and fixed, and people and animals on the ground stay still, since walking cut
+  out of a painting looks like a puppet. Tried first on a dragon over a village and two people on
+  a bridge: Claude marked wings, chimneys, clouds and lights well, and left the people alone (R14).
 - **No `.docx` import.** Export only.
 - **Contents heading is "Contents"** (English), in the app and in Word.

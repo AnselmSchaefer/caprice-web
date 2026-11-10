@@ -19,6 +19,7 @@ mod layout;
 mod leave;
 mod live;
 mod model;
+mod motion;
 mod notes;
 mod numbers;
 mod paginate;
@@ -4281,6 +4282,37 @@ mod tests {
     }
 
     #[test]
+    fn the_picture_on_the_page_shown_beats_its_wings_and_drifts_its_clouds_until_told_to_stand_still() {
+        let mut h = Harness::new();
+        h.type_text("Night fell over the village, and something flew over it.");
+        h.app.fake_painting(0, motion::NIGHT);
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.scene_shown().is_some());
+        let parts = h.app.shown_parts();
+        let part = |m: fn(&motion::Motion) -> bool| parts.iter().find(|(p, _)| m(p)).unwrap().1;
+        let (wing, cloud) = (part(|m| matches!(m, motion::Motion::Wing { .. })), part(|m| *m == motion::Motion::Drift));
+        // Where a part is drawn: the corners of its mesh.
+        let at = |h: &Harness, texture| -> Vec<egui::Pos2> {
+            h.painted.iter().find_map(|cs| match &cs.shape {
+                egui::Shape::Mesh(m) if m.texture_id == texture => Some(m.vertices.iter().map(|v| v.pos).collect()),
+                _ => None,
+            }).expect("the part is drawn")
+        };
+        let before = (at(&h, wing), at(&h, cloud));
+        h.wait(0.3);
+        assert_ne!(at(&h, wing), before.0, "the wing beats");
+        assert_ne!(at(&h, cloud), before.1, "the cloud drifts");
+
+        h.app.backdrop.moving = false;
+        h.frames(1, vec![], Modifiers::NONE);
+        let still = (at(&h, wing), at(&h, cloud));
+        h.wait(0.3);
+        assert_eq!((at(&h, wing), at(&h, cloud)), still, "told to, the picture stands still");
+        let other = h.reopened("still");
+        assert!(!other.app.backdrop.moving, "and does so when the story opens again");
+    }
+
+    #[test]
     fn scenes_stay_with_their_paragraph_through_edits_and_saving() {
         let mut h = Harness::new();
         paragraphs_over_pages(&mut h);
@@ -4324,7 +4356,7 @@ mod tests {
         let mut h = Harness::new();
         h.frames(3, vec![], Modifiers::NONE);
         h.type_text("A storm at sea.");
-        let old = backdrop::SceneFile { svg: Some(BLUE.into()), description: "A ship in a storm".into(), hidden: false };
+        let old = backdrop::SceneFile { svg: Some(BLUE.into()), description: "A ship in a storm".into(), hidden: false, still: false };
         let mut json = serde_json::to_value(fileio::DocFile::from_doc(&h.app.doc)).unwrap();
         json["scene"] = serde_json::to_value(&old).unwrap();
         let dir = std::env::temp_dir().join(format!("caprice-scene-test-{}-old", std::process::id()));
