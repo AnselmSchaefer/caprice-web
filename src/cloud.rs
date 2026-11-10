@@ -27,7 +27,11 @@ pub const UP_AFTER: f64 = 20.0;
 /// Seconds between looks for what changed elsewhere, while the page is shown.
 pub const LOOK_EVERY: f64 = 600.0;
 /// Seconds to wait before trying again with no network, when the server says nothing sooner.
-const AGAIN_AFTER: f64 = 60.0;
+pub const AGAIN_AFTER: f64 = 60.0;
+/// What online backup being off means for the writer.
+pub const BACKUP_OFF: &str = "Your stories are saved in this browser, and you can go on writing and begin new ones. They are \
+    not backed up online, and stories kept online cannot be brought here, until Caprice's server can be reached again. \
+    Caprice tries again by itself.";
 
 /// Where requests go: the page's own server in the browser, a stand-in in tests.
 pub trait Server {
@@ -64,11 +68,16 @@ pub struct Record {
     pub hash: u64,
 }
 
-/// `cloud.json`: whose stories these are, whether a sign-in was begun, and each story's record.
+/// `cloud.json`: whose stories these are (and their name, to say who is signed in while the server
+/// cannot be asked), whether a sign-in was begun, and each story's record.
 #[derive(Serialize, Deserialize, Default)]
 struct Kept {
     #[serde(default)]
     user: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    provider: String,
     #[serde(default)]
     signing_in: bool,
     #[serde(default)]
@@ -243,7 +252,8 @@ pub struct Cloud {
     pub who: Option<Who>,
     /// The ways of signing in the server has; None until asked.
     pub providers: Option<Vec<String>>,
-    /// How it goes now: paused by a limit, no network. It goes when that is over.
+    /// How it goes now: paused by a limit, no network, a fault of the server's; or signed out. It
+    /// goes when that is over. Signed in, a note means online backup is off (`backup_off`).
     pub note: Option<String>,
     /// What happened that the writer should know (a story kept twice, one too big), until they
     /// close the window.
@@ -265,6 +275,8 @@ pub struct Cloud {
     pub skip: Option<PathBuf>,
     begun: bool,
     was_hidden: bool,
+    /// Online backup was off at the last frame, to tell the writer when it goes off and comes back.
+    was_off: bool,
     asked_providers: bool,
     confirm_delete: bool,
 }
@@ -299,6 +311,7 @@ impl Cloud {
             reload: false,
             skip: None,
             begun: false,
+            was_off: false,
             was_hidden: false,
             asked_providers: false,
             confirm_delete: false,
@@ -361,6 +374,12 @@ impl Cloud {
             let _ = file.parent().map(fs::create_dir_all);
             let _ = fs::write(file, json);
         }
+    }
+
+    /// Signed in, but nothing goes online or comes from it for now: why. Stories are kept in this
+    /// browser meanwhile, and go up once it is over.
+    pub fn backup_off(&self) -> Option<&str> {
+        self.who.as_ref().and(self.note.as_deref())
     }
 
     /// Is anything being sent or waiting to be?
@@ -437,7 +456,6 @@ impl Cloud {
     /// What every request may be answered: not signed in any more, a limit, or no answer at all.
     /// True when the answer was one of those, and has been dealt with.
     fn refused(&mut self, answer: &Answer) -> bool {
-        let said = String::from_utf8_lossy(&answer.body).trim().to_owned();
         match answer.status {
             401 => {
                 self.who = None;
@@ -445,12 +463,22 @@ impl Cloud {
                 self.next_round = None;
                 self.note = Some("Signed out: sign in again to keep your stories online.".into());
             }
-            0 => self.pause(answer, "No connection: trying again soon. Your stories are safe in this browser.".into()),
-            429 | 503 | 507 => self.pause(answer, format!("Paused: {said}")),
-            500.. => self.pause(answer, "The server had a problem: trying again soon.".into()),
+            0 | 429 | 503 | 507 | 500.. => self.pause(answer, why_off(answer)),
             _ => return false,
         }
         true
+    }
+}
+
+/// Why the server could not be asked, from its answer: no connection, a limit it names (the
+/// day's requests used up, a writer's saves), or a fault of its own.
+fn why_off(answer: &Answer) -> String {
+    let said = String::from_utf8_lossy(&answer.body).trim().to_owned();
+    match answer.status {
+        0 => "There is no connection to Caprice's server.".into(),
+        429 | 503 | 507 if !said.is_empty() => said,
+        429 | 503 | 507 => "Caprice's server is busy.".into(),
+        _ => "Caprice's server has a problem.".into(),
     }
 }
 
@@ -465,6 +493,10 @@ impl App {
             self.cloud.wake = Some(Waker::new(ctx));
         }
         self.tend_cloud();
+        let off = self.cloud.backup_off().is_some();
+        if off != std::mem::replace(&mut self.cloud.was_off, off) {
+            self.status = if off { "- online backup is off for now: stories are kept in this browser only" } else { "- online backup is on again" }.into();
+        }
         if std::mem::take(&mut self.cloud.reload)
             && let Some(path) = self.path.clone()
         {
@@ -489,7 +521,8 @@ impl App {
         if cloud.server.is_none() || cloud.wake.is_none() || self.shelf.dir.is_none() {
             return;
         }
-        if !cloud.begun {
+        // Not while paused: with no network, asking again at once would ask in every frame.
+        if !cloud.begun && cloud.now() >= cloud.paused_until {
             cloud.begun = true;
             // Only someone who signed in here is asked about: otherwise nothing is sent at all.
             if cloud.kept.signing_in || !cloud.kept.user.is_empty() {
@@ -563,6 +596,7 @@ impl App {
                         cloud.kept = Kept { user: who.user.clone(), ..Kept::default() };
                     }
                     cloud.kept.signing_in = false;
+                    (cloud.kept.name, cloud.kept.provider) = (who.name.clone(), who.provider.clone());
                     cloud.keep();
                     cloud.who = Some(who);
                     cloud.note = None;
@@ -579,9 +613,14 @@ impl App {
                 }
                 _ => {
                     let cloud = &mut self.cloud;
-                    cloud.pause(&answer, "No connection: trying again soon. Your stories are safe in this browser.".into());
-                    // Asked again once it lifts.
+                    cloud.pause(&answer, why_off(&answer));
+                    // Asked again once it lifts. Meanwhile whoever signed in here last still is: their
+                    // name shows, and that their stories are not backed up for now.
                     cloud.begun = false;
+                    if cloud.who.is_none() && !cloud.kept.user.is_empty() && !cloud.kept.name.is_empty() {
+                        let k = &cloud.kept;
+                        cloud.who = Some(Who { name: k.name.clone(), provider: k.provider.clone(), user: k.user.clone() });
+                    }
                 }
             },
             Asking::Providers => {
@@ -605,7 +644,7 @@ impl App {
                     .or_else(|_| serde_json::from_slice::<Vec<Online>>(&answer.body).map(|stories| Listed { stories, gone: Vec::new() }));
                 match listed {
                     Ok(listed) => self.plan(listed),
-                    Err(_) => self.cloud.pause(&answer, "The server had a problem: trying again soon.".into()),
+                    Err(_) => self.cloud.pause(&answer, "Caprice's server has a problem.".into()),
                 }
             }
             Asking::Get(task) => {
@@ -841,12 +880,19 @@ impl App {
                         let by = if who.provider == "github" { "GitHub" } else { "Google" };
                         ui.label(format!("Signed in with {by} as {}.", who.name));
                         ui.add_space(4.0);
-                        let how = match &cloud.note {
-                            Some(note) => note.clone(),
-                            None if cloud.busy() || cloud.next_round.is_some_and(|t| t <= cloud.now() + UP_AFTER) => "Saving online\u{2026}".into(),
-                            None => "Your stories are online, and in this browser.".into(),
-                        };
-                        ui.weak(how);
+                        match cloud.backup_off() {
+                            Some(why) => {
+                                ui.strong("Online backup is off for now.");
+                                ui.weak(why);
+                                ui.label(BACKUP_OFF);
+                            }
+                            None if cloud.busy() || cloud.next_round.is_some_and(|t| t <= cloud.now() + UP_AFTER) => {
+                                ui.weak("Saving online\u{2026}");
+                            }
+                            None => {
+                                ui.weak("Your stories are online, and in this browser.");
+                            }
+                        }
                         if let Some(told) = &cloud.told {
                             ui.add_space(4.0);
                             ui.label(told);
@@ -991,6 +1037,8 @@ pub mod stand_in {
         pub went_to: Vec<String>,
         /// An answer to give every story request instead: its status, Retry-After, and what it says.
         pub refuse: Option<(u16, u32, String)>,
+        /// No network: every request goes unanswered (status 0), as the page's `send` gives it.
+        pub offline: bool,
         /// The stories' rooms, as `web/api/room.js` keeps them (R34), and whether they can be
         /// reached (no: a socket closes as soon as it opens, as with no network).
         pub rooms: Rooms,
@@ -1028,6 +1076,9 @@ pub mod stand_in {
         fn answer(&self, r: Request) -> Answer {
             let mut o = self.0.borrow_mut();
             o.asked.push(format!("{} {}", r.method, r.path));
+            if o.offline {
+                return Answer::default();
+            }
             let header = |name: &str| r.headers.iter().find(|(n, _)| *n == name).map(|(_, v)| v.clone());
             let json = |v: serde_json::Value| Answer { status: 200, headers: Vec::new(), body: v.to_string().into_bytes() };
             let status = |status: u16| Answer { status, ..Answer::default() };

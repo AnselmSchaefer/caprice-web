@@ -720,7 +720,10 @@ impl App {
             {
                 ui.add_space(14.0);
                 let (r, _) = ui.allocate_exact_size(vec2(full, 26.0), Sense::hover());
-                let say = format!("Your stories are kept online too, as {}.", who.name);
+                let say = match self.cloud.backup_off() {
+                    Some(_) => format!("Online backup is off for now, {}: your stories are kept in this browser only.", who.name),
+                    None => format!("Your stories are kept online too, as {}.", who.name),
+                };
                 // On the dock's colour, like the stories above it: where the desk fades it can be the
                 // text's own colour (the Magic Reef's deep water, the Magic Snow's twilight).
                 let font = egui::TextStyle::Button.resolve(ui.style());

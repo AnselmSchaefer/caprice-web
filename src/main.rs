@@ -8245,6 +8245,52 @@ mod tests {
     }
 
     #[test]
+    fn with_no_connection_the_writer_stays_signed_in_writes_on_and_is_told_backup_is_off() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "online-offline");
+        let server = online(&mut h, &dir, true);
+        h.frames(12, vec![], Modifiers::NONE);
+        assert_eq!(h.app.cloud.who.as_ref().map(|w| w.name.as_str()), Some("Ada"));
+
+        // The page opens again with no network.
+        server.0.borrow_mut().offline = true;
+        let mut back = started_without_a_file(&dir);
+        back.app.shelf.dir = Some(dir.clone());
+        back.app.cloud = cloud::Cloud::with(Some(server.clone()), Some(dir.join("cloud.json")));
+        back.app.cloud.clock = Some(2000.0);
+        back.frames(12, vec![], Modifiers::NONE);
+        assert_eq!(back.app.cloud.who.as_ref().map(|w| w.name.as_str()), Some("Ada"), "still signed in, by name");
+        assert_eq!(back.app.shown_status, "- online backup is off for now: stories are kept in this browser only");
+        let welcome = back.labels();
+        assert!(welcome.contains("Online backup is off for now, Ada: your stories are kept in this browser only."), "{welcome}");
+        let asked = server.0.borrow().asked.len();
+        back.frames(30, vec![], Modifiers::NONE);
+        assert_eq!(server.0.borrow().asked.len(), asked, "not asked again in every frame");
+
+        // A new story is begun, written and saved, in this browser.
+        back.click_widget("Blank page");
+        back.frames(60, vec![], Modifiers::NONE);
+        back.type_text("Written on a train.");
+        back.save_on_shelf();
+        back.later(cloud::UP_AFTER + 1.0);
+        back.app.cloud.open = true;
+        let window = back.labels();
+        for said in ["Signed in with Google as Ada.", "Online backup is off for now.", "There is no connection to Caprice's server.", cloud::BACKUP_OFF] {
+            assert!(window.contains(said), "{said:?} in {window}");
+        }
+        assert!(stories_online(&server).is_empty());
+
+        // The network back, it goes up by itself.
+        server.0.borrow_mut().offline = false;
+        back.later(cloud::AGAIN_AFTER + 1.0);
+        back.later(cloud::UP_AFTER + 1.0);
+        assert!(stories_online(&server).iter().any(|s| s.1.contains("Written on a train.")), "{:?}", stories_online(&server));
+        assert!(!back.labels().contains("Online backup is off"));
+        assert_eq!(back.app.shown_status, "- online backup is on again");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn a_limit_pauses_stories_online_and_they_go_up_once_it_lifts() {
         let mut h = Harness::new();
         let dir = with_shelf(&mut h, "online-limit");
@@ -8255,14 +8301,15 @@ mod tests {
         h.save_on_shelf();
         h.later(cloud::UP_AFTER + 1.0);
         h.app.cloud.open = true;
-        assert!(h.labels().contains("Paused: Stories online are paused until tomorrow."));
+        let labels = h.labels();
+        assert!(labels.contains("Online backup is off for now.") && labels.contains("Stories online are paused until tomorrow."), "{labels}");
         server.0.borrow_mut().refuse = None;
         let asked = server.0.borrow().asked.len();
         h.later(600.0);
         assert_eq!(server.0.borrow().asked.len(), asked, "nothing is sent before the server said");
         h.later(3001.0);
         assert!(stories_online(&server)[0].1.contains("Written on a busy day."), "then it goes up");
-        assert!(!h.labels().contains("Paused"));
+        assert!(!h.labels().contains("Online backup is off"));
         std::fs::remove_dir_all(dir).unwrap();
     }
 

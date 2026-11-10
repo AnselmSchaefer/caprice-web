@@ -62,13 +62,14 @@ function providers(request) {
 // The rooms each test opened, each with the sockets of the devices that came in (`device`).
 const opened = new WeakMap();
 
-async function start(t, vars = {}) {
+// With `down`, the Ledger is one that fails every request while told to (`ledger-down.mjs`).
+async function start(t, vars = {}, down = false) {
   const mf = new Miniflare(convertV4MiniflareOptions({
     modulesRoot: fileURLToPath(new URL(".", import.meta.url)),
-    modules: ["worker.js", "ledger.js", "room.js", "failure.js"].map(m => ({ type: "ESModule", path: fileURLToPath(new URL(m, import.meta.url)) })),
+    modules: [...(down ? ["ledger-down.mjs"] : []), "worker.js", "ledger.js", "room.js", "failure.js"].map(m => ({ type: "ESModule", path: fileURLToPath(new URL(m, import.meta.url)) })),
     compatibilityDate: DATE,
     r2Buckets: ["STORIES"],
-    durableObjects: { LEDGER: { className: "Ledger", useSQLite: true }, ROOMS: { className: "StoryRoom", useSQLite: true } },
+    durableObjects: { LEDGER: { className: down ? "DownLedger" : "Ledger", useSQLite: true }, ROOMS: { className: "StoryRoom", useSQLite: true } },
     bindings: {
       SESSION_SECRET: "a test's own secret, long enough to sign with",
       GOOGLE_CLIENT_ID: "google-app", GOOGLE_CLIENT_SECRET: "google-secret",
@@ -136,6 +137,42 @@ test("cloudflare's daily limit is said plainly, with when it lifts, and other fa
   assert.match(failure(over, Date.UTC(2026, 10, 10, 23, 50)).said, /within the hour/);
   assert.deepEqual(failure(new Error("Unexpected end of JSON input"), at), { status: 500, said: "Something went wrong", retry: null });
   assert.equal(failure(undefined, at).status, 500);
+});
+
+test("with the ledger out of reach the writer still signs in and is named, and is recorded once it is back", async t => {
+  const mf = await start(t, {}, true);
+  const namespace = await mf.getDurableObjectNamespace("LEDGER");
+  const ledger = namespace.get(namespace.idFromName("ledger"));
+  await ledger.down(true);
+  const api = await writer(mf, "7", "Ada");
+  const me = await api("/api/me");
+  assert.equal(me.status, 200);
+  assert.equal((await me.json()).name, "Ada", "the app knows who is signed in");
+  const list = await api("/api/stories");
+  assert.equal(list.status, 503);
+  assert.match(await list.text(), /used up what its host, Cloudflare, allows it in a day/);
+  assert.ok(Number(list.headers.get("Retry-After")) > 0);
+
+  await ledger.down(false);
+  const back = await api("/api/stories");
+  assert.equal(back.status, 200, "once the ledger is back, the writer is signed up and their stories are there");
+  const renewed = cookie(back, "__Host-caprice");
+  assert.ok(renewed, "the session is renewed as recorded");
+  const recorded = await mf.dispatchFetch(`${SITE}/api/stories`, { headers: { "X-Caprice": "1", Origin: SITE, Cookie: renewed } });
+  assert.equal(recorded.status, 200);
+  assert.equal(cookie(recorded, "__Host-caprice"), undefined, "and is not recorded again");
+});
+
+test("a session still to be recorded cannot pass the day's limit on new accounts", async t => {
+  const mf = await start(t, { SITE_ACCOUNTS_PER_DAY: "0" }, true);
+  const namespace = await mf.getDurableObjectNamespace("LEDGER");
+  const ledger = namespace.get(namespace.idFromName("ledger"));
+  await ledger.down(true);
+  const api = await writer(mf, "8", "Bo");
+  await ledger.down(false);
+  const list = await api("/api/stories");
+  assert.equal(list.status, 503);
+  assert.match(await list.text(), /taking no new sign-ups today/);
 });
 
 test("signing in with google gives a session that names the writer", async t => {

@@ -1747,6 +1747,26 @@ In the app (`cloud.rs`) **the shelf is where a story is; online is a copy, and n
 - **Nothing is sent unless the writer signed in here**: at start the app asks `/api/me` only if
   `cloud.json` says a sign-in was begun, or who was signed in. The session cookie is HttpOnly, so
   the page cannot see it; `cloud.json` is how it knows to ask. Signing out forgets `cloud.json`.
+- **Signed in stays signed in when the server cannot be reached; online backup is off, and
+  says so.** With no network, a limit (the day's requests used up, R34) or a fault of the
+  server's, the writer still sees their name and writes and begins stories as ever; only nothing
+  goes up or comes down. Both sides keep to it:
+  - The Worker signs the writer in even when the Ledger cannot be reached (`callback`): the
+    session then says the sign-up is still to be recorded (`k`), and the next request records it
+    first (`ledger.signIn`, so the day's limit on new accounts still holds) and renews the cookie
+    without it. `/api/me` needs no Ledger, so the app learns the name at once.
+  - The app keeps the name and provider of who signed in last in `cloud.json` (`Kept`), and when
+    `/api/me` gets no answer it takes them from there. `Cloud::pause` notes why (`why_off`: no
+    connection, the server's own words for a limit, or a fault) and asks nothing until it lifts,
+    `/api/me` included (asking it again at once asked in every frame with no network).
+    `Cloud::backup_off` is that note while signed in: the Stories online window says "Online
+    backup is off for now", why, and what it means (`BACKUP_OFF`); the welcome page's line says it
+    instead of "kept online too"; the status line says when it goes off and when it is back.
+  - Tests: `with_no_connection_the_writer_stays_signed_in_writes_on_and_is_told_backup_is_off`,
+    `a_limit_pauses_stories_online_and_they_go_up_once_it_lifts`; in `api.test.mjs`, "with the
+    ledger out of reach the writer still signs in and is named, and is recorded once it is back",
+    "a session still to be recorded cannot pass the day's limit on new accounts" (`ledger-down.mjs`,
+    a Ledger the tests can make fail as Cloudflare's does).
 - **Saving never waits for the network.** `save_to` calls `Cloud::saved`, and the story goes up
   `UP_AFTER` later; going out of sight or coming back looks at once; otherwise every `LOOK_EVERY`.
 - **What to do is `decide`**, from the shelf's file (its fingerprint, and whether it is the open
@@ -1918,9 +1938,9 @@ Plan and reasons: `LIVE_PLAN.md`.
   then refuses every Durable Object request until midnight UTC, and the Worker's catch-all answered
   "Something went wrong", which looked like a broken sign-in. Its error (`OVER_LIMIT`) now answers
   503 saying what happened and when it lifts, with `Retry-After` until midnight UTC, so the app
-  pauses stories online that long and shows the words ("Paused: …"; a painting: "no picture: …").
-  The sign-in callback is a page of its own and shows them as they are. `/api/me` needs no Durable
-  Object and still answers. Any other fault still says only "Something went wrong". Test:
+  pauses stories online that long and shows the words (online backup is off, R33; a painting:
+  "no picture: …"). Signing in still works then (R33). `/api/me` needs no Durable Object and
+  still answers. Any other fault still says only "Something went wrong". Test:
   "cloudflare's daily limit is said plainly, with when it lifts, and other faults say only that".
 - **Only the writer's own devices**: the WebSocket cannot carry `X-Caprice`, so `connect` checks
   its `Origin`, then the session; the room hears who from the Worker, never from the device, and

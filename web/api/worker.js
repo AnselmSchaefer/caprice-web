@@ -88,6 +88,24 @@ async function route(request, env) {
   if (!session) return text(401, "Not signed in");
   // The user's id is no secret of theirs (a hash), and tells the app when someone else signs in.
   if (path === "/api/me") return json({ name: session.n, provider: session.p, user: session.u });
+  if (!session.k) return signedIn(request, env, url, session);
+
+  // Signed in while the Ledger could not be reached (`callback`): the sign-up is recorded now,
+  // before anything the Ledger keeps, and the session no longer says it is still to be.
+  const answer = await env.LEDGER.get(env.LEDGER.idFromName("ledger")).signIn(session.u);
+  if (!answer.ok) return refused(answer);
+  const { k: _, ...recorded } = session;
+  const renewed = set(SESSION, await sealed(recorded, env), Math.max(0, Math.floor((session.x - Date.now()) / 1000)));
+  const response = await signedIn(request, env, url, recorded);
+  const out = new Response(response.body, response);
+  out.headers.append("Set-Cookie", renewed);
+  return out;
+}
+
+// What a writer signed in may ask, once the Ledger knows them.
+async function signedIn(request, env, url, session) {
+  const path = url.pathname;
+  const method = request.method;
   if (path === "/api/scene") return method === "POST" ? scene(request, env, session.u) : text(405, "POST only");
   if (path === "/api/scenes") return method === "GET" ? waiting(url, env, session.u) : text(405, "GET only");
   const kept = path.match(/^\/api\/scenes\/([^/]+)$/);
@@ -409,10 +427,20 @@ async function callback(provider, url, request, env) {
   if (!who) return text(502, `${provider} did not say who you are. Please try again.`);
   const user = await hex(`${provider}:${who.sub}`);
   const ledger = env.LEDGER.get(env.LEDGER.idFromName("ledger"));
-  const answer = await ledger.signIn(user);
-  if (!answer.ok) return refused(answer);
+  // The Ledger out of reach (the day's requests used up, a fault) does not keep the writer from
+  // signing in: the app then knows who they are, and says their stories are not backed up for now.
+  // The session says the sign-up is still to be recorded (`k`), which the next request does first,
+  // so the day's limit on new accounts still holds.
+  let unrecorded = false;
+  try {
+    const answer = await ledger.signIn(user);
+    if (!answer.ok) return refused(answer);
+  } catch (e) {
+    console.error("api: signed in without the Ledger:", e?.message);
+    unrecorded = true;
+  }
   const name = who.name.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 60);
-  const session = await sealed({ u: user, n: name, p: provider, x: Date.now() + 30 * DAY }, env);
+  const session = await sealed({ u: user, n: name, p: provider, x: Date.now() + 30 * DAY, ...(unrecorded ? { k: 1 } : {}) }, env);
   return home([set(SESSION, session, 30 * DAY / 1000), clear(SIGNING_IN)]);
 }
 
