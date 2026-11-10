@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
+import { failure } from "./failure.js";
 
 const SITE = "https://caprice.test";
 // The date the Worker is deployed with, so the tests run what readers get.
@@ -64,7 +65,7 @@ const opened = new WeakMap();
 async function start(t, vars = {}) {
   const mf = new Miniflare(convertV4MiniflareOptions({
     modulesRoot: fileURLToPath(new URL(".", import.meta.url)),
-    modules: ["worker.js", "ledger.js", "room.js"].map(m => ({ type: "ESModule", path: fileURLToPath(new URL(m, import.meta.url)) })),
+    modules: ["worker.js", "ledger.js", "room.js", "failure.js"].map(m => ({ type: "ESModule", path: fileURLToPath(new URL(m, import.meta.url)) })),
     compatibilityDate: DATE,
     r2Buckets: ["STORIES"],
     durableObjects: { LEDGER: { className: "Ledger", useSQLite: true }, ROOMS: { className: "StoryRoom", useSQLite: true } },
@@ -122,6 +123,20 @@ async function inR2(mf) {
   const bucket = await mf.getR2Bucket("STORIES");
   return (await bucket.list()).objects.map(o => o.key);
 }
+
+test("cloudflare's daily limit is said plainly, with when it lifts, and other faults say only that", () => {
+  // Cloudflare's own words, as the Worker's log showed them on 2026-11-10.
+  const over = new Error("Exceeded allowed volume of requests in Durable Objects free tier.");
+  const at = Date.UTC(2026, 10, 10, 16, 30);
+  const said = failure(over, at);
+  assert.equal(said.status, 503);
+  assert.match(said.said, /used up what its host, Cloudflare, allows it in a day/);
+  assert.match(said.said, /until midnight UTC, in about 8 hours/);
+  assert.equal(said.retry, 7.5 * 3600, "the app waits until midnight UTC before asking again");
+  assert.match(failure(over, Date.UTC(2026, 10, 10, 23, 50)).said, /within the hour/);
+  assert.deepEqual(failure(new Error("Unexpected end of JSON input"), at), { status: 500, said: "Something went wrong", retry: null });
+  assert.equal(failure(undefined, at).status, 500);
+});
 
 test("signing in with google gives a session that names the writer", async t => {
   const mf = await start(t);

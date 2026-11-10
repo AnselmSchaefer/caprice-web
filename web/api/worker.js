@@ -8,6 +8,7 @@
 // whether the limits allow it, so R2 stays inside its free amounts.
 import { Ledger, key, limits } from "./ledger.js";
 import { StoryRoom } from "./room.js";
+import { failure } from "./failure.js";
 
 export { Ledger, StoryRoom };
 
@@ -26,7 +27,8 @@ export default {
     } catch (e) {
       // The reason only: never anything of a story.
       console.error("api:", new URL(request.url).pathname, e?.message);
-      response = text(500, "Something went wrong");
+      const { status, said, retry } = failure(e);
+      response = text(status, said, retry ? { "Retry-After": String(retry) } : {});
     }
     // A WebSocket handed on as it is: copying the answer would lose it.
     return response.status === 101 ? response : guarded(response);

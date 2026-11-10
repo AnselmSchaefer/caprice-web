@@ -104,6 +104,7 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `live.rs` | A story live on several devices: the room's connection, the pen, batches of edits out, following them in, the hash check and the whole story, the bar and Transfer here (R34) |
 | `web/api/worker.js` | The Worker's own requests, `/api/*` only: signing in with Google or GitHub, the session cookie, stories online in R2, scenes Claude paints for the browser (R33) |
 | `web/api/room.js` | The Durable Object `StoryRoom`, one per story of each writer: the devices it is open on, the pen, batches passed on (R34) |
+| `web/api/failure.js` | What a failed request answers: Cloudflare's daily limit said plainly, with when it lifts; any other fault, "Something went wrong" (R34) |
 | `web/api/ledger.js` | The Durable Object `Ledger`: who has signed up, the current version and history of each story online, the day's scenes, every limit (R33) |
 
 ---
@@ -1913,6 +1914,14 @@ Plan and reasons: `LIVE_PLAN.md`.
   to a device there (`settle`), never in an empty room, and never for a time already past. An
   empty room with its holder gone once set an alarm in the past for ever, and two such rooms
   used up the day's 100,000 in a morning.
+- **Once the day's 100,000 are used up, the writer is told so** (`web/api/failure.js`). Cloudflare
+  then refuses every Durable Object request until midnight UTC, and the Worker's catch-all answered
+  "Something went wrong", which looked like a broken sign-in. Its error (`OVER_LIMIT`) now answers
+  503 saying what happened and when it lifts, with `Retry-After` until midnight UTC, so the app
+  pauses stories online that long and shows the words ("Paused: …"; a painting: "no picture: …").
+  The sign-in callback is a page of its own and shows them as they are. `/api/me` needs no Durable
+  Object and still answers. Any other fault still says only "Something went wrong". Test:
+  "cloudflare's daily limit is said plainly, with when it lifts, and other faults say only that".
 - **Only the writer's own devices**: the WebSocket cannot carry `X-Caprice`, so `connect` checks
   its `Origin`, then the session; the room hears who from the Worker, never from the device, and
   refuses a socket whose session has run out.
