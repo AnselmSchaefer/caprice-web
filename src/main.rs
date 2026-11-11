@@ -7131,7 +7131,7 @@ mod tests {
             assert!(!hill.forming && carved.2 == 1.0 && hill.formed == chapters - 1, "Chapter {n}: every chapter before carved: {:?}", hill.figures);
             assert!(carved.0.height() > pile.0.height() && (carved.0.bottom() - pile.0.bottom()).abs() < 2.0, "Chapter {n}: a figure taller than its pile, in its place: {:?} {:?}", carved.0, pile.0);
             assert!(hill.figures[chapters - 1].2 == 0.0, "Chapter {n}: the new chapter's pile begun");
-            assert!(hill.which.windows(2).all(|w| w[0] != w[1]) || chapters < 2, "{:?}", hill.which);
+            assert!(hill.which.windows(2).all(|w| w[0].0 != w[1].0 && w[0].1 != w[1].1), "a figure and a light of its own: {:?}", hill.which);
         }
         assert_eq!(seen(&h).figures[0].1, first.1, "the first as it was cut");
 

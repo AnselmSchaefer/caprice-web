@@ -5,8 +5,9 @@
 //! the dusk. Each page of the chapter being written cuts a block of ice out of the lake: a glint
 //! traces round it, it rises out of the water, floats up to the chapter's place and settles on its
 //! pile, and the hole freezes over. When the next chapter begins, the pile shimmers and turns into
-//! an ice figure, rising from its foot: a swan, a stag, a bear, an owl, a fox or a leaping fish,
-//! bigger the more pages its chapter had, a gleam passing over it as it is done. Nothing brings a
+//! an ice figure, rising from its foot: one of twenty animals and things, at random, bigger the
+//! more pages its chapter had, a light of its own colour glowing inside it, and a gleam passing
+//! over it as it is done. Nothing brings a
 //! title in this theme.
 //!
 //! Like everything in `eggs.rs` it lies on the desk behind the pages and is drawn from shapes as a
@@ -195,9 +196,50 @@ fn limb(a: (f32, f32), b: (f32, f32), wa: f32, wb: f32) -> Vec<(f32, f32)> {
 }
 
 /// The figures a pile can become, in their units from the foot of their plinth, facing right: each
-/// a list of convex parts, the further back first. A swan, a stag, a bear, an owl, a fox sitting
-/// with its tail round its feet, and a fish leaping out of a wave.
-pub const FIGURES: usize = 6;
+/// a list of convex parts, the further back first. A swan, a stag, a bear, an owl, a fox, a fish
+/// leaping, a rabbit, a cat, a seal with a ball, a whale's tail, a turtle, a snail, a hedgehog,
+/// an elephant, a giraffe, a horse's head, a butterfly, a squirrel, a frog and a snowflake.
+pub const FIGURES: usize = 20;
+
+/// The lights that glow inside the figures, a chapter's each.
+pub const LIGHTS: [Color32; 12] = [
+    Color32::from_rgb(255, 140, 180),
+    Color32::from_rgb(255, 186, 84),
+    Color32::from_rgb(176, 128, 255),
+    Color32::from_rgb(110, 236, 180),
+    Color32::from_rgb(96, 214, 255),
+    Color32::from_rgb(255, 222, 110),
+    Color32::from_rgb(255, 120, 100),
+    Color32::from_rgb(224, 156, 255),
+    Color32::from_rgb(186, 248, 110),
+    Color32::from_rgb(130, 170, 255),
+    Color32::from_rgb(255, 104, 214),
+    Color32::from_rgb(255, 176, 136),
+];
+
+/// Which figure chapter `k` becomes and which light glows in it, at random for the story: the
+/// figures in a shuffled order, all of them before any comes again and never the same twice
+/// running, and each light other than the chapter's before.
+pub fn chosen(story: &str, k: usize) -> (usize, Color32) {
+    let mut order: Vec<usize> = Vec::new();
+    for round in 0..=k / FIGURES {
+        let mut s = Seeds::of(story, 99_400 + round);
+        let mut deal: Vec<usize> = (0..FIGURES).collect();
+        for i in (1..FIGURES).rev() {
+            deal.swap(i, (s.next(0.0, (i + 1) as f32) as usize).min(i));
+        }
+        if order.last() == deal.first() {
+            deal.swap(0, FIGURES - 1);
+        }
+        order.extend(deal);
+    }
+    let mut light = 0;
+    for j in 0..=k {
+        let step = Seeds::of(story, 99_300 + j).next(0.0, (LIGHTS.len() - 1) as f32) as usize;
+        light = (light + 1 + step.min(LIGHTS.len() - 2)) % LIGHTS.len();
+    }
+    (order[k], LIGHTS[light])
+}
 
 fn figure_parts(which: usize) -> Vec<Vec<(f32, f32)>> {
     let mut parts = vec![vec![(-24.0, 0.0), (24.0, 0.0), (24.0, -10.0), (-24.0, -10.0)], vec![(-24.0, -10.0), (24.0, -10.0), (22.0, -14.0), (-22.0, -14.0)]];
@@ -271,6 +313,172 @@ fn figure_parts(which: usize) -> Vec<Vec<(f32, f32)>> {
             parts.push(tri((13.0, -59.0), (24.0, -55.0), (13.0, -51.0)));
             parts.push(ell(10.0, -19.0, 20.0, 6.0, -0.2));
         }
+        6 => {
+            // A rabbit sitting up, its ears tall.
+            parts.push(ell(-16.0, -26.0, 4.0, 4.0, 0.0));
+            parts.push(ell(-8.0, -24.0, 11.0, 10.0, 0.0));
+            parts.push(ell(-2.0, -32.0, 13.0, 16.0, 0.0));
+            parts.push(limb((6.0, -14.0), (7.0, -30.0), 4.0, 4.0));
+            parts.push(limb((4.0, -55.0), (-1.0, -80.0), 4.5, 3.6));
+            parts.push(ell(-1.0, -80.0, 1.8, 1.8, 0.0));
+            parts.push(ell(8.0, -50.0, 8.5, 7.5, 0.0));
+            parts.push(limb((8.0, -55.0), (9.0, -81.0), 4.5, 3.6));
+            parts.push(ell(9.0, -81.0, 1.8, 1.8, 0.0));
+        }
+        7 => {
+            // A cat sitting, its tail curling up behind.
+            parts.push(limb((-10.0, -16.0), (-22.0, -24.0), 3.2, 3.0));
+            parts.push(limb((-22.0, -24.0), (-24.0, -44.0), 3.0, 2.6));
+            parts.push(ell(-22.0, -24.0, 1.5, 1.5, 0.0));
+            parts.push(ell(0.0, -32.0, 12.0, 18.0, 0.05));
+            parts.push(ell(5.0, -34.0, 6.0, 12.0, 0.0));
+            parts.push(limb((4.0, -14.0), (5.0, -32.0), 3.6, 3.6));
+            parts.push(limb((9.0, -14.0), (9.0, -32.0), 3.6, 3.6));
+            parts.push(tri((-1.0, -59.0), (0.0, -71.0), (5.0, -63.0)));
+            parts.push(tri((6.0, -63.0), (11.0, -71.0), (12.0, -59.0)));
+            parts.push(ell(5.0, -56.0, 9.0, 8.0, 0.0));
+        }
+        8 => {
+            // A seal lying on its belly, a ball on its nose.
+            parts.push(tri((-28.0, -22.0), (-40.0, -30.0), (-38.0, -15.0)));
+            parts.push(ell(-6.0, -22.0, 24.0, 8.0, 0.0));
+            parts.push(limb((10.0, -22.0), (18.0, -38.0), 12.0, 9.0));
+            parts.push(tri((6.0, -18.0), (17.0, -14.0), (10.0, -24.0)));
+            parts.push(ell(22.0, -42.0, 7.0, 6.0, 0.1));
+            parts.push(ell(28.0, -41.0, 4.0, 3.0, 0.0));
+            parts.push(ell(30.0, -51.0, 5.0, 5.0, 0.0));
+        }
+        9 => {
+            // A whale's tail rising out of a wave.
+            parts.push(limb((0.0, -18.0), (2.0, -52.0), 12.0, 6.0));
+            parts.push(ell(-11.0, -59.0, 15.0, 5.0, 0.35));
+            parts.push(ell(15.0, -59.0, 15.0, 5.0, -0.35));
+            parts.push(ell(0.0, -18.0, 26.0, 5.0, 0.0));
+            parts.push(tri((-18.0, -20.0), (-26.0, -32.0), (-12.0, -22.0)));
+            parts.push(tri((18.0, -20.0), (27.0, -31.0), (12.0, -22.0)));
+        }
+        10 => {
+            // A turtle, its head out.
+            parts.push(limb((-12.0, -14.0), (-12.0, -24.0), 6.0, 6.0));
+            parts.push(limb((12.0, -14.0), (12.0, -24.0), 6.0, 6.0));
+            parts.push(tri((-22.0, -22.0), (-31.0, -19.0), (-22.0, -17.0)));
+            parts.push(limb((16.0, -24.0), (24.0, -32.0), 6.0, 5.0));
+            parts.push(ell(27.0, -33.0, 6.5, 5.0, 0.0));
+            parts.push(ell(0.0, -21.0, 25.0, 4.0, 0.0));
+            parts.push(ell(0.0, -30.0, 21.0, 16.0, 0.0));
+            parts.push(ell(0.0, -34.0, 9.0, 7.0, 0.0));
+        }
+        11 => {
+            // A snail, its shell curled and its horns out.
+            parts.push(limb((-22.0, -17.0), (24.0, -17.0), 5.0, 8.0));
+            parts.push(limb((24.0, -24.0), (29.0, -38.0), 1.6, 1.4));
+            parts.push(limb((21.0, -24.0), (21.0, -38.0), 1.6, 1.4));
+            parts.push(ell(29.0, -38.0, 2.2, 2.2, 0.0));
+            parts.push(ell(21.0, -38.0, 2.2, 2.2, 0.0));
+            parts.push(ell(24.0, -22.0, 5.5, 6.5, 0.0));
+            parts.push(ell(-2.0, -38.0, 19.0, 19.0, 0.0));
+            parts.push(ell(0.0, -40.0, 12.0, 12.0, 0.0));
+            parts.push(ell(2.0, -42.0, 5.5, 5.5, 0.0));
+        }
+        12 => {
+            // A hedgehog, its spines up.
+            for x in [-12.0, 10.0] {
+                parts.push(limb((x, -14.0), (x, -20.0), 4.0, 4.0));
+            }
+            for i in 0..9 {
+                let a = PI * (0.95 - 0.8 * i as f32 / 8.0);
+                let at = |r: f32, da: f32| (-2.0 + r * (a + da).cos() * 1.2, -28.0 - r * (a + da).sin());
+                parts.push(tri(at(10.0, -0.22), at(24.0, 0.0), at(10.0, 0.22)));
+            }
+            parts.push(ell(-2.0, -28.0, 20.0, 12.0, 0.0));
+            parts.push(ell(17.0, -25.0, 8.0, 6.0, 0.2));
+            parts.push(tri((23.0, -27.0), (31.0, -23.0), (23.0, -21.0)));
+        }
+        13 => {
+            // An elephant, its trunk curled down.
+            for (x, lean) in [(-14.0, 1.0), (-6.0, -1.0), (8.0, 1.0), (15.0, -1.0)] {
+                parts.push(limb((x + lean, -14.0), (x, -34.0), 7.0, 8.0));
+            }
+            parts.push(limb((-23.0, -44.0), (-26.0, -30.0), 1.6, 1.2));
+            parts.push(ell(-2.0, -43.0, 22.0, 16.0, 0.0));
+            parts.push(ell(20.0, -51.0, 10.0, 10.0, 0.0));
+            parts.push(limb((27.0, -47.0), (30.0, -31.0), 5.0, 4.0));
+            parts.push(limb((30.0, -31.0), (35.0, -23.0), 4.0, 3.0));
+            parts.push(tri((26.0, -41.0), (34.0, -36.0), (27.0, -37.0)));
+            parts.push(ell(13.0, -50.0, 8.0, 11.0, 0.1));
+        }
+        14 => {
+            // A giraffe, its neck up high.
+            for x in [-10.0, -5.0, 8.0, 13.0] {
+                parts.push(limb((x, -14.0), (x, -48.0), 3.0, 3.4));
+            }
+            parts.push(limb((-14.0, -52.0), (-18.0, -38.0), 1.4, 1.0));
+            parts.push(ell(0.0, -51.0, 15.0, 9.0, 0.1));
+            parts.push(limb((10.0, -54.0), (20.0, -92.0), 7.0, 4.5));
+            parts.push(limb((19.0, -96.0), (18.0, -104.0), 1.4, 1.4));
+            parts.push(limb((22.0, -97.0), (22.0, -105.0), 1.4, 1.4));
+            parts.push(ell(24.0, -93.0, 7.5, 4.0, 0.3));
+        }
+        15 => {
+            // A horse's head, as in chess.
+            parts.push(ell(0.0, -19.0, 16.0, 5.0, 0.0));
+            parts.push(limb((0.0, -20.0), (-2.0, -34.0), 22.0, 18.0));
+            parts.push(limb((-6.0, -32.0), (-2.0, -72.0), 20.0, 14.0));
+            parts.push(tri((-7.0, -74.0), (-5.0, -87.0), (0.0, -75.0)));
+            parts.push(limb((-2.0, -70.0), (17.0, -61.0), 14.0, 9.0));
+            parts.push(ell(18.0, -59.0, 6.0, 5.0, 0.3));
+            for i in 0..4 {
+                let y = -38.0 - 9.0 * i as f32;
+                parts.push(tri((-14.0, y), (-20.0, y - 6.0), (-12.0, y - 9.0)));
+            }
+        }
+        16 => {
+            // A butterfly resting on a stem.
+            parts.push(limb((0.0, -14.0), (0.0, -32.0), 3.0, 2.5));
+            parts.push(ell(-14.0, -60.0, 15.0, 10.0, 0.5));
+            parts.push(ell(14.0, -60.0, 15.0, 10.0, -0.5));
+            parts.push(ell(-10.0, -41.0, 9.0, 7.0, -0.4));
+            parts.push(ell(10.0, -41.0, 9.0, 7.0, 0.4));
+            parts.push(limb((0.0, -32.0), (0.0, -62.0), 3.5, 2.5));
+            parts.push(limb((0.0, -62.0), (-6.0, -74.0), 1.2, 1.0));
+            parts.push(limb((0.0, -62.0), (6.0, -74.0), 1.2, 1.0));
+        }
+        17 => {
+            // A squirrel, its tail up and a nut in its paws.
+            parts.push(ell(-14.0, -44.0, 9.0, 24.0, -0.25));
+            parts.push(ell(-6.0, -68.0, 8.0, 7.0, 0.5));
+            parts.push(ell(2.0, -30.0, 10.0, 15.0, 0.0));
+            parts.push(ell(4.0, -17.0, 8.0, 4.0, 0.0));
+            parts.push(tri((6.0, -55.0), (7.0, -64.0), (11.0, -56.0)));
+            parts.push(ell(9.0, -50.0, 7.0, 6.5, 0.0));
+            parts.push(limb((8.0, -36.0), (14.0, -40.0), 3.0, 3.0));
+            parts.push(ell(16.0, -42.0, 3.5, 4.0, 0.0));
+        }
+        18 => {
+            // A frog sitting, its eyes up.
+            parts.push(ell(-10.0, -20.0, 12.0, 6.0, -0.2));
+            parts.push(ell(0.0, -30.0, 16.0, 13.0, -0.25));
+            parts.push(limb((8.0, -14.0), (8.0, -28.0), 3.5, 3.5));
+            parts.push(ell(10.0, -40.0, 11.0, 7.0, 0.0));
+            parts.push(ell(4.0, -47.0, 4.0, 4.0, 0.0));
+            parts.push(ell(14.0, -47.0, 4.0, 4.0, 0.0));
+        }
+        19 => {
+            // A snowflake standing on one of its arms.
+            let c = (0.0, -58.0);
+            parts.push(limb((0.0, -14.0), (0.0, -24.0), 5.0, 4.0));
+            for i in 0..6 {
+                let a = PI / 2.0 + i as f32 * PI / 3.0;
+                let at = |r: f32, da: f32| (c.0 + r * (a + da).cos(), c.1 + r * (a + da).sin());
+                parts.push(limb(c, at(34.0, 0.0), 4.0, 2.0));
+                for side in [-1.0, 1.0] {
+                    let from = at(20.0, 0.0);
+                    let to = (from.0 + 10.0 * (a + side * 0.8).cos(), from.1 + 10.0 * (a + side * 0.8).sin());
+                    parts.push(limb(from, to, 2.0, 1.4));
+                }
+            }
+            parts.push(ell(c.0, c.1, 7.0, 7.0, 0.0));
+        }
         _ => {
             // A fish leaping out of a wave.
             parts.push(ell(0.0, -18.0, 24.0, 5.0, 0.0));
@@ -287,9 +495,9 @@ fn figure_parts(which: usize) -> Vec<Vec<(f32, f32)>> {
 }
 
 /// A chapter's ice: where it stands, its size, how much the dusk blues it, which way its figure
-/// faces (towards the page), which figure it becomes and the parts of it, how far they reach, the
-/// size it is carved at (bigger for more pages), its pile's blocks a little out of line, and
-/// where it sparkles.
+/// faces (towards the page), which figure it becomes and the parts of it, the light glowing inside
+/// it, how far its parts reach, the size it is carved at (bigger for more pages), its pile's
+/// blocks a little out of line, and where it sparkles.
 #[derive(Clone, Debug)]
 pub struct Figure {
     pub foot: Pos2,
@@ -298,6 +506,7 @@ pub struct Figure {
     face: f32,
     pub which: usize,
     parts: Vec<Vec<(f32, f32)>>,
+    pub light: Color32,
     extent: Rect,
     scale: f32,
     jitter: Vec<f32>,
@@ -308,8 +517,7 @@ impl Figure {
     /// Chapter `k`'s ice at `place`, facing `face`, of `pages` pages.
     pub fn of(story: &str, k: usize, place: &Place, face: f32, pages: usize) -> Figure {
         let mut s = Seeds::of(story, 99_500 + k);
-        // Each chapter its own figure, never the one before it again.
-        let which = (k + Seeds::of(story, 99_400).next(0.0, FIGURES as f32) as usize) % FIGURES;
+        let (which, light) = chosen(story, k);
         let parts = figure_parts(which);
         let extent = parts.iter().flatten().fold(Rect::NOTHING, |r, &(x, y)| r.union(Rect::from_pos(pos2(x, y))));
         let jitter = (0..BLOCKS).map(|_| s.next(-1.5, 1.5)).collect();
@@ -318,7 +526,7 @@ impl Figure {
             (p[s.next(0.0, p.len() as f32) as usize % p.len()], s.next(0.0, 40.0))
         }).collect();
         let scale = place.size * (0.6 + 0.4 * pages.min(BLOCKS) as f32 / BLOCKS as f32);
-        Figure { foot: place.foot, u: place.size, haze: place.haze, face, which, parts, extent, scale, jitter, sparkles }
+        Figure { foot: place.foot, u: place.size, haze: place.haze, face, which, parts, light, extent, scale, jitter, sparkles }
     }
 
     fn hazed(&self, c: Color32) -> Color32 {
@@ -353,9 +561,9 @@ impl Figure {
     }
 
     /// One part of the figure, shown as far up as `level` (in its units, from the foot): a mesh
-    /// clear at its edge and deeper blue within, lit from the left, brighter where the `gleam`
-    /// passes (across, in its units), with a fine bright edge.
-    fn part(&self, poly: &[(f32, f32)], level: f32, gleam: Option<f32>, alpha: f32) -> Vec<Shape> {
+    /// clear at its edge and deeper within, where its light glows `inner` (from 0 to 1), lit from
+    /// the left, brighter where the `gleam` passes (across, in its units), with a fine bright edge.
+    fn part(&self, poly: &[(f32, f32)], level: f32, gleam: Option<f32>, inner: f32) -> Vec<Shape> {
         let poly = if level > self.extent.top() { cut(poly, level, true) } else { poly.to_vec() };
         if poly.len() < 3 {
             return Vec::new();
@@ -370,23 +578,26 @@ impl Figure {
         let mid = (mid.0 / poly.len() as f32, mid.1 / poly.len() as f32);
         let mut mesh = egui::epaint::Mesh::default();
         let (l, g) = lit(mid);
-        mesh.colored_vertex(self.point(mid), glow(self.hazed(ICE_DEEP.lerp_to_gamma(ICE, 0.25 + 0.45 * l).lerp_to_gamma(ICE_LIT, g)), 0.82 * alpha));
+        let deep = ICE_DEEP.lerp_to_gamma(ICE, 0.25 + 0.45 * l).lerp_to_gamma(self.light, 0.75 * inner);
+        mesh.colored_vertex(self.point(mid), glow(self.hazed(deep.lerp_to_gamma(ICE_LIT, g)), 0.85));
         for &p in &poly {
             let (l, g) = lit(p);
-            mesh.colored_vertex(self.point(p), glow(self.hazed(ICE_SHADE.lerp_to_gamma(ICE_LIT, l).lerp_to_gamma(Color32::WHITE, g)), 0.92 * alpha));
+            let edge = ICE_SHADE.lerp_to_gamma(ICE_LIT, l).lerp_to_gamma(self.light, 0.25 * inner);
+            mesh.colored_vertex(self.point(p), glow(self.hazed(edge.lerp_to_gamma(Color32::WHITE, g)), 0.92));
         }
         let n = poly.len() as u32;
         for i in 1..=n {
             mesh.add_triangle(0, i, i % n + 1);
         }
         let points = poly.iter().map(|&p| self.point(p)).collect();
-        vec![Shape::mesh(mesh), Shape::closed_line(points, Stroke::new(0.6 * self.scale, glow(self.hazed(ICE_LIT), 0.7 * alpha)))]
+        vec![Shape::mesh(mesh), Shape::closed_line(points, Stroke::new(0.6 * self.scale, glow(self.hazed(ICE_LIT), 0.7)))]
     }
 
     /// The chapter's ice with `blocks` on its pile (whole ones; the one on its way is `coming`),
     /// `formed` from 0 (a pile) to 1 (its figure). As it forms the pile shimmers and fades, light
     /// swirling up about it, and the figure rises out of it from its foot, a bright edge where it
-    /// is reaching; at the last a gleam passes over it. Once carved, it sparkles now and then.
+    /// is reaching, and its light comes on inside it; at the last a gleam passes over it. Once
+    /// carved, its light glows on, breathing slowly, and it sparkles now and then.
     pub fn draw(&self, blocks: f32, formed: f32, time: f64) -> Vec<Shape> {
         let (t, u, q) = (time as f32, self.u, formed);
         let mut out = Vec::new();
@@ -396,7 +607,7 @@ impl Figure {
             // Its shadow on the snow, away from the light.
             let b = self.bounds();
             out.push(radial(self.foot + vec2(10.0, -2.0) * u, b.width() * 0.75, 7.0 * u, self.hazed(SNOW_SHADE), 0.8 * ease(q / 0.4)));
-            out.push(radial(b.center(), b.width() * 0.9, b.height() * 0.7, self.hazed(ICE_LIT), 0.1 + 0.5 * shimmer));
+            out.push(radial(b.center(), b.width() * 0.9, b.height() * 0.7, self.hazed(ICE_LIT), 0.5 * shimmer));
         }
         if q < 0.5 {
             let fade = 1.0 - ease((q - 0.2) / 0.3);
@@ -419,8 +630,17 @@ impl Figure {
         if reveal > 0.0 {
             let level = if reveal >= 1.0 { f32::MIN } else { self.extent.bottom() + (self.extent.top() - self.extent.bottom()) * reveal };
             let gleam = (q > 0.75 && q < 1.0).then(|| self.extent.left() - 10.0 + (self.extent.width() + 20.0) * ease((q - 0.75) / 0.22));
+            // The light inside, coming on as it rises, then breathing slowly.
+            let inner = ease((q - 0.45) / 0.4) * (0.85 + 0.15 * (t * 1.1 + self.sparkles[0].1).sin());
+            let b = self.bounds();
+            if inner > 0.0 {
+                out.push(radial(b.center(), b.width() * 0.95, b.height() * 0.75, self.hazed(self.light), 0.22 * inner));
+            }
             for p in &self.parts {
-                out.extend(self.part(p, level, gleam, 1.0));
+                out.extend(self.part(p, level, gleam, inner));
+            }
+            if inner > 0.0 {
+                out.push(radial(b.center() + vec2(0.0, b.height() * 0.1), b.width() * 0.35, b.height() * 0.3, self.hazed(self.light), 0.3 * inner));
             }
             if reveal > 0.0 && reveal < 1.0 {
                 out.push(radial(self.point((self.extent.center().x, level)), self.extent.width() * 0.55 * self.scale, 3.0 * self.scale, ICE_LIT, 0.9));
@@ -692,7 +912,7 @@ impl App {
         }));
         let places = places(story, page, ground, u);
         let forming = e.ice.finishing(now, FORM);
-        let mut seen = Seen { figures: vec![(Rect::NOTHING, 0, 0.0); n], forming: forming.is_some(), ..Seen::default() };
+        let mut seen = Seen { figures: vec![(Rect::NOTHING, 0, 0.0); n], which: vec![(0, Color32::TRANSPARENT); n], forming: forming.is_some(), ..Seen::default() };
         // Those further up the hill first, so the nearer stand in front.
         let mut order: Vec<(usize, Place)> = (0..n).map(|k| (k, places[e.ice.place(k, places.len(), |p| places[p].in_view(area, page))])).collect();
         order.sort_by(|a, b| a.1.foot.y.total_cmp(&b.1.foot.y).then(a.0.cmp(&b.0)));
@@ -719,7 +939,7 @@ impl App {
             let shown = if formed > 0.5 { figure.bounds() } else { figure.pile_bounds(blocks as usize) };
             seen.figures[k] = (shown, blocks as usize, formed);
             seen.formed += usize::from(formed >= 1.0);
-            seen.which.push(figure.which);
+            seen.which[k] = (figure.which, figure.light);
         }
         painter.extend(coming.0);
         painter.extend(coming.1);
@@ -731,14 +951,14 @@ impl App {
 /// The hillside drawn last frame, for tests: each chapter's ice, around what stands in its place
 /// (its pile, or its figure once mostly formed), with how many blocks and how far it is formed;
 /// where the block on its way is, if one is; whether a pile is forming, how many figures are
-/// carved, and which figures were drawn.
+/// carved, and each chapter's figure and the light inside it.
 #[derive(Clone, Default, Debug)]
 pub struct Seen {
     pub figures: Vec<(Rect, usize, f32)>,
     pub coming: Option<Pos2>,
     pub forming: bool,
     pub formed: usize,
-    pub which: Vec<usize>,
+    pub which: Vec<(usize, Color32)>,
 }
 
 #[cfg(test)]
@@ -864,17 +1084,45 @@ mod tests {
         for which in 0..FIGURES {
             let f = (0..FIGURES).map(|k| figure(k, 8)).find(|f| f.which == which).expect("every figure for some chapter");
             let pile = f.pile_bounds(8);
-            let top = |q: f32| around(&f.draw(8.0, q, 0.0).into_iter().filter(|s| matches!(s, Shape::Mesh(m) if m.vertices.len() > 4 && m.vertices.len() < 40)).collect::<Vec<_>>()).top();
+            let top = |q: f32| around(&f.draw(8.0, q, 0.0).into_iter().filter(|s| matches!(s, Shape::Path(p) if p.closed)).collect::<Vec<_>>()).top();
             assert!(f.draw(8.0, 0.0, 0.0).iter().all(|s| !matches!(s, Shape::Path(p) if p.closed)), "{which}: a pile, no figure yet");
             assert!(top(0.4) > top(0.6) && top(0.6) > top(1.0), "{which}: rising from its foot");
-            assert!(f.bounds().height() > pile.height() * 1.2, "{which}: the figure taller than its pile: {:?} {pile:?}", f.bounds());
+            assert!(f.bounds().height() > pile.height(), "{which}: the figure taller than its pile: {:?} {pile:?}", f.bounds());
+            assert!(f.bounds().width() < 100.0 && f.bounds().height() < 120.0, "{which}: no bigger than a place: {:?}", f.bounds());
             assert!(f.bounds().center().distance(f.foot) < f.bounds().height(), "{which}: in its place");
             let blocks = |q: f32| f.draw(8.0, q, 0.0).iter().filter(|s| matches!(s, Shape::Mesh(m) if m.vertices.len() == 4 && m.vertices[0].color.a() > 0)).count();
             assert!(blocks(0.1) >= 16 && f.draw(8.0, 1.0, 0.0).len() == f.draw(0.0, 1.0, 0.0).len(), "{which}: the blocks gone into it");
         }
         assert!(figure(0, BLOCKS).bounds().height() > figure(0, 2).bounds().height() * 1.2, "a long chapter's figure bigger");
-        let whiches: Vec<usize> = (0..8).map(|k| figure(k, 6).which).collect();
+        let whiches: Vec<usize> = (0..60).map(|k| chosen("a story", k).0).collect();
         assert!(whiches.windows(2).all(|w| w[0] != w[1]), "never the same twice running: {whiches:?}");
+        for round in whiches.chunks(FIGURES) {
+            let mut all = round.to_vec();
+            all.sort();
+            assert_eq!(all, (0..FIGURES).collect::<Vec<_>>(), "all of them before any comes again");
+        }
+        assert_ne!(whiches[..FIGURES], (0..FIGURES).collect::<Vec<_>>()[..], "at random, not in a row");
+        assert_ne!(whiches[..6], (0..6).map(|k| chosen("another story", k).0).collect::<Vec<_>>()[..], "each story its own");
+    }
+
+    #[test]
+    fn each_figure_glows_with_a_light_of_its_own_from_inside() {
+        let lights: Vec<Color32> = (0..40).map(|k| chosen("a story", k).1).collect();
+        assert!(lights.windows(2).all(|w| w[0] != w[1]), "never the same twice running: {lights:?}");
+        let mut seen = lights.clone();
+        seen.sort_by_key(|c| c.to_array());
+        seen.dedup();
+        assert!(seen.len() >= 8, "many colours: {seen:?}");
+        let f = figure(2, 8);
+        let tinted = |q: f32| f.draw(8.0, q, 0.0).iter().filter(|s| matches!(s, Shape::Mesh(m) if m.vertices.len() > 4 && m.vertices.len() < 40)).map(|s| match s {
+            Shape::Mesh(m) => {
+                let [r, g, b, _] = m.vertices[0].color.to_array();
+                let [lr, lg, lb, _] = f.light.to_array();
+                (r as i32 - lr as i32).abs() + (g as i32 - lg as i32).abs() + (b as i32 - lb as i32).abs()
+            }
+            _ => 0,
+        }).min().unwrap_or(i32::MAX);
+        assert!(tinted(1.0) + 60 < tinted(0.5), "its light comes on inside it as it forms: {} {}", tinted(0.5), tinted(1.0));
     }
 
     #[test]

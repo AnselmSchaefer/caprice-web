@@ -1337,11 +1337,17 @@ Snow (`Theme::Snow`) the frozen lake and its ice figures, the Magic Vineyard (`T
   drawn in front of the ice, the block last, before the snow. When the next chapter begins (over
   `FORM`) the pile before shimmers and fades and its figure rises out of it from its foot (each
   part a convex shape cut at the rising level, `cut`), a gleam passing over it at the last; once
-  carved it sparkles now and then. The figures (`figure_parts`) are a swan, a stag, a bear, an
-  owl, a fox and a leaping fish, each a list of convex parts in its own units, facing the page,
-  each chapter the next of them from a start of the story's own, so never the same twice running;
-  a figure is carved bigger the more pages its chapter had. Each part is one mesh, clear at its
-  edge and deeper blue within, lit from the left, with a fine bright edge.
+  carved it sparkles now and then. The figures (`figure_parts`, `FIGURES` of them: a swan, a
+  stag, a bear, an owl, a fox, a leaping fish, a rabbit, a cat, a seal, a whale's tail, a turtle, a
+  snail, a hedgehog, an elephant, a giraffe, a horse's head, a butterfly, a squirrel, a frog and a
+  snowflake) are each a list of convex parts in its own units, facing the page. Which a chapter
+  becomes is at random for the story (`chosen`): the figures shuffled, all of them before any
+  comes again and never the same twice running. Each chapter also has a light of its own
+  (`LIGHTS`, never the one before's) that comes on inside its figure as it forms and then breathes
+  slowly: the deep middle of each part takes its colour, the edges a little, with a soft glow of
+  it behind and within. A figure is carved bigger the more pages its chapter had. Each part is one
+  mesh, clear at its edge and deeper within, lit from the left, with a fine bright edge
+  (`each_figure_glows_with_a_light_of_its_own_from_inside`).
   Zooming brings the whole hillside nearer, as through a camera: everything is zoomed by the zoom
   over the fitting one (`App::fitting_zoom`, in `view.rs`) about the foot of the desk under the page's middle.
   The hillside is laid out as at the fitting zoom, from that same point rather than from the
@@ -1511,6 +1517,7 @@ Snow (`Theme::Snow`) the frozen lake and its ice figures, the Magic Vineyard (`T
   `a_block_is_cut_out_of_the_lake_rises_and_floats_onto_the_pile`,
   `the_pile_stacks_a_block_a_page_in_rows_without_overlapping`,
   `a_pile_becomes_an_ice_figure_rising_from_its_foot_bigger_for_more_pages`,
+  `each_figure_glows_with_a_light_of_its_own_from_inside`,
   `a_figure_carved_sparkles_now_and_then_and_is_ice`,
   `the_places_are_spread_about_beside_the_page_near_and_far_up_the_hill` (in `eggs/snow.rs`),
   `in_the_magic_snow_each_page_cuts_a_block_out_of_the_lake_onto_the_chapter_s_pile`,
@@ -2341,7 +2348,9 @@ result sent back, a stand-in answer in `api.test.mjs` and in `cloud::stand_in` (
   a rising level rather than by a mask, which egui has not got. The places are taken from either
   side of the page in turn: bigger ice in a short story otherwise all fell on one side. The lake
   first reached beyond the window's edges; asked for: the whole lake in sight, so it is laid out
-  from the window rather than from the hillside's middle.
+  from the window rather than from the hillside's middle. Then asked for: at least twenty
+  figures, appearing at random, each with a light of a different colour glowing inside; there are
+  twenty, dealt shuffled so a story sees every one before any comes back.
 - **2026-11-07 — The Magic Snow.** Asked for: two more magic themes, creative, quirky and
   imaginative. A Magic Cosmos (a planet a chapter, a moon a page, a flying saucer) and a Magic Hive
   (a comb a chapter, a cell of honey a page, bees) were made first and not liked; of six proposals
