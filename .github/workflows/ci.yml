@@ -99,7 +99,13 @@ jobs:
         run: node --test api/api.test.mjs
       - name: Chromium for the smoke test
         working-directory: web
-        run: npx playwright-core install --with-deps chromium
+        # The runner has the libraries Chromium needs; --with-deps also fetches fonts from Ubuntu's
+        # mirrors, which have failed to resolve for minutes at a time. The smoke test needs none of
+        # them (Caprice draws with its own fonts), so without them it goes on with the browser alone.
+        run: |
+          timeout 300 npx playwright-core install --with-deps chromium && exit 0
+          echo "::warning::Chromium's extra packages could not be fetched; installing the browser alone"
+          npx playwright-core install chromium
       - name: Build
         run: ./web/build.sh
       - name: The .wasm fits Cloudflare's 25 MiB a file
