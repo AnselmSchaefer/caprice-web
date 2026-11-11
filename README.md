@@ -19,7 +19,7 @@ clouds), and Caprice moves them, resting while you write.*
 
 - **Easy to use.** One small toolbar, real pages and no clutter. Start typing, and the story fills page after page.
 - **A welcome to come back to.** Caprice greets you with a page of its own: begin something new, or pick up one of your stories, each shown with its first page, its first words, how many words it holds and when you last had it open. Choose one and its sheet flies onto the desk and becomes the page.
-- **Joy in writing.** Pages turn over like a book's, or slide onto a stack (Page → View: *Book* or *Paperstack*). Under Page → Theme the desk comes in seven moods (*Midnight Ink*, *Lagoon*, *Marmalade*, *Disco Grape*, *Bubblegum*, *Pistachio Sorbet* and *Typewriter*) and seven magic ones, where something grows with your story: a garden, a city, ships in a bay, a forest of lanterns, a coral reef, a frozen lake carved into ice figures, a vineyard.
+- **Joy in writing.** Pages turn over like a book's, or slide onto a stack (Page → View: *Book* or *Paperstack*). Under Page → Theme the desk comes in seven moods (*Midnight Ink*, *Lagoon*, *Marmalade*, *Disco Grape*, *Bubblegum*, *Pistachio Sorbet* and *Typewriter*) and seven magic ones, where something grows with your story: a garden, a city, ships in a bay, a forest of lanterns, a coral reef, a village of igloos built from a frozen lake, a vineyard.
 - **Room for ideas.** Stick post-its to any line for plot twists, names and "what if…" thoughts. They peek out of the page piles, and clicking one takes you back to its page.
 
 ## Features

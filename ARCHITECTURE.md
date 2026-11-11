@@ -96,7 +96,7 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `ideas.rs` | The What next window (lower left): ways the story could go on from the caret, kept in the scratchpad |
 | `fonts.rs` | Installed fonts loaded on demand, a missing one drawn with a twin of the same widths |
 | `theme.rs` | The themes (`Theme`, `Palette`): colours and egui visuals around the page, the palette in use (`pal`), fading from one to the next, the choice kept in the data folder; the page's own `PAPER` and `INK` |
-| `eggs.rs` | What is hidden in the magic themes: in the Magic Garden a plant a chapter growing on the desk and a balloon flying in each new chapter title; in the Magic City a street of houses a chapter, a floor a page, and a dragon flying a new title in held in its feet; in the Magic Sea a ship a chapter, built in a yard a part a page and launched into the bay when the next chapter begins; in the Magic Forest (`eggs/forest.rs`) an old forest at night with a swarm of lanterns, a lantern a page, each chapter's swarm becoming a big lantern on a branch near the page; in the Magic Reef (`eggs/reef.rs`) a sunlit sea with a coral a chapter, a branch a page, spawning and taking in a shoal of fish when the next chapter begins, and an octopus swimming down from above with each new title; in the Magic Snow (`eggs/snow.rs`) a frozen lake at the foot of a snowy hillside and a pile of ice a chapter spread about the hillside, a block a page cut out of the lake and floated onto it, the pile carved into an ice figure when the next chapter begins; in the Magic Vineyard (`eggs/vineyard.rs`) a vineyard on rolling hills on a golden afternoon, a stretch of vines a chapter, a bunch of grapes a page, the stretch before turning gold and red and dropping its leaves when the next chapter begins, and now and then a murmuration of starlings; the country it lies in is `eggs/country.rs` |
+| `eggs.rs` | What is hidden in the magic themes: in the Magic Garden a plant a chapter growing on the desk and a balloon flying in each new chapter title; in the Magic City a street of houses a chapter, a floor a page, and a dragon flying a new title in held in its feet; in the Magic Sea a ship a chapter, built in a yard a part a page and launched into the bay when the next chapter begins; in the Magic Forest (`eggs/forest.rs`) an old forest at night with a swarm of lanterns, a lantern a page, each chapter's swarm becoming a big lantern on a branch near the page; in the Magic Reef (`eggs/reef.rs`) a sunlit sea with a coral a chapter, a branch a page, spawning and taking in a shoal of fish when the next chapter begins, and an octopus swimming down from above with each new title; in the Magic Snow (`eggs/snow.rs`) a frozen lake at the foot of a snowy hillside and an igloo a chapter spread about the hillside, a brick a page cut out of the lake and floated onto it, the igloo finished and lit inside when the next chapter begins; in the Magic Vineyard (`eggs/vineyard.rs`) a vineyard on rolling hills on a golden afternoon, a stretch of vines a chapter, a bunch of grapes a page, the stretch before turning gold and red and dropping its leaves when the next chapter begins, and now and then a murmuration of starlings; the country it lies in is `eggs/country.rs` |
 | `platform.rs` | What the desktop and the browser do differently: background work (`spawn`, `Waker`, `keep_awake`), the time and time zone, the run's id, the data folder, file dialogs (`Dialog`), uploads and downloads, requests to Caprice's server (`send`, `go_to`) (R31, R33) |
 | `platform/fs.rs` | Files: the system's on the desktop; in the browser, kept in memory by path and mirrored to IndexedDB (R31) |
 | `platform/worker.rs` | In the browser, a Web Worker for each piece of background work, started from `web/worker.js` with nothing evaluated (R31) |
@@ -291,8 +291,7 @@ paginating).
   becomes a scene pinned at 0 in `App::open_scene`. `scene` now only holds the description and
   whether pictures show.
 - Unsaved changes = a hash of the serialized `DocFile`, so anything saved counts automatically.
-  Only the garden is left out of it (`content_hash`): it grows only with the text, and a story
-  begun or opened must not be unsaved for its garden being measured (R30).
+  The garden is not in the file (R30), so measuring it never makes a story unsaved.
 - `PageSetup::page_numbers` is read only from files from before footers: `into_doc` makes it a
   plain footer of the page number (`Band::page_numbers`) and it is never written again. (Older
   Caprice opening a newer file shows no page numbers.)
@@ -303,8 +302,8 @@ paginating).
   older files take the file's own date (created, else modified) on opening, and keep it once saved.
 - A look's peek (`Look::peek`, an SVG) and whether the cast peeks (`Doc::peeks`, on unless turned
   off: older files peek) are left out of the file while unused (R28).
-- `DocFile::garden`: the most pages each plant has grown to (R30). It is history, not derived:
-  the text no longer holds what was taken out. Older files have none and start from their pages.
+- The garden (`Doc::garden`, R30) is not in the file: a story opened is counted from its pages.
+  Older files hold it as `garden`; it is no longer read, and dropped with the next save.
 - Tests: `roundtrip_keeps_text_styles_breaks_and_setup`, `version_1_files_still_load_as_separate_pages`,
   `a_peek_and_whether_the_cast_peeks_are_saved_and_older_files_peek`,
   `files_from_before_footers_keep_their_page_numbers_as_a_footer`,
@@ -314,7 +313,7 @@ paginating).
   `story_notes_are_saved_and_sent_with_questions_about_the_story_but_not_corrections`,
   `the_scratchpad_stays_on_the_right_as_it_is_while_pages_turn_and_is_saved`,
   `a_scene_that_names_someone_in_the_cast_is_painted_with_their_look_and_model_sheet`,
-  `the_garden_is_kept_with_the_story_and_does_not_shrink_when_it_is_opened_again_smaller`,
+  `a_story_opened_again_shows_its_chapters_and_pages_as_they_are_not_as_they_once_were`,
   `a_story_begun_is_not_unsaved_for_its_garden`.
 
 ### R10 — Word export maps the model, not the pixels
@@ -855,9 +854,9 @@ must keep working: writers do it. A version (the whole `.caprice` file) is kept 
   `story.json` saying its name and file (none: never saved, listed under "Stories never saved").
   Anything that starts another story (open, going back to one never saved) sets `App::story_id`
   and calls `Keeper::opened`, or its versions mix with the last story's.
-- **Changed means as saving counts it** (`unsaved`: the file without the garden, R9), never a
-  hash of the whole file: `keep_safe` once compared the whole file, garden and all, with
-  `saved_hash`, so any story with a garden counted as changed for good (autosaving the same text
+- **Changed means as saving counts it** (`unsaved`, R9), never a hash of what a version keeps:
+  `keep_safe` once compared the whole file, garden and all (when the file still held the garden),
+  with `saved_hash`, so any story with a garden counted as changed for good (autosaving the same text
   every half minute, keeping a version of a blank story, and in the browser asking before
   leaving always). Tests: `a_story_just_saved_has_no_changes_to_lose`,
   `a_fresh_story_nobody_wrote_in_keeps_no_version`.
@@ -1183,7 +1182,7 @@ same in every theme, so what is printed (R20) and exported (R10) never depends o
 The magic themes hide things for the writer to find (`eggs.rs`): the Magic Garden (`Theme::Garden`)
 a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a dragon, the Magic Sea
 (`Theme::Sea`) ships, the Magic Forest (`Theme::Forest`) lanterns, the Magic Reef (`Theme::Reef`) corals, the Magic
-Snow (`Theme::Snow`) the frozen lake and its ice figures, the Magic Vineyard (`Theme::Vineyard`) vines, grapes and starlings. Their blurbs give nothing away. What a theme hides is its own: picking another theme is how to stop it.
+Snow (`Theme::Snow`) the frozen lake and its igloos, the Magic Vineyard (`Theme::Vineyard`) vines, grapes and starlings. Their blurbs give nothing away. What a theme hides is its own: picking another theme is how to stop it.
 
 - **The garden lies on the desk, behind every page**, in the Magic Garden only. `draw_garden` is
   called in `frame` right after `page_rect` and before any page is drawn, so the pages hide what is
@@ -1196,22 +1195,36 @@ Snow (`Theme::Snow`) the frozen lake and its ice figures, the Magic Vineyard (`T
   (`bar_rect`): a chapter of a page grew a plant shorter than the bar, all of it out of sight.
   Anything else growing up from the desk's bottom edge must clear the bar the same way. Test:
   `a_chapter_added_to_a_story_opened_again_grows_a_plant_in_sight_above_the_page_bar`.
-- **It never shrinks, and is kept with the story** (`Doc::garden`, saved as `DocFile::garden`): the
-  most pages each plant has had, a plant a chapter in order. `grow_garden` raises it, in every
-  theme, whenever the story's version or its number of pages changed, so the Magic Garden shows
-  all the story's growth. Never while a font of the story is still to come (`FontBook::settled`,
-  R21): egui's own font gives more pages, and a story opened in the browser, where a font's files
-  take a while, kept that count for good, so the pages written next added nothing to see.
-  Taking text away, a chapter out, undo, opening the file again smaller: none of it lowers a
-  plant, and a chapter taken out keeps its plant. Nothing that counts "the chapter being written"
+- **It never shrinks while the story is open, and starts from the story as it is when opened**
+  (`Doc::garden`): the most pages each plant has had, a plant a chapter in order. `grow_garden`
+  raises it, in every theme, whenever the story's version or its number of pages changed, so
+  every magic theme shows all the story's growth. Never while a font of the story is still to come
+  (`FontBook::settled`, R21): egui's own font gives more pages, and a story opened in the browser,
+  where a font's files take a while, kept that count, so the pages written next added nothing to
+  see. Taking text away, a chapter out, undo: none of it lowers a plant while the story is open,
+  and a chapter taken out keeps its plant. It is not saved: a story opened is counted from its
+  chapters and pages as they are, the same in every browser (it was once kept in the file, and a
+  story whose chapters had been taken out kept their igloos, and grew nothing new until it had
+  more chapters than before; and each browser could hold a different count for the same text,
+  which, being no change, was never sent online). The first count of a story opened makes every
+  theme show it as it stands at once (`Eggs::regrown`): in the browser it comes a few frames after
+  opening, and the themes grew it all again from nothing. A page loaded again after the GPU was
+  taken away (`again.rs`) carries the garden over, as the story was never closed. Tests:
+  `a_story_opened_again_shows_its_chapters_and_pages_as_they_are_not_as_they_once_were`,
+  `a_story_opened_shows_what_it_has_grown_at_once_rather_than_growing_it_again`,
+  `chapters_taken_out_on_one_device_leave_the_other_s_igloos_until_it_opens_the_story_again`
+  (open in two browsers, each keeps what it has shown until it opens the story again),
+  `a_story_never_saved_comes_back_unsaved_when_the_page_loads_again`. Nothing that counts "the chapter being written"
   for a plant or a ship asks `Doc::chapters`, which shrinks, but the length of `Doc::garden`,
   which does not: a title taken away took the flower off a plant, and brought a ship back from the
   bay to be built again while the half-built one sailed out finished. Guarded by
   `a_chapter_title_taken_away_leaves_every_plant_as_it_was_in_flower_or_not` and
   `a_chapter_title_taken_away_leaves_every_ship_where_it_was`. Whatever puts
   another `Doc` in place of the open one goes through `adopt`, which keeps the bigger garden when
-  it is the same story (`keep_garden`: a version, its file again, dropping the changes since
-  saving); anything else that replaces `doc` must do the same. Plants are matched to chapters by
+  it is the same story still open (`keep_garden`: a version, its file again, dropping the changes
+  since saving, a newer copy from another browser, following it live); anything else that
+  replaces `doc` must do the same. Closing a story begins a blank one under the welcome page, so
+  opening it later counts it afresh. Plants are matched to chapters by
   order, so a chapter put in between takes the next plant (decided: tying plants to their titles
   like notes, R7, costs more than it is worth here).
 - **The city stands on the desk the same way**, in the Magic City only: `draw_city` is called right
@@ -1330,24 +1343,18 @@ Snow (`Theme::Snow`) the frozen lake and its ice figures, the Magic Vineyard (`T
   (`Tended::place`), kept while the story is shown and forgotten in another theme
   (`Tended::forget`), so a window made narrower moves none and the theme picked again shows it all
   as it stands. As in the reef and the forest, the newest is the last of `Doc::garden`, not of
-  `Doc::chapters`. Each chapter has a pile of ice (`Figure`), a block for each page up to
-  `BLOCKS`, stacked in `ROWS` (`Figure::slot`). Each block is cut out of the lake below its place
-  (`Lake::cut_at`) over `HANG` (`Figure::coming`): a glint traces round it, it rises out of the dark
-  water, floats up over an arc onto its slot, and the hole freezes over. The lake's part of it is
-  drawn in front of the ice, the block last, before the snow. When the next chapter begins (over
-  `FORM`) the pile before shimmers and fades and its figure rises out of it from its foot (each
-  part a convex shape cut at the rising level, `cut`), a gleam passing over it at the last; once
-  carved it sparkles now and then. The figures (`figure_parts`, `FIGURES` of them: a swan, a
-  stag, a bear, an owl, a fox, a leaping fish, a rabbit, a cat, a seal, a whale's tail, a turtle, a
-  snail, a hedgehog, an elephant, a giraffe, a horse's head, a butterfly, a squirrel, a frog and a
-  snowflake) are each a list of convex parts in its own units, facing the page. Which a chapter
-  becomes is at random for the story (`chosen`): the figures shuffled, all of them before any
-  comes again and never the same twice running. Each chapter also has a light of its own
-  (`LIGHTS`, never the one before's) that comes on inside its figure as it forms and then breathes
-  slowly: the deep middle of each part takes its colour, the edges a little, with a soft glow of
-  it behind and within. A figure is carved bigger the more pages its chapter had. Each part is one
-  mesh, clear at its edge and deeper within, lit from the left, with a fine bright edge
-  (`each_figure_glows_with_a_light_of_its_own_from_inside`).
+  `Doc::chapters`. Each chapter has an igloo (`Igloo`), a brick for each page up to `BRICKS`,
+  laid in `COURSES` from the bottom up, the last its cap (`Igloo::brick`: bands of a half oval,
+  narrower towards the sides as the dome turns away, the outer ones bowed to its round; together
+  they fill the dome). Each brick is a block cut out of the lake below its place
+  (`Lake::cut_at`) over `HANG` (`Igloo::coming`): a glint traces round it, it rises out of the
+  dark water, floats up over an arc to its brick (`Igloo::slot`), fading into the brick as it
+  lands, and the hole freezes over. The lake's part of it is drawn in front of the igloos, the
+  block last, before the snow. When the next chapter begins (over `FINISH`) the igloo before is
+  finished: the bricks it lacks drop in one after another, its tunnel rises on the page's side,
+  and a warm light comes on inside, flickering a little: the doorway glows, the joints between the
+  bricks (each brick is drawn over its own outline in the joint's colour, a little within it)
+  turn warm, and light falls on the snow before it.
   Zooming brings the whole hillside nearer, as through a camera: everything is zoomed by the zoom
   over the fitting one (`App::fitting_zoom`, in `view.rs`) about the foot of the desk under the page's middle.
   The hillside is laid out as at the fitting zoom, from that same point rather than from the
@@ -1361,7 +1368,7 @@ Snow (`Theme::Snow`) the frozen lake and its ice figures, the Magic Vineyard (`T
   the zoom changed. The snowfall is the window's and is never zoomed; a flake's way down is a share
   of the window's height, never the time multiplied by a size, which made every flake leap as the
   size changed. Anything that moves with the time must not multiply it by a size that can change
-  (`zooming_in_on_the_magic_snow_brings_the_whole_hillside_nearer_not_the_ice_alone`,
+  (`zooming_in_on_the_magic_snow_brings_the_whole_hillside_nearer_not_the_igloos_alone`,
   `the_hillside_is_laid_out_the_same_whatever_part_of_it_shows`,
   `the_hills_go_on_to_the_edges_of_whatever_shows_however_far_from_the_page`,
   `the_snow_falls_gently_whatever_the_size_of_things`). The places (`snow::places`) lie beyond the
@@ -1480,7 +1487,7 @@ Snow (`Theme::Snow`) the frozen lake and its ice figures, the Magic Vineyard (`T
   carrier is drawn in the settled branch in front of the page, after the peek's hand.
 - **None of it is printed or saved**: it is in none of `underlay`, `ink` or `furniture` (R20), and
   nothing of it is in `Doc`. Its colours are the garden's, the houses', the ships', the sea's, the
-  forest's, the reef's, the hillside's, its lake's and its ice's, the balloon's, the dragon's and the octopus's own, like the emblem's, not the palette's: they are pictures, not chrome.
+  forest's, the reef's, the hillside's, its lake's and its igloos', the balloon's, the dragon's and the octopus's own, like the emblem's, not the palette's: they are pictures, not chrome.
 - Tests: in `eggs.rs` `the_title_is_brought_in_carried_over_its_place_lowered_and_let_go`,
   `the_balloon_and_the_dragon_bring_the_title_in_from_the_side_and_go_away_past_the_other`,
   `the_dragon_beats_its_wings_and_breathes_fire_from_its_mouth`,
@@ -1514,15 +1521,13 @@ Snow (`Theme::Snow`) the frozen lake and its ice figures, the Magic Vineyard (`T
   `the_octopus_swims_down_from_above_sets_the_title_in_its_place_and_jets_back_up` (in `eggs/reef.rs`),
   `the_hillside_is_there_from_the_start_the_same_for_the_same_story`,
   `the_whole_lake_shows_along_the_foot_of_the_window_either_side_of_the_page`,
-  `a_block_is_cut_out_of_the_lake_rises_and_floats_onto_the_pile`,
-  `the_pile_stacks_a_block_a_page_in_rows_without_overlapping`,
-  `a_pile_becomes_an_ice_figure_rising_from_its_foot_bigger_for_more_pages`,
-  `each_figure_glows_with_a_light_of_its_own_from_inside`,
-  `a_figure_carved_sparkles_now_and_then_and_is_ice`,
+  `a_block_is_cut_out_of_the_lake_rises_and_floats_onto_the_igloo_as_its_next_brick`,
+  `an_igloo_gets_a_brick_a_page_course_by_course_from_the_bottom_up`,
+  `an_igloo_is_finished_when_its_chapter_is_and_a_warm_light_comes_on_inside`,
   `the_places_are_spread_about_beside_the_page_near_and_far_up_the_hill` (in `eggs/snow.rs`),
-  `in_the_magic_snow_each_page_cuts_a_block_out_of_the_lake_onto_the_chapter_s_pile`,
-  `in_the_magic_snow_a_chapter_s_pile_becomes_an_ice_figure_when_the_next_begins`,
-  `a_long_story_s_figures_are_spread_beside_the_page_and_a_narrower_window_moves_none`,
+  `in_the_magic_snow_each_page_cuts_a_block_out_of_the_lake_for_the_chapter_s_igloo`,
+  `in_the_magic_snow_a_chapter_s_igloo_is_finished_and_lit_when_the_next_begins`,
+  `a_long_story_s_igloos_are_spread_beside_the_page_and_a_narrower_window_moves_none`,
   `the_clouds_drift_slowly_whatever_the_size_of_things` (in `eggs/country.rs`),
   `the_landscape_is_laid_out_the_same_whatever_part_of_it_shows`,
   `the_vineyard_is_there_from_the_start_the_same_for_the_same_story`,
@@ -2258,10 +2263,16 @@ result sent back, a stand-in answer in `api.test.mjs` and in `cloud::stand_in` (
   colours, and choosing another theme turns them off without one more setting. The garden is there
   all the time, as it grows with the story; the crane comes only now and then, so it stays a
   surprise (R30).
-- **2026-10-27 — The garden is kept with the story.** Asked for: it never shrinks, even when text
-  and pages are taken out and the file is opened again. Worked out from the text alone it could
+- **2026-10-27 — The garden is kept with the story** (replaced on 2026-11-11, above). Asked for: it
+  never shrinks, even when text and pages are taken out and the file is opened again. Worked out from the text alone it could
   not remember what was taken out, so each plant's most pages are saved with the story, measured in
   every theme, and left out of what counts as unsaved (R9, R30).
+- **2026-11-11 — The garden is counted from the story when it is opened.** Replaces the decision
+  below. A story whose two chapters were taken out and saved kept its two statues, and grew
+  nothing new until it had more chapters than before; asked for: nothing comes down while the
+  story is open, but opened again it shows its actual state. Kept in the file, the count also
+  differed from browser to browser for the same text (it was no change, so never sent online),
+  and saving while writing kept a count the text no longer held. So it is no longer saved.
 - **2026-10-27 — Each magic theme brings a new chapter its own way.** The crane went to a Magic
   City of its own and the garden, renamed Magic Garden, got a hot-air balloon: one course in time
   for both, so the title is set down the same way, and only the path and the picture differ (R30).
@@ -2350,7 +2361,11 @@ result sent back, a stand-in answer in `api.test.mjs` and in `cloud::stand_in` (
   first reached beyond the window's edges; asked for: the whole lake in sight, so it is laid out
   from the window rather than from the hillside's middle. Then asked for: at least twenty
   figures, appearing at random, each with a light of a different colour glowing inside; there are
-  twenty, dealt shuffled so a story sees every one before any comes back.
+  twenty, dealt shuffled so a story sees every one before any comes back. The seal did not read as
+  one, and the statues were taken out for igloos: a brick a page (still a block cut out of the
+  lake), the igloo finished and a light lit inside when the next chapter begins. Its bricks are
+  bands of a half oval, so the dome is round without a mask, and its joints glow because each
+  brick lies over an outline of itself in the joint's colour.
 - **2026-11-07 — The Magic Snow.** Asked for: two more magic themes, creative, quirky and
   imaginative. A Magic Cosmos (a planet a chapter, a moon a page, a flying saucer) and a Magic Hive
   (a comb a chapter, a cell of honey a page, bees) were made first and not liked; of six proposals

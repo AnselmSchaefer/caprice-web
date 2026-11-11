@@ -191,8 +191,7 @@ impl App {
         self.keep.checked_at = now;
         let json = serde_json::to_string(&self.doc_file()).unwrap_or_default();
         let hash = hash_of(&json);
-        // Unsaved as saving counts it: the garden grown is no change (R9). The whole file, garden
-        // and all, is what a version keeps.
+        // Unsaved as saving counts it (R9): the whole file is what a version keeps.
         let unsaved = self.unsaved();
         if !unsaved {
             self.keep.changed_since = None;

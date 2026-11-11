@@ -93,14 +93,15 @@ Full list with reasons and tests in `ARCHITECTURE.md` §4.
    `Doc::page_numbers`, never `i + 1`.
 8. **Files hold only stored state.** New fields get `#[serde(default)]`; old formats are converted
    in `DocFile::into_doc`.
-   The garden's most pages (`Doc::garden`) are stored: history, and never counted as unsaved.
+   The garden's most pages (`Doc::garden`) are not: they never shrink while a story is open, and
+   a story opened is counted from its pages (R30).
 9. **Every formatting feature needs a Word mapping** in `export.rs`, or a decision that it has none.
 10. **Tests never call Claude** unless marked `#[ignore]` and calling `claude::allow_live()`.
 11. **Print draws `App::underlay`, `PageLayout::ink` and `App::furniture`**, in that order (boxes behind
     the text; the text and pictures; header, footer, boxes in front). Anything new
     drawn on a page goes into one of them, or it is not printed. None of them moves a page break.
     Tests never reach the system's printers: they set `App::print.spooler`.
-    The magic themes' garden, houses, ships, forest, reef, the lake and its ice, vines and starlings, balloon, dragon and octopus (`eggs.rs`) are deliberately in none of them, and move no text.
+    The magic themes' garden, houses, ships, forest, reef, the lake and its igloos, vines and starlings, balloon, dragon and octopus (`eggs.rs`) are deliberately in none of them, and move no text.
 12. **A story with a file saves itself; every story keeps versions by its id.** Anything that
     starts another story sets `story_id` and calls `Keeper::opened`. Leaving still offers to drop
     the changes since saving by hand (`as_saved`). `Harness` turns autosave, versions, the
@@ -108,7 +109,7 @@ Full list with reasons and tests in `ARCHITECTURE.md` §4.
     nothing outside their own folders.
 13. **Colours around the page come from `theme::pal()`**, never literals; the page itself (`PAPER`, `INK`)
     is the same in every theme.
-    Pictures (the emblem, the garden, houses, ships and sea, the forest and its lanterns, the reef, its fish and the octopus, the snowy hillside, its lake and ice figures, the vineyard and its starlings, balloon and dragon) and Google's sign-in button keep their own colours.
+    Pictures (the emblem, the garden, houses, ships and sea, the forest and its lanterns, the reef, its fish and the octopus, the snowy hillside, its lake and igloos, the vineyard and its starlings, balloon and dragon) and Google's sign-in button keep their own colours.
 
 14. **The desktop and the browser differ only in `platform.rs`.** Background work is
     `platform::spawn` with a `platform::Waker`, never a `Context` or a lock shared with the frame;

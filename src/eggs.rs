@@ -15,8 +15,8 @@
 //! the Magic Forest each page lights a lantern in a swarm over an old forest, each chapter's swarm
 //! becomes a big lantern in its trees (`forest`). In the Magic Reef each chapter has a coral, a
 //! branch for each page, which spawns when the next chapter begins and a shoal of fish comes to
-//! live about (`reef`). In the Magic Snow each chapter has a pile of ice, a block a page cut out
-//! of a frozen lake, carved into an ice figure when the next begins (`snow`). In the Magic Vineyard each
+//! live about (`reef`). In the Magic Snow each chapter has an igloo, a brick a page cut out
+//! of a frozen lake, finished and lit inside when the next begins (`snow`). In the Magic Vineyard each
 //! chapter has a stretch of vines, a bunch of grapes a page, its leaves
 //! turning and falling when the next begins (`vineyard`).
 //!
@@ -218,7 +218,7 @@ pub struct Eggs {
     grown: Vec<f32>,
     grown_at: f64,
     /// The story, its version and its number of pages when the garden was last measured.
-    measured: Option<(String, u64, usize)>,
+    pub measured: Option<(String, u64, usize)>,
     /// The dragon or the balloon at work, if one is.
     pub lift: Option<Lift>,
     /// Where the title being lifted lies on the screen, from the last page drawn; and the desk
@@ -394,6 +394,14 @@ impl Eggs {
         }
         self.scale = Some((shown, now));
         shown
+    }
+
+    /// Each magic theme to show the garden as it stands at its next frame, as when it is picked.
+    fn regrown(&mut self) {
+        (self.grown_for, self.built_for, self.forest_for) = (None, None, None);
+        (self.sailed_for, self.launch, self.reef_for, self.spawn) = (None, None, None, None);
+        self.ice.forget();
+        self.vines.forget();
     }
 
     /// A number from 0 to 1, at random.
@@ -2079,11 +2087,12 @@ impl Bay {
 }
 
 impl App {
-    /// The garden kept with the story (`Doc::garden`) grown to the pages each chapter has now, if
-    /// it has more: in every theme, so the Magic Garden shows all the story's growth. It never
-    /// shrinks, and keeps a plant for a chapter taken out. Measured again only when the text or the
-    /// pages have changed, and never while a font of the story is still to come: the pages egui's
-    /// own font gives are more, and the garden would keep them for good.
+    /// The garden of the story open (`Doc::garden`) grown to the pages each chapter has now, if
+    /// it has more: in every theme, so each shows all the story's growth. While the story is open
+    /// it never shrinks, and keeps a plant for a chapter taken out; opened again, it starts from
+    /// the chapters and pages it has (R30). Measured again only when the text or the pages have
+    /// changed, and never while a font of the story is still to come: the pages egui's own font
+    /// gives are more, and the garden would keep them while the story is open.
     pub fn grow_garden(&mut self) {
         if !self.fonts.settled() {
             return;
@@ -2091,6 +2100,11 @@ impl App {
         let now = (self.doc.version, self.doc.spans.len());
         if self.eggs.measured.as_ref().is_some_and(|(id, v, n)| *id == self.story_id && (*v, *n) == now) {
             return;
+        }
+        // Measured for the first time since it was opened: each theme shows it as it stands at
+        // once, as when the theme is picked, rather than growing from nothing what was there all along.
+        if self.eggs.measured.as_ref().is_none_or(|(id, _, _)| *id != self.story_id) {
+            self.eggs.regrown();
         }
         self.eggs.measured = Some((self.story_id.clone(), now.0, now.1));
         // A plant a chapter, as many pages as it has; a story without chapters grows one.

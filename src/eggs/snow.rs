@@ -1,18 +1,17 @@
 //! The Magic Snow. A snowy hillside at twilight lies on the desk: a few stars and the moon come out
 //! over hills with pines on them, a frozen lake lies along the foot of the desk, under the page and
-//! either side of it, the whole of it in the window, and snow falls softly in front of everything. Each chapter has a place on
-//! the hillside beside the page, some near and big, some further up the hill, smaller and bluer in
-//! the dusk. Each page of the chapter being written cuts a block of ice out of the lake: a glint
-//! traces round it, it rises out of the water, floats up to the chapter's place and settles on its
-//! pile, and the hole freezes over. When the next chapter begins, the pile shimmers and turns into
-//! an ice figure, rising from its foot: one of twenty animals and things, at random, bigger the
-//! more pages its chapter had, a light of its own colour glowing inside it, and a gleam passing
-//! over it as it is done. Nothing brings a
-//! title in this theme.
+//! either side of it, the whole of it in the window, and snow falls softly in front of everything.
+//! Each chapter has an igloo on the hillside beside the page, some near and big, some further up
+//! the hill, smaller and bluer in the dusk. Each page of the chapter being written cuts a block of
+//! ice out of the lake: a glint traces round it, it rises out of the water, floats up to the
+//! chapter's igloo and becomes its next brick, course by course from the bottom up, and the hole
+//! freezes over. When the next chapter begins, the igloo before is finished (the bricks it lacks
+//! drop in, its tunnel is built) and a warm light comes on inside it, glowing through the doorway
+//! and the joints. Nothing brings a title in this theme.
 //!
 //! Like everything in `eggs.rs` it lies on the desk behind the pages and is drawn from shapes as a
 //! function of the story and of time; nothing is printed or saved, and nothing new is kept: the
-//! blocks and the figures are counted from `Doc::garden`.
+//! bricks and the igloos are counted from `Doc::garden`.
 
 use super::*;
 
@@ -36,21 +35,17 @@ const ICE_SHADE: Color32 = Color32::from_rgb(92, 142, 206);
 const ICE_DEEP: Color32 = Color32::from_rgb(46, 86, 164);
 const GLINT: Color32 = Color32::from_rgb(250, 254, 255);
 
-/// How many blocks make a whole pile, one for each page of its chapter; a pile is rows of these
-/// many from the bottom up.
-pub const BLOCKS: usize = 12;
-const ROWS: [usize; 4] = [4, 3, 3, 2];
 /// A block's width, the height of its front and the depth of its top, in units.
 const BLOCK: (f32, f32, f32) = (17.0, 10.0, 4.0);
-/// Seconds a block takes to be cut, rise and float to its pile, and a pile to become its figure.
+/// Seconds a block takes to be cut, rise and float to its igloo, and an igloo to be finished and lit.
 pub const HANG: f32 = 2.6;
-pub const FORM: f32 = 7.0;
+pub const FINISH: f32 = 6.0;
 /// How far the places reach from the page whatever the window, and how far up the hill they go,
 /// in units; how many depths there are.
 const REACH: f32 = 1800.0;
 const RISE: f32 = 100.0;
 const DEPTHS: usize = 5;
-/// How big the ice is beside the hillside: a figure stands as tall as a tree did.
+/// How big the igloos are beside the hillside.
 const SIZE: f32 = 1.3;
 
 /// A convex shape filled from colour to colour across it, `colors` at its `points`: one mesh.
@@ -105,7 +100,7 @@ impl Lake {
 
     /// Where block `j` of chapter `k` is cut out of it, below `x` (kept well within it).
     fn cut_at(&self, story: &str, k: usize, j: usize, x: f32) -> Pos2 {
-        let mut s = Seeds::of(story, 99_700 + k * BLOCKS + j);
+        let mut s = Seeds::of(story, 99_700 + k * BRICKS + j);
         let u = self.u;
         let x = (x + s.next(-40.0, 40.0) * u).clamp(self.left + 70.0 * u, self.right - 70.0 * u);
         let (far, near) = (self.far(x) + 10.0 * u, self.near(x) - 8.0 * u);
@@ -177,484 +172,193 @@ fn block(at: Pos2, u: f32, alpha: f32, bright: f32, haze: f32) -> Vec<Shape> {
     ]
 }
 
-/// An oval about `(cx, cy)`, `rx` and `ry` across, turned `tilt`, in a figure's units.
-fn ell(cx: f32, cy: f32, rx: f32, ry: f32, tilt: f32) -> Vec<(f32, f32)> {
-    let (c, s) = (tilt.cos(), tilt.sin());
-    (0..18).map(|k| {
-        let a = k as f32 / 18.0 * 2.0 * PI;
-        let (x, y) = (rx * a.cos(), ry * a.sin());
-        (cx + x * c - y * s, cy + x * s + y * c)
-    }).collect()
-}
+/// How many bricks make an igloo, one for each page of its chapter: rows of these many from the
+/// bottom up, the last its cap; how wide and how high its dome is, in units.
+pub const BRICKS: usize = 16;
+const COURSES: [usize; 5] = [5, 4, 3, 3, 1];
+const DOME: (f32, f32) = (40.0, 34.0);
+/// The light inside an igloo: at its brightest, and deeper, as through the doorway.
+pub const WARM: Color32 = Color32::from_rgb(255, 196, 110);
+const EMBER: Color32 = Color32::from_rgb(232, 120, 52);
+/// The bricks: in the light, and in shade.
+const BRICK: Color32 = Color32::from_rgb(248, 251, 255);
+const BRICK_SHADE: Color32 = Color32::from_rgb(170, 188, 226);
 
-/// A limb from `a` to `b`, `wa` thick at one end and `wb` at the other.
-fn limb(a: (f32, f32), b: (f32, f32), wa: f32, wb: f32) -> Vec<(f32, f32)> {
-    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-    let l = (dx * dx + dy * dy).sqrt().max(0.01);
-    let (nx, ny) = (-dy / l, dx / l);
-    vec![(a.0 + nx * wa / 2.0, a.1 + ny * wa / 2.0), (b.0 + nx * wb / 2.0, b.1 + ny * wb / 2.0), (b.0 - nx * wb / 2.0, b.1 - ny * wb / 2.0), (a.0 - nx * wa / 2.0, a.1 - ny * wa / 2.0)]
-}
-
-/// The figures a pile can become, in their units from the foot of their plinth, facing right: each
-/// a list of convex parts, the further back first. A swan, a stag, a bear, an owl, a fox, a fish
-/// leaping, a rabbit, a cat, a seal with a ball, a whale's tail, a turtle, a snail, a hedgehog,
-/// an elephant, a giraffe, a horse's head, a butterfly, a squirrel, a frog and a snowflake.
-pub const FIGURES: usize = 20;
-
-/// The lights that glow inside the figures, a chapter's each.
-pub const LIGHTS: [Color32; 12] = [
-    Color32::from_rgb(255, 140, 180),
-    Color32::from_rgb(255, 186, 84),
-    Color32::from_rgb(176, 128, 255),
-    Color32::from_rgb(110, 236, 180),
-    Color32::from_rgb(96, 214, 255),
-    Color32::from_rgb(255, 222, 110),
-    Color32::from_rgb(255, 120, 100),
-    Color32::from_rgb(224, 156, 255),
-    Color32::from_rgb(186, 248, 110),
-    Color32::from_rgb(130, 170, 255),
-    Color32::from_rgb(255, 104, 214),
-    Color32::from_rgb(255, 176, 136),
-];
-
-/// Which figure chapter `k` becomes and which light glows in it, at random for the story: the
-/// figures in a shuffled order, all of them before any comes again and never the same twice
-/// running, and each light other than the chapter's before.
-pub fn chosen(story: &str, k: usize) -> (usize, Color32) {
-    let mut order: Vec<usize> = Vec::new();
-    for round in 0..=k / FIGURES {
-        let mut s = Seeds::of(story, 99_400 + round);
-        let mut deal: Vec<usize> = (0..FIGURES).collect();
-        for i in (1..FIGURES).rev() {
-            deal.swap(i, (s.next(0.0, (i + 1) as f32) as usize).min(i));
-        }
-        if order.last() == deal.first() {
-            deal.swap(0, FIGURES - 1);
-        }
-        order.extend(deal);
-    }
-    let mut light = 0;
-    for j in 0..=k {
-        let step = Seeds::of(story, 99_300 + j).next(0.0, (LIGHTS.len() - 1) as f32) as usize;
-        light = (light + 1 + step.min(LIGHTS.len() - 2)) % LIGHTS.len();
-    }
-    (order[k], LIGHTS[light])
-}
-
-fn figure_parts(which: usize) -> Vec<Vec<(f32, f32)>> {
-    let mut parts = vec![vec![(-24.0, 0.0), (24.0, 0.0), (24.0, -10.0), (-24.0, -10.0)], vec![(-24.0, -10.0), (24.0, -10.0), (22.0, -14.0), (-22.0, -14.0)]];
-    let tri = |a: (f32, f32), b: (f32, f32), c: (f32, f32)| vec![a, b, c];
-    match which % FIGURES {
-        0 => {
-            // A swan, its wing raised and its neck curved.
-            parts.push(tri((-22.0, -28.0), (-38.0, -42.0), (-20.0, -20.0)));
-            parts.push(ell(-2.0, -28.0, 27.0, 12.0, 0.06));
-            parts.push(ell(-9.0, -44.0, 22.0, 8.0, 0.6));
-            let spine = [(16.0, -32.0), (22.0, -46.0), (19.0, -60.0), (21.0, -72.0)];
-            let widths = [9.0, 6.5, 5.5, 5.0];
-            for i in 0..3 {
-                parts.push(limb(spine[i], spine[i + 1], widths[i], widths[i + 1]));
-                parts.push(ell(spine[i + 1].0, spine[i + 1].1, widths[i + 1] / 2.0, widths[i + 1] / 2.0, 0.0));
-            }
-            parts.push(ell(25.0, -75.0, 7.0, 4.5, 0.15));
-            parts.push(tri((30.0, -77.5), (40.0, -73.0), (30.0, -72.0)));
-        }
-        1 => {
-            // A stag, its antlers branching.
-            for (x, lean) in [(-14.0, -1.0), (-8.0, 1.5), (10.0, -1.0), (16.0, 1.5)] {
-                parts.push(limb((x + lean, -14.0), (x, -40.0), 3.4, 4.6));
-            }
-            parts.push(ell(-22.0, -48.0, 3.0, 4.0, 0.3));
-            parts.push(ell(0.0, -45.0, 23.0, 11.0, 0.0));
-            parts.push(limb((14.0, -46.0), (22.0, -66.0), 12.0, 7.0));
-            parts.push(ell(19.0, -73.0, 4.0, 2.0, -0.6));
-            for (a, b) in [((24.0, -72.0), (27.0, -92.0)), ((27.0, -92.0), (31.0, -104.0)), ((26.0, -86.0), (35.0, -93.0))] {
-                parts.push(limb(a, b, 2.4, 1.8));
-            }
-            parts.push(ell(26.0, -68.0, 8.5, 5.0, 0.35));
-            for (a, b) in [((21.0, -72.0), (16.0, -90.0)), ((16.0, -90.0), (10.0, -104.0)), ((17.0, -86.0), (24.0, -97.0)), ((13.0, -97.0), (4.0, -104.0))] {
-                parts.push(limb(a, b, 2.6, 2.0));
-            }
-        }
-        2 => {
-            // A bear, walking.
-            for (x, lean) in [(-16.0, 1.0), (-6.0, -1.0), (9.0, 1.0), (18.0, -1.0)] {
-                parts.push(limb((x + lean, -14.0), (x, -34.0), 8.0, 9.0));
-            }
-            parts.push(ell(0.0, -38.0, 26.0, 15.0, 0.0));
-            parts.push(ell(-4.0, -47.0, 15.0, 8.0, -0.05));
-            parts.push(ell(21.0, -50.0, 3.4, 3.4, 0.0));
-            parts.push(ell(28.0, -51.0, 3.2, 3.2, 0.0));
-            parts.push(ell(26.0, -42.0, 10.0, 8.0, 0.1));
-            parts.push(ell(35.0, -39.0, 5.5, 3.8, 0.1));
-        }
-        3 => {
-            // An owl, its ear tufts up and its eyes wide.
-            parts.push(ell(-5.0, -15.0, 4.0, 2.0, 0.0));
-            parts.push(ell(5.0, -15.0, 4.0, 2.0, 0.0));
-            parts.push(ell(0.0, -38.0, 15.0, 23.0, 0.0));
-            parts.push(ell(-13.0, -36.0, 6.0, 17.0, 0.12));
-            parts.push(ell(13.0, -36.0, 6.0, 17.0, -0.12));
-            parts.push(tri((-12.0, -70.0), (-15.0, -84.0), (-4.0, -73.0)));
-            parts.push(tri((12.0, -70.0), (15.0, -84.0), (4.0, -73.0)));
-            parts.push(ell(0.0, -65.0, 14.0, 11.0, 0.0));
-            parts.push(ell(-5.5, -66.0, 4.5, 4.5, 0.0));
-            parts.push(ell(5.5, -66.0, 4.5, 4.5, 0.0));
-            parts.push(tri((-2.0, -62.0), (2.0, -62.0), (0.0, -56.0)));
-        }
-        4 => {
-            // A fox sitting, its tail round its feet.
-            parts.push(ell(-2.0, -33.0, 12.0, 19.0, -0.15));
-            parts.push(tri((1.0, -59.0), (2.0, -72.0), (7.0, -62.0)));
-            parts.push(ell(5.0, -38.0, 7.0, 12.0, -0.2));
-            parts.push(limb((7.0, -14.0), (7.0, -36.0), 4.0, 4.5));
-            parts.push(ell(7.0, -56.0, 9.0, 7.0, 0.05));
-            parts.push(tri((8.0, -61.0), (13.0, -72.0), (14.0, -59.0)));
-            parts.push(tri((13.0, -59.0), (24.0, -55.0), (13.0, -51.0)));
-            parts.push(ell(10.0, -19.0, 20.0, 6.0, -0.2));
-        }
-        6 => {
-            // A rabbit sitting up, its ears tall.
-            parts.push(ell(-16.0, -26.0, 4.0, 4.0, 0.0));
-            parts.push(ell(-8.0, -24.0, 11.0, 10.0, 0.0));
-            parts.push(ell(-2.0, -32.0, 13.0, 16.0, 0.0));
-            parts.push(limb((6.0, -14.0), (7.0, -30.0), 4.0, 4.0));
-            parts.push(limb((4.0, -55.0), (-1.0, -80.0), 4.5, 3.6));
-            parts.push(ell(-1.0, -80.0, 1.8, 1.8, 0.0));
-            parts.push(ell(8.0, -50.0, 8.5, 7.5, 0.0));
-            parts.push(limb((8.0, -55.0), (9.0, -81.0), 4.5, 3.6));
-            parts.push(ell(9.0, -81.0, 1.8, 1.8, 0.0));
-        }
-        7 => {
-            // A cat sitting, its tail curling up behind.
-            parts.push(limb((-10.0, -16.0), (-22.0, -24.0), 3.2, 3.0));
-            parts.push(limb((-22.0, -24.0), (-24.0, -44.0), 3.0, 2.6));
-            parts.push(ell(-22.0, -24.0, 1.5, 1.5, 0.0));
-            parts.push(ell(0.0, -32.0, 12.0, 18.0, 0.05));
-            parts.push(ell(5.0, -34.0, 6.0, 12.0, 0.0));
-            parts.push(limb((4.0, -14.0), (5.0, -32.0), 3.6, 3.6));
-            parts.push(limb((9.0, -14.0), (9.0, -32.0), 3.6, 3.6));
-            parts.push(tri((-1.0, -59.0), (0.0, -71.0), (5.0, -63.0)));
-            parts.push(tri((6.0, -63.0), (11.0, -71.0), (12.0, -59.0)));
-            parts.push(ell(5.0, -56.0, 9.0, 8.0, 0.0));
-        }
-        8 => {
-            // A seal lying on its belly, a ball on its nose.
-            parts.push(tri((-28.0, -22.0), (-40.0, -30.0), (-38.0, -15.0)));
-            parts.push(ell(-6.0, -22.0, 24.0, 8.0, 0.0));
-            parts.push(limb((10.0, -22.0), (18.0, -38.0), 12.0, 9.0));
-            parts.push(tri((6.0, -18.0), (17.0, -14.0), (10.0, -24.0)));
-            parts.push(ell(22.0, -42.0, 7.0, 6.0, 0.1));
-            parts.push(ell(28.0, -41.0, 4.0, 3.0, 0.0));
-            parts.push(ell(30.0, -51.0, 5.0, 5.0, 0.0));
-        }
-        9 => {
-            // A whale's tail rising out of a wave.
-            parts.push(limb((0.0, -18.0), (2.0, -52.0), 12.0, 6.0));
-            parts.push(ell(-11.0, -59.0, 15.0, 5.0, 0.35));
-            parts.push(ell(15.0, -59.0, 15.0, 5.0, -0.35));
-            parts.push(ell(0.0, -18.0, 26.0, 5.0, 0.0));
-            parts.push(tri((-18.0, -20.0), (-26.0, -32.0), (-12.0, -22.0)));
-            parts.push(tri((18.0, -20.0), (27.0, -31.0), (12.0, -22.0)));
-        }
-        10 => {
-            // A turtle, its head out.
-            parts.push(limb((-12.0, -14.0), (-12.0, -24.0), 6.0, 6.0));
-            parts.push(limb((12.0, -14.0), (12.0, -24.0), 6.0, 6.0));
-            parts.push(tri((-22.0, -22.0), (-31.0, -19.0), (-22.0, -17.0)));
-            parts.push(limb((16.0, -24.0), (24.0, -32.0), 6.0, 5.0));
-            parts.push(ell(27.0, -33.0, 6.5, 5.0, 0.0));
-            parts.push(ell(0.0, -21.0, 25.0, 4.0, 0.0));
-            parts.push(ell(0.0, -30.0, 21.0, 16.0, 0.0));
-            parts.push(ell(0.0, -34.0, 9.0, 7.0, 0.0));
-        }
-        11 => {
-            // A snail, its shell curled and its horns out.
-            parts.push(limb((-22.0, -17.0), (24.0, -17.0), 5.0, 8.0));
-            parts.push(limb((24.0, -24.0), (29.0, -38.0), 1.6, 1.4));
-            parts.push(limb((21.0, -24.0), (21.0, -38.0), 1.6, 1.4));
-            parts.push(ell(29.0, -38.0, 2.2, 2.2, 0.0));
-            parts.push(ell(21.0, -38.0, 2.2, 2.2, 0.0));
-            parts.push(ell(24.0, -22.0, 5.5, 6.5, 0.0));
-            parts.push(ell(-2.0, -38.0, 19.0, 19.0, 0.0));
-            parts.push(ell(0.0, -40.0, 12.0, 12.0, 0.0));
-            parts.push(ell(2.0, -42.0, 5.5, 5.5, 0.0));
-        }
-        12 => {
-            // A hedgehog, its spines up.
-            for x in [-12.0, 10.0] {
-                parts.push(limb((x, -14.0), (x, -20.0), 4.0, 4.0));
-            }
-            for i in 0..9 {
-                let a = PI * (0.95 - 0.8 * i as f32 / 8.0);
-                let at = |r: f32, da: f32| (-2.0 + r * (a + da).cos() * 1.2, -28.0 - r * (a + da).sin());
-                parts.push(tri(at(10.0, -0.22), at(24.0, 0.0), at(10.0, 0.22)));
-            }
-            parts.push(ell(-2.0, -28.0, 20.0, 12.0, 0.0));
-            parts.push(ell(17.0, -25.0, 8.0, 6.0, 0.2));
-            parts.push(tri((23.0, -27.0), (31.0, -23.0), (23.0, -21.0)));
-        }
-        13 => {
-            // An elephant, its trunk curled down.
-            for (x, lean) in [(-14.0, 1.0), (-6.0, -1.0), (8.0, 1.0), (15.0, -1.0)] {
-                parts.push(limb((x + lean, -14.0), (x, -34.0), 7.0, 8.0));
-            }
-            parts.push(limb((-23.0, -44.0), (-26.0, -30.0), 1.6, 1.2));
-            parts.push(ell(-2.0, -43.0, 22.0, 16.0, 0.0));
-            parts.push(ell(20.0, -51.0, 10.0, 10.0, 0.0));
-            parts.push(limb((27.0, -47.0), (30.0, -31.0), 5.0, 4.0));
-            parts.push(limb((30.0, -31.0), (35.0, -23.0), 4.0, 3.0));
-            parts.push(tri((26.0, -41.0), (34.0, -36.0), (27.0, -37.0)));
-            parts.push(ell(13.0, -50.0, 8.0, 11.0, 0.1));
-        }
-        14 => {
-            // A giraffe, its neck up high.
-            for x in [-10.0, -5.0, 8.0, 13.0] {
-                parts.push(limb((x, -14.0), (x, -48.0), 3.0, 3.4));
-            }
-            parts.push(limb((-14.0, -52.0), (-18.0, -38.0), 1.4, 1.0));
-            parts.push(ell(0.0, -51.0, 15.0, 9.0, 0.1));
-            parts.push(limb((10.0, -54.0), (20.0, -92.0), 7.0, 4.5));
-            parts.push(limb((19.0, -96.0), (18.0, -104.0), 1.4, 1.4));
-            parts.push(limb((22.0, -97.0), (22.0, -105.0), 1.4, 1.4));
-            parts.push(ell(24.0, -93.0, 7.5, 4.0, 0.3));
-        }
-        15 => {
-            // A horse's head, as in chess.
-            parts.push(ell(0.0, -19.0, 16.0, 5.0, 0.0));
-            parts.push(limb((0.0, -20.0), (-2.0, -34.0), 22.0, 18.0));
-            parts.push(limb((-6.0, -32.0), (-2.0, -72.0), 20.0, 14.0));
-            parts.push(tri((-7.0, -74.0), (-5.0, -87.0), (0.0, -75.0)));
-            parts.push(limb((-2.0, -70.0), (17.0, -61.0), 14.0, 9.0));
-            parts.push(ell(18.0, -59.0, 6.0, 5.0, 0.3));
-            for i in 0..4 {
-                let y = -38.0 - 9.0 * i as f32;
-                parts.push(tri((-14.0, y), (-20.0, y - 6.0), (-12.0, y - 9.0)));
-            }
-        }
-        16 => {
-            // A butterfly resting on a stem.
-            parts.push(limb((0.0, -14.0), (0.0, -32.0), 3.0, 2.5));
-            parts.push(ell(-14.0, -60.0, 15.0, 10.0, 0.5));
-            parts.push(ell(14.0, -60.0, 15.0, 10.0, -0.5));
-            parts.push(ell(-10.0, -41.0, 9.0, 7.0, -0.4));
-            parts.push(ell(10.0, -41.0, 9.0, 7.0, 0.4));
-            parts.push(limb((0.0, -32.0), (0.0, -62.0), 3.5, 2.5));
-            parts.push(limb((0.0, -62.0), (-6.0, -74.0), 1.2, 1.0));
-            parts.push(limb((0.0, -62.0), (6.0, -74.0), 1.2, 1.0));
-        }
-        17 => {
-            // A squirrel, its tail up and a nut in its paws.
-            parts.push(ell(-14.0, -44.0, 9.0, 24.0, -0.25));
-            parts.push(ell(-6.0, -68.0, 8.0, 7.0, 0.5));
-            parts.push(ell(2.0, -30.0, 10.0, 15.0, 0.0));
-            parts.push(ell(4.0, -17.0, 8.0, 4.0, 0.0));
-            parts.push(tri((6.0, -55.0), (7.0, -64.0), (11.0, -56.0)));
-            parts.push(ell(9.0, -50.0, 7.0, 6.5, 0.0));
-            parts.push(limb((8.0, -36.0), (14.0, -40.0), 3.0, 3.0));
-            parts.push(ell(16.0, -42.0, 3.5, 4.0, 0.0));
-        }
-        18 => {
-            // A frog sitting, its eyes up.
-            parts.push(ell(-10.0, -20.0, 12.0, 6.0, -0.2));
-            parts.push(ell(0.0, -30.0, 16.0, 13.0, -0.25));
-            parts.push(limb((8.0, -14.0), (8.0, -28.0), 3.5, 3.5));
-            parts.push(ell(10.0, -40.0, 11.0, 7.0, 0.0));
-            parts.push(ell(4.0, -47.0, 4.0, 4.0, 0.0));
-            parts.push(ell(14.0, -47.0, 4.0, 4.0, 0.0));
-        }
-        19 => {
-            // A snowflake standing on one of its arms.
-            let c = (0.0, -58.0);
-            parts.push(limb((0.0, -14.0), (0.0, -24.0), 5.0, 4.0));
-            for i in 0..6 {
-                let a = PI / 2.0 + i as f32 * PI / 3.0;
-                let at = |r: f32, da: f32| (c.0 + r * (a + da).cos(), c.1 + r * (a + da).sin());
-                parts.push(limb(c, at(34.0, 0.0), 4.0, 2.0));
-                for side in [-1.0, 1.0] {
-                    let from = at(20.0, 0.0);
-                    let to = (from.0 + 10.0 * (a + side * 0.8).cos(), from.1 + 10.0 * (a + side * 0.8).sin());
-                    parts.push(limb(from, to, 2.0, 1.4));
-                }
-            }
-            parts.push(ell(c.0, c.1, 7.0, 7.0, 0.0));
-        }
-        _ => {
-            // A fish leaping out of a wave.
-            parts.push(ell(0.0, -18.0, 24.0, 5.0, 0.0));
-            parts.push(tri((-14.0, -20.0), (-22.0, -30.0), (-8.0, -22.0)));
-            parts.push(tri((14.0, -20.0), (24.0, -29.0), (8.0, -22.0)));
-            parts.push(tri((-18.0, -38.0), (-32.0, -34.0), (-25.0, -24.0)));
-            parts.push(tri((-1.0, -57.0), (5.0, -68.0), (11.0, -60.0)));
-            parts.push(ell(2.0, -48.0, 26.0, 10.0, -0.55));
-            parts.push(ell(19.0, -60.0, 7.0, 6.5, -0.55));
-            parts.push(tri((6.0, -43.0), (12.0, -36.0), (1.0, -39.0)));
-        }
-    }
-    parts
-}
-
-/// A chapter's ice: where it stands, its size, how much the dusk blues it, which way its figure
-/// faces (towards the page), which figure it becomes and the parts of it, the light glowing inside
-/// it, how far its parts reach, the size it is carved at (bigger for more pages), its pile's
-/// blocks a little out of line, and where it sparkles.
+/// A chapter's igloo: where it stands, its size, how much the dusk blues it, which side its
+/// doorway is on (towards the page), and a number of its own that sets how its light flickers.
 #[derive(Clone, Debug)]
-pub struct Figure {
+pub struct Igloo {
     pub foot: Pos2,
     u: f32,
     haze: f32,
     face: f32,
-    pub which: usize,
-    parts: Vec<Vec<(f32, f32)>>,
-    pub light: Color32,
-    extent: Rect,
-    scale: f32,
-    jitter: Vec<f32>,
-    sparkles: Vec<((f32, f32), f32)>,
+    phase: f32,
 }
 
-impl Figure {
-    /// Chapter `k`'s ice at `place`, facing `face`, of `pages` pages.
-    pub fn of(story: &str, k: usize, place: &Place, face: f32, pages: usize) -> Figure {
-        let mut s = Seeds::of(story, 99_500 + k);
-        let (which, light) = chosen(story, k);
-        let parts = figure_parts(which);
-        let extent = parts.iter().flatten().fold(Rect::NOTHING, |r, &(x, y)| r.union(Rect::from_pos(pos2(x, y))));
-        let jitter = (0..BLOCKS).map(|_| s.next(-1.5, 1.5)).collect();
-        let sparkles = (0..6).map(|_| {
-            let p = &parts[2 + s.next(0.0, (parts.len() - 2) as f32) as usize % (parts.len() - 2)];
-            (p[s.next(0.0, p.len() as f32) as usize % p.len()], s.next(0.0, 40.0))
-        }).collect();
-        let scale = place.size * (0.6 + 0.4 * pages.min(BLOCKS) as f32 / BLOCKS as f32);
-        Figure { foot: place.foot, u: place.size, haze: place.haze, face, which, parts, light, extent, scale, jitter, sparkles }
+impl Igloo {
+    /// Chapter `k`'s igloo at `place`, its doorway to `face`.
+    pub fn of(story: &str, k: usize, place: &Place, face: f32) -> Igloo {
+        Igloo { foot: place.foot, u: place.size, haze: place.haze, face, phase: Seeds::of(story, 99_500 + k).next(0.0, 40.0) }
     }
 
     fn hazed(&self, c: Color32) -> Color32 {
         c.lerp_to_gamma(DUSK, self.haze)
     }
 
-    /// The point `(x, y)` of the figure, in its units from its foot, turned the way it faces.
+    /// The point `(x, y)` of the igloo, in its units from its foot, its doorway turned to `face`.
     fn point(&self, (x, y): (f32, f32)) -> Pos2 {
-        self.foot + vec2(x * self.face, y) * self.scale
+        self.foot + vec2(x * self.face, y) * self.u
     }
 
-    /// Around the figure carved.
-    pub fn bounds(&self) -> Rect {
-        Rect::from_two_pos(self.point((self.extent.left(), self.extent.top())), self.point((self.extent.right(), self.extent.bottom())))
+    /// A point of the dome, `phi` of the way up it (an angle) and `s` across (from -1 to 1).
+    fn dome(phi: f32, s: f32) -> (f32, f32) {
+        (DOME.0 * phi.cos() * s, -DOME.1 * phi.sin())
     }
 
-    /// Where block `j` of the pile stands: the middle of its foot.
-    pub fn slot(&self, j: usize) -> Pos2 {
-        let (mut row, mut i) = (0, j);
-        while row + 1 < ROWS.len() && i >= ROWS[row] {
-            i -= ROWS[row];
+    /// Brick `j`, in the igloo's units: a band of its course, narrower towards the sides as the
+    /// dome turns away, with its outer edge bowed out to the dome's round; the cap is the top of it.
+    fn brick(j: usize) -> Vec<(f32, f32)> {
+        let (mut row, mut i) = (0, j.min(BRICKS - 1));
+        while row + 1 < COURSES.len() && i >= COURSES[row] {
+            i -= COURSES[row];
             row += 1;
         }
-        let across = i as f32 - (ROWS[row] as f32 - 1.0) / 2.0;
-        self.foot + vec2((across * (BLOCK.0 + 1.0) + self.jitter[j % BLOCKS]) * self.face, -(row as f32) * (BLOCK.1 + 1.0)) * self.u
-    }
-
-    /// Around the pile of `blocks` blocks (the first, if none).
-    pub fn pile_bounds(&self, blocks: usize) -> Rect {
-        let (w, h) = (BLOCK.0 * self.u / 2.0, (BLOCK.1 + BLOCK.2) * self.u);
-        (0..blocks.clamp(1, BLOCKS)).map(|j| self.slot(j)).fold(Rect::NOTHING, |r, p| r | Rect::from_min_max(p - vec2(w, h), p + vec2(w, 0.0)))
-    }
-
-    /// One part of the figure, shown as far up as `level` (in its units, from the foot): a mesh
-    /// clear at its edge and deeper within, where its light glows `inner` (from 0 to 1), lit from
-    /// the left, brighter where the `gleam` passes (across, in its units), with a fine bright edge.
-    fn part(&self, poly: &[(f32, f32)], level: f32, gleam: Option<f32>, inner: f32) -> Vec<Shape> {
-        let poly = if level > self.extent.top() { cut(poly, level, true) } else { poly.to_vec() };
-        if poly.len() < 3 {
-            return Vec::new();
+        let step = PI / 2.0 / COURSES.len() as f32;
+        let (lo, hi) = (row as f32 * step, (row + 1) as f32 * step);
+        if row + 1 == COURSES.len() {
+            return (0..=8).map(|m| PI * m as f32 / 8.0).map(|a| (DOME.0 * lo.cos() * -a.cos(), -DOME.1 * (lo.sin() + (1.0 - lo.sin()) * a.sin()))).collect();
         }
-        let e = self.extent;
-        let lit = |(x, y): (f32, f32)| {
-            let (dx, dy) = ((x * self.face - e.center().x * self.face) / e.width(), (y - e.center().y) / e.height());
-            let shine = gleam.map_or(0.0, |g| (1.0 - (x - g).abs() / 9.0).max(0.0));
-            ((0.5 - 0.7 * dx - 0.5 * dy).clamp(0.0, 1.0), shine)
+        let n = COURSES[row] as f32;
+        let across = |m: f32| -(PI * m / n).cos();
+        let (a, b) = (across(i as f32), across(i as f32 + 1.0));
+        let mut out = vec![Self::dome(lo, a), Self::dome(lo, b)];
+        if i + 1 == COURSES[row] {
+            out.push(Self::dome((lo + hi) / 2.0, 1.0));
+        }
+        out.extend([Self::dome(hi, b), Self::dome(hi, a)]);
+        if i == 0 {
+            out.push(Self::dome((lo + hi) / 2.0, -1.0));
+        }
+        out
+    }
+
+    /// Where brick `j` sits: the middle of its foot, where the block that becomes it lands.
+    pub fn slot(&self, j: usize) -> Pos2 {
+        let b = Self::brick(j);
+        let x = b.iter().map(|p| p.0).sum::<f32>() / b.len() as f32;
+        let y = b.iter().map(|p| p.1).fold(f32::MIN, f32::max);
+        self.point((x, y))
+    }
+
+    /// Around the igloo built, its tunnel and all.
+    pub fn bounds(&self) -> Rect {
+        Rect::from_two_pos(self.point((-DOME.0, -DOME.1)), self.point((DOME.0 + 6.0, 0.0)))
+    }
+
+    /// Around the first `bricks` bricks (the first, if none).
+    pub fn built_bounds(&self, bricks: usize) -> Rect {
+        (0..bricks.clamp(1, BRICKS)).flat_map(Self::brick).fold(Rect::NOTHING, |r, p| r | Rect::from_pos(self.point(p)))
+    }
+
+    /// One brick, `alpha` of the way there, lowered from `drop` units above, with the light inside
+    /// showing in the joint round it as `lit`: the joint is the brick at full size, the brick itself
+    /// a little within it, shaded from the light on the left and the top.
+    fn draw_brick(&self, j: usize, alpha: f32, drop: f32, lit: f32) -> Vec<Shape> {
+        let poly: Vec<(f32, f32)> = Self::brick(j).into_iter().map(|(x, y)| (x, y - drop)).collect();
+        let n = poly.len() as f32;
+        let c = poly.iter().fold((0.0, 0.0), |a, p| (a.0 + p.0 / n, a.1 + p.1 / n));
+        let joint = self.hazed(BRICK_SHADE.lerp_to_gamma(WARM, lit));
+        let mut out = vec![Shape::convex_polygon(poly.iter().map(|&p| self.point(p)).collect(), glow(joint, alpha), Stroke::NONE)];
+        let inset = |(x, y): (f32, f32)| {
+            let (dx, dy) = (x - c.0, y - c.1);
+            let l = (dx * dx + dy * dy).sqrt().max(0.01);
+            let k = (1.0 - 1.3 / l).max(0.0);
+            (c.0 + dx * k, c.1 + dy * k)
         };
-        let mid = poly.iter().fold((0.0, 0.0), |a, p| (a.0 + p.0, a.1 + p.1));
-        let mid = (mid.0 / poly.len() as f32, mid.1 / poly.len() as f32);
+        let shade = |(x, y): (f32, f32)| {
+            let l = (0.55 - 0.45 * x * self.face / DOME.0 + 0.35 * (-y / DOME.1 - 0.5)).clamp(0.0, 1.0);
+            glow(self.hazed(BRICK_SHADE.lerp_to_gamma(BRICK, l).lerp_to_gamma(WARM, 0.12 * lit)), alpha)
+        };
+        let inner: Vec<(f32, f32)> = poly.iter().map(|&p| inset(p)).collect();
         let mut mesh = egui::epaint::Mesh::default();
-        let (l, g) = lit(mid);
-        let deep = ICE_DEEP.lerp_to_gamma(ICE, 0.25 + 0.45 * l).lerp_to_gamma(self.light, 0.75 * inner);
-        mesh.colored_vertex(self.point(mid), glow(self.hazed(deep.lerp_to_gamma(ICE_LIT, g)), 0.85));
-        for &p in &poly {
-            let (l, g) = lit(p);
-            let edge = ICE_SHADE.lerp_to_gamma(ICE_LIT, l).lerp_to_gamma(self.light, 0.25 * inner);
-            mesh.colored_vertex(self.point(p), glow(self.hazed(edge.lerp_to_gamma(Color32::WHITE, g)), 0.92));
+        mesh.colored_vertex(self.point(inset(c)), shade(c));
+        for &p in &inner {
+            mesh.colored_vertex(self.point(p), shade(p));
         }
-        let n = poly.len() as u32;
-        for i in 1..=n {
-            mesh.add_triangle(0, i, i % n + 1);
+        let m = inner.len() as u32;
+        for i in 1..=m {
+            mesh.add_triangle(0, i, i % m + 1);
         }
-        let points = poly.iter().map(|&p| self.point(p)).collect();
-        vec![Shape::mesh(mesh), Shape::closed_line(points, Stroke::new(0.6 * self.scale, glow(self.hazed(ICE_LIT), 0.7)))]
+        out.push(Shape::mesh(mesh));
+        out
     }
 
-    /// The chapter's ice with `blocks` on its pile (whole ones; the one on its way is `coming`),
-    /// `formed` from 0 (a pile) to 1 (its figure). As it forms the pile shimmers and fades, light
-    /// swirling up about it, and the figure rises out of it from its foot, a bright edge where it
-    /// is reaching, and its light comes on inside it; at the last a gleam passes over it. Once
-    /// carved, its light glows on, breathing slowly, and it sparkles now and then.
-    pub fn draw(&self, blocks: f32, formed: f32, time: f64) -> Vec<Shape> {
-        let (t, u, q) = (time as f32, self.u, formed);
+    /// The igloo with `bricks` laid (whole ones, and the newest coming in as its block lands),
+    /// `finished` from 0 to 1 once its chapter is done: the bricks it lacks drop in one after
+    /// another, its tunnel is built, and a light comes on inside, glowing through the doorway and
+    /// the joints and on the snow before it, flickering a little.
+    pub fn draw(&self, bricks: f32, finished: f32, time: f64) -> Vec<Shape> {
+        let (t, u, q) = (time as f32, self.u, finished);
         let mut out = Vec::new();
-        let shimmer = if q > 0.0 && q < 1.0 { (PI * ((q - 0.05) / 0.7).clamp(0.0, 1.0)).sin() } else { 0.0 };
-        let pile = self.pile_bounds(blocks as usize);
-        if q > 0.0 {
-            // Its shadow on the snow, away from the light.
-            let b = self.bounds();
-            out.push(radial(self.foot + vec2(10.0, -2.0) * u, b.width() * 0.75, 7.0 * u, self.hazed(SNOW_SHADE), 0.8 * ease(q / 0.4)));
-            out.push(radial(b.center(), b.width() * 0.9, b.height() * 0.7, self.hazed(ICE_LIT), 0.5 * shimmer));
+        let laid = (bricks.floor() as usize).min(BRICKS);
+        let lit = ease((q - 0.65) / 0.25) * (0.9 + 0.1 * (t * 5.0 + self.phase).sin() * (t * 3.3).sin());
+        if laid > 0 || q > 0.0 {
+            out.push(radial(self.foot + vec2(8.0, -1.0) * u, DOME.0 * 1.3 * u, 7.0 * u, self.hazed(SNOW_SHADE), 0.8));
         }
-        if q < 0.5 {
-            let fade = 1.0 - ease((q - 0.2) / 0.3);
-            for j in 0..(blocks as usize).min(BLOCKS) {
-                let flicker = 0.5 + 0.5 * (t * 7.0 + j as f32 * 1.9).sin();
-                out.extend(block(self.slot(j), u, fade, shimmer * (0.4 + 0.5 * flicker), self.haze));
-            }
+        if lit > 0.0 {
+            out.push(radial(self.point((0.0, -DOME.1 * 0.5)), DOME.0 * 2.0 * u, DOME.1 * 0.9 * u, self.hazed(WARM), 0.22 * lit));
         }
-        if q > 0.0 && q < 0.85 {
-            // Light swirling up about the pile.
-            for i in 0..14 {
-                let f = i as f32 / 14.0;
-                let a = t * 2.5 + f * 2.0 * PI;
-                let up = (q * 1.4 + f * 0.6).fract();
-                let at = pile.center_bottom() + vec2(a.cos() * pile.width() * 0.6 * (1.0 - 0.4 * up), -up * self.bounds().height() * 1.1 - 6.0 * u);
-                out.push(Shape::circle_filled(at, 1.4 * u, glow(GLINT, shimmer * (1.0 - up) * (0.6 + 0.4 * a.sin()))));
-            }
-        }
-        let reveal = ease((q - 0.25) / 0.5);
-        if reveal > 0.0 {
-            let level = if reveal >= 1.0 { f32::MIN } else { self.extent.bottom() + (self.extent.top() - self.extent.bottom()) * reveal };
-            let gleam = (q > 0.75 && q < 1.0).then(|| self.extent.left() - 10.0 + (self.extent.width() + 20.0) * ease((q - 0.75) / 0.22));
-            // The light inside, coming on as it rises, then breathing slowly.
-            let inner = ease((q - 0.45) / 0.4) * (0.85 + 0.15 * (t * 1.1 + self.sparkles[0].1).sin());
-            let b = self.bounds();
-            if inner > 0.0 {
-                out.push(radial(b.center(), b.width() * 0.95, b.height() * 0.75, self.hazed(self.light), 0.22 * inner));
-            }
-            for p in &self.parts {
-                out.extend(self.part(p, level, gleam, inner));
-            }
-            if inner > 0.0 {
-                out.push(radial(b.center() + vec2(0.0, b.height() * 0.1), b.width() * 0.35, b.height() * 0.3, self.hazed(self.light), 0.3 * inner));
-            }
-            if reveal > 0.0 && reveal < 1.0 {
-                out.push(radial(self.point((self.extent.center().x, level)), self.extent.width() * 0.55 * self.scale, 3.0 * self.scale, ICE_LIT, 0.9));
-            }
-        }
-        if q >= 1.0 {
-            for &((x, y), phase) in &self.sparkles {
-                let a = (t * 0.7 + phase).sin().max(0.0).powi(16);
-                if a > 0.02 {
-                    let (c, r) = (self.point((x, y)), 4.5 * self.scale * a);
-                    out.push(Shape::line_segment([c - vec2(r, 0.0), c + vec2(r, 0.0)], Stroke::new(0.6 * self.scale, glow(GLINT, a))));
-                    out.push(Shape::line_segment([c - vec2(0.0, r), c + vec2(0.0, r)], Stroke::new(0.6 * self.scale, glow(GLINT, a))));
-                    out.push(Shape::circle_filled(c, 1.2 * self.scale, glow(GLINT, a)));
+        for j in 0..BRICKS {
+            if j < laid {
+                out.extend(self.draw_brick(j, 1.0, 0.0, lit));
+            } else if j == laid && bricks.fract() > 0.9 && q == 0.0 {
+                // The newest, as its block lands.
+                out.extend(self.draw_brick(j, (bricks.fract() - 0.9) / 0.1, 0.0, 0.0));
+            } else if q > 0.0 {
+                // Those it lacks, once its chapter is done, dropping in one after another.
+                let at = 0.45 * (j - laid) as f32 / (BRICKS - laid).max(1) as f32;
+                let p = ease((q - at) / 0.1);
+                if p > 0.0 {
+                    out.extend(self.draw_brick(j, p, 18.0 * (1.0 - p), lit));
+                    if p < 1.0 {
+                        let land = self.slot(j);
+                        out.push(radial(land - vec2(0.0, 4.0 * u), 12.0 * u, 8.0 * u, GLINT, 0.8 * p));
+                    }
                 }
+            }
+        }
+        let tunnel = ease((q - 0.5) / 0.12);
+        if tunnel > 0.0 {
+            // The tunnel before the doorway, on the page's side, rising from the snow.
+            let (cx, rx, ry) = (DOME.0 * 0.62, 15.0, 18.0 * tunnel);
+            let arch = |rx: f32, ry: f32| (0..=12).map(|m| PI * m as f32 / 12.0).map(|a| self.point((cx - rx * a.cos(), -ry * a.sin()))).collect::<Vec<_>>();
+            let outer = arch(rx, ry);
+            let colors: Vec<Color32> = outer.iter().enumerate().map(|(m, _)| glow(self.hazed(BRICK_SHADE.lerp_to_gamma(BRICK, 0.35 + 0.5 * (m as f32 / 12.0))), tunnel)).collect();
+            let mut mesh = egui::epaint::Mesh::default();
+            let base = self.point((cx, 0.0));
+            mesh.colored_vertex(base, glow(self.hazed(BRICK_SHADE.lerp_to_gamma(BRICK, 0.6)), tunnel));
+            for (&p, &c) in outer.iter().zip(&colors) {
+                mesh.colored_vertex(p, c);
+            }
+            for m in 1..outer.len() as u32 {
+                mesh.add_triangle(0, m, m + 1);
+            }
+            out.push(Shape::mesh(mesh));
+            out.push(Shape::line(arch(rx - 3.0, ry - 3.0 * tunnel), Stroke::new(0.8 * u, glow(self.hazed(BRICK_SHADE.lerp_to_gamma(WARM, lit)), tunnel))));
+            // The doorway, dark until the light comes on, then warm from within.
+            let door = arch(8.0, 12.0 * tunnel);
+            let mut mesh = egui::epaint::Mesh::default();
+            let dark = self.hazed(WATER);
+            mesh.colored_vertex(base, dark.lerp_to_gamma(WARM, lit));
+            for &p in &door {
+                mesh.colored_vertex(p, dark.lerp_to_gamma(EMBER, 0.85 * lit));
+            }
+            for m in 1..door.len() as u32 {
+                mesh.add_triangle(0, m, m + 1);
+            }
+            out.push(Shape::mesh(mesh));
+            if lit > 0.0 {
+                out.push(radial(base + vec2(self.face * 4.0, 2.0) * u, 30.0 * u, 7.0 * u, self.hazed(WARM), 0.45 * lit));
             }
         }
         out
@@ -662,8 +366,8 @@ impl Figure {
 
     /// Block `j` on its way, `g` of the way (from 0 to 1), cut out of the lake at `from` where its
     /// size is `lake_u`: a glint traces round it in the ice, it rises out of the dark water, floats
-    /// up to its place on the pile, glints as it settles, and the hole freezes over. The lake's
-    /// part of it, the block's, and where the block is.
+    /// up to its place in the igloo, becomes the brick there as it lands, and the hole freezes
+    /// over. The lake's part of it, the block's, and where the block is.
     pub fn coming(&self, j: usize, g: f32, from: Pos2, lake_u: f32, time: f64) -> (Vec<Shape>, Vec<Shape>, Pos2) {
         let (mut lake, mut out) = (Vec::new(), Vec::new());
         let (w, d) = (BLOCK.0 * lake_u / 2.0, 3.0 * lake_u);
@@ -699,9 +403,9 @@ impl Figure {
                 let back = (s - 0.025 * i as f32).max(0.0);
                 out.push(Shape::circle_filled(bend(lifted, over, to, back) - vec2(0.0, 5.0 * self.u), 1.3 * self.u, glow(GLINT, 0.7 * (1.0 - i as f32 / 6.0) * (1.0 - s))));
             }
-            (bend(lifted, over, to, s) + vec2(0.0, bob), lake_u + (self.u - lake_u) * s, self.haze * s)
+            (bend(lifted, over, to, s) + vec2(0.0, bob), lake_u + (self.u * 0.8 - lake_u) * s, self.haze * s)
         };
-        out.extend(block(at, size, 1.0, 0.15, haze));
+        out.extend(block(at, size, 1.0 - ((g - 0.9) / 0.1).clamp(0.0, 1.0), 0.15, haze));
         if g > 0.9 {
             out.push(radial(at - vec2(0.0, 6.0 * size), 16.0 * size, 12.0 * size, GLINT, 0.9 * (1.0 - (g - 0.9) / 0.1)));
         }
@@ -709,7 +413,7 @@ impl Figure {
     }
 }
 
-/// A place on the hillside a chapter's ice can stand: its foot, its size, how much the dusk blues
+/// A place on the hillside a chapter's igloo can stand: its foot, its size, how much the dusk blues
 /// it, and how much room it has across.
 #[derive(Clone, Copy, Debug)]
 pub struct Place {
@@ -720,9 +424,9 @@ pub struct Place {
 }
 
 impl Place {
-    /// Whether the figure there is wholly on the desk, beside the page.
+    /// Whether the igloo there is wholly on the desk, beside the page.
     pub fn in_view(&self, area: Rect, page: Rect) -> bool {
-        let r = Rect::from_min_max(self.foot + vec2(-self.w / 2.0, -112.0 * self.size), self.foot + vec2(self.w / 2.0, 0.0));
+        let r = Rect::from_min_max(self.foot + vec2(-self.w / 2.0, -40.0 * self.size), self.foot + vec2(self.w / 2.0, 0.0));
         area.contains_rect(r) && !r.x_range().intersects(page.x_range())
     }
 }
@@ -747,7 +451,7 @@ pub fn places(story: &str, page: Rect, ground: f32, u: f32) -> Vec<Place> {
                 let d = near + step * (j + 0.5 * (level % 2) as f32 + s.next(0.0, 0.3));
                 let foot = pos2(if x < 0.0 { page.left() - d } else { page.right() + d }, y + s.next(-6.0, 6.0) * u);
                 let key = d + s.next(0.0, 380.0) * u + level as f32 * 25.0 * u;
-                out.push((key, Place { foot, size: u * k, haze: 0.5 * depth, w: 84.0 * u * k }));
+                out.push((key, Place { foot, size: u * k, haze: 0.5 * depth, w: 100.0 * u * k }));
             }
             j += 1.0;
         }
@@ -769,7 +473,7 @@ pub fn places(story: &str, page: Rect, ground: f32, u: f32) -> Vec<Place> {
     taken
 }
 
-/// The hillside behind the ice: stars coming out and the moon risen, hills far off and nearer with
+/// The hillside behind the igloos: stars coming out and the moon risen, hills far off and nearer with
 /// pines on them, and the snow reaching up to them. All of it is laid out from `middle` (across) and `ground` (up), as far as `REACH` either
 /// side, whatever part of it shows in `area`: only the plain fills below the hills reach to
 /// `area`'s edges. So zooming, which shows more or less of it, only makes it bigger or smaller and
@@ -868,8 +572,8 @@ fn snowfall(story: &str, area: Rect, u: f32, time: f64) -> Vec<Shape> {
 
 impl App {
     /// The hillside on the desk, behind the pages lying at `page`, in the Magic Snow only: for each
-    /// chapter a pile with a block of ice for each page it has had (`Doc::garden`), cut out of the
-    /// lake, the pile before the newest carved into a figure when its chapter begins.
+    /// chapter an igloo with a brick for each page it has had (`Doc::garden`), each cut out of the
+    /// lake, the igloo before the newest finished and lit when its chapter begins.
     pub fn draw_snow(&mut self, ui: &egui::Ui, area: Rect, page: Rect) {
         self.eggs.snow = None;
         if self.themes.theme != Theme::Snow {
@@ -885,10 +589,10 @@ impl App {
         // nearer with the page, as through a camera, rather than the ice alone moving.
         let z = (self.zoom / self.fitting_zoom(area)).clamp(0.5, 4.0);
         let e = &mut self.eggs;
-        if e.ice.tend(&self.story_id, garden, BLOCKS, HANG, FORM, now) {
+        if e.ice.tend(&self.story_id, garden, BRICKS, HANG, FINISH, now) {
             ctx.request_repaint();
         } else {
-            // The snow falls and the ice sparkles.
+            // The snow falls and the lights flicker.
             ctx.request_repaint_after(std::time::Duration::from_millis(40));
         }
         let unzoomed = e.unit(&ctx, area, now);
@@ -911,35 +615,34 @@ impl App {
             s
         }));
         let places = places(story, page, ground, u);
-        let forming = e.ice.finishing(now, FORM);
-        let mut seen = Seen { figures: vec![(Rect::NOTHING, 0, 0.0); n], which: vec![(0, Color32::TRANSPARENT); n], forming: forming.is_some(), ..Seen::default() };
+        let finishing = e.ice.finishing(now, FINISH);
+        let mut seen = Seen { igloos: vec![(Rect::NOTHING, 0, 0.0); n], finishing: finishing.is_some(), ..Seen::default() };
         // Those further up the hill first, so the nearer stand in front.
         let mut order: Vec<(usize, Place)> = (0..n).map(|k| (k, places[e.ice.place(k, places.len(), |p| places[p].in_view(area, page))])).collect();
         order.sort_by(|a, b| a.1.foot.y.total_cmp(&b.1.foot.y).then(a.0.cmp(&b.0)));
         let mut coming = (Vec::new(), Vec::new());
         for (k, place) in order {
             let face = if place.foot.x < page.center().x { 1.0 } else { -1.0 };
-            let blocks = e.ice.grown(garden, k, BLOCKS);
-            let figure = Figure::of(story, k, &place, face, blocks.ceil() as usize);
-            let formed = match forming {
+            let bricks = e.ice.grown(garden, k, BRICKS);
+            let igloo = Igloo::of(story, k, &place, face);
+            let finished = match finishing {
                 Some((m, q)) if m == k => q,
                 _ if k == n - 1 => 0.0,
                 _ => 1.0,
             };
-            painter.extend(figure.draw(blocks, formed, now));
-            if k == n - 1 && blocks.fract() > 0.0 {
+            painter.extend(igloo.draw(bricks, finished, now));
+            if k == n - 1 && bricks.fract() > 0.0 {
                 // The block on its way, cut out of the lake below the place, as laid out unzoomed.
                 let below = anchor.x + (place.foot.x - anchor.x) / z;
-                let from = zoom * lake.cut_at(story, k, blocks as usize, below);
-                let (lake, block, at) = figure.coming(blocks as usize, blocks.fract(), from, u, now);
+                let from = zoom * lake.cut_at(story, k, bricks as usize, below);
+                let (lake, block, at) = igloo.coming(bricks as usize, bricks.fract(), from, u, now);
                 coming.0.extend(lake);
                 coming.1.extend(block);
                 seen.coming = Some(at);
             }
-            let shown = if formed > 0.5 { figure.bounds() } else { figure.pile_bounds(blocks as usize) };
-            seen.figures[k] = (shown, blocks as usize, formed);
-            seen.formed += usize::from(formed >= 1.0);
-            seen.which[k] = (figure.which, figure.light);
+            let shown = if finished > 0.0 { igloo.bounds() } else { igloo.built_bounds(bricks as usize) };
+            seen.igloos[k] = (shown, bricks as usize, finished);
+            seen.lit += usize::from(finished >= 1.0);
         }
         painter.extend(coming.0);
         painter.extend(coming.1);
@@ -948,17 +651,16 @@ impl App {
     }
 }
 
-/// The hillside drawn last frame, for tests: each chapter's ice, around what stands in its place
-/// (its pile, or its figure once mostly formed), with how many blocks and how far it is formed;
-/// where the block on its way is, if one is; whether a pile is forming, how many figures are
-/// carved, and each chapter's figure and the light inside it.
+/// The hillside drawn last frame, for tests: each chapter's igloo, around what of it stands (the
+/// bricks laid, or all of it once its chapter is done), with how many bricks and how far it is
+/// finished; where the block on its way is, if one is; whether an igloo is being finished, and
+/// how many are lit.
 #[derive(Clone, Default, Debug)]
 pub struct Seen {
-    pub figures: Vec<(Rect, usize, f32)>,
+    pub igloos: Vec<(Rect, usize, f32)>,
     pub coming: Option<Pos2>,
-    pub forming: bool,
-    pub formed: usize,
-    pub which: Vec<(usize, Color32)>,
+    pub finishing: bool,
+    pub lit: usize,
 }
 
 #[cfg(test)]
@@ -973,8 +675,8 @@ mod tests {
         Rect::from_min_size(pos2(450.0, 60.0), vec2(500.0, 700.0))
     }
 
-    fn figure(k: usize, pages: usize) -> Figure {
-        Figure::of("a story", k, &Place { foot: pos2(300.0, 820.0), size: 1.0, haze: 0.0, w: 84.0 }, 1.0, pages)
+    fn igloo(k: usize) -> Igloo {
+        Igloo::of("a story", k, &Place { foot: pos2(300.0, 820.0), size: 1.0, haze: 0.0, w: 100.0 }, 1.0)
     }
 
     fn around(shapes: &[Shape]) -> Rect {
@@ -1044,8 +746,8 @@ mod tests {
     }
 
     #[test]
-    fn a_block_is_cut_out_of_the_lake_rises_and_floats_onto_the_pile() {
-        let f = figure(0, 5);
+    fn a_block_is_cut_out_of_the_lake_rises_and_floats_onto_the_igloo_as_its_next_brick() {
+        let f = igloo(0);
         let from = pos2(420.0, 870.0);
         let (lake, block, at) = f.coming(3, 0.1, from, 1.0, 0.0);
         assert!(block.is_empty() && at == from && !lake.is_empty(), "first a glint traces round it in the ice");
@@ -1054,9 +756,11 @@ mod tests {
         assert!(lake.iter().any(|s| matches!(s, Shape::Mesh(m) if m.vertices[0].color.b() > 40 && m.vertices[0].color.r() < 40)), "the hole dark");
         let (_, _, half) = f.coming(3, 0.7, from, 1.0, 0.0);
         assert!(half.y < f.slot(3).y.min(from.y) - 10.0, "floating over: {half:?}");
-        let (lake, _, at) = f.coming(3, 1.0, from, 1.0, 0.0);
-        assert!(at.distance(f.slot(3)) < 0.5, "settled on the pile: {at:?} {:?}", f.slot(3));
+        let (lake, block, at) = f.coming(3, 1.0, from, 1.0, 0.0);
+        assert!(at.distance(f.slot(3)) < 0.5, "at its brick: {at:?} {:?}", f.slot(3));
+        assert!(block.iter().all(|s| !matches!(s, Shape::Mesh(m) if m.vertices.iter().any(|v| v.color.a() > 0))), "become the brick");
         assert!(lake.iter().all(|s| !matches!(s, Shape::Mesh(m) if m.vertices.iter().any(|v| v.color.a() > 0))), "frozen over");
+        assert!(f.draw(3.95, 0.0, 0.0).len() > f.draw(3.0, 0.0, 0.0).len(), "the brick there as it lands");
         for k in 0..200 {
             let (a, b) = (f.coming(3, 0.3 + 0.7 * k as f32 / 200.0, from, 1.0, 0.0).2, f.coming(3, 0.3 + 0.7 * (k + 1) as f32 / 200.0, from, 1.0, 0.0).2);
             assert!(a.distance(b) < 6.0, "smoothly at {k}: {a:?} {b:?}");
@@ -1064,74 +768,46 @@ mod tests {
     }
 
     #[test]
-    fn the_pile_stacks_a_block_a_page_in_rows_without_overlapping() {
-        let f = figure(0, BLOCKS);
-        for j in 0..BLOCKS {
-            let a = f.slot(j);
-            assert!(a.y <= f.foot.y && (a.x - f.foot.x).abs() < 40.0, "{j}: on the place: {a:?}");
-            for i in 0..j {
-                let b = f.slot(i);
-                assert!((a.x - b.x).abs() >= BLOCK.0 - 3.5 || (a.y - b.y).abs() >= BLOCK.1, "{j} and {i} apart: {a:?} {b:?}");
+    fn an_igloo_gets_a_brick_a_page_course_by_course_from_the_bottom_up() {
+        let f = igloo(0);
+        let dome = f.bounds();
+        for j in 0..BRICKS {
+            assert!(dome.expand(0.5).contains(f.slot(j)), "{j}: in the dome: {:?}", f.slot(j));
+            if j > 0 {
+                assert!(f.slot(j).y <= f.slot(j - 1).y + 0.01, "{j}: never below the one before");
             }
+            assert!(f.draw(j as f32 + 1.0, 0.0, 0.0).len() > f.draw(j as f32, 0.0, 0.0).len(), "{j}: one more");
         }
-        let drawn = |n: f32| f.draw(n, 0.0, 0.0).len();
-        assert!(drawn(5.0) > drawn(4.0) && drawn(BLOCKS as f32) > drawn(BLOCKS as f32 - 1.0), "a block more for a page more");
-        assert!(f.pile_bounds(BLOCKS).height() > f.pile_bounds(4).height(), "rows on rows");
+        assert!(f.slot(BRICKS - 1).y < f.slot(0).y - 25.0, "the cap at the top");
+        // The bricks fill the dome without overlapping: their middles apart, the dome's area theirs.
+        let area = |p: &[(f32, f32)]| (0..p.len()).map(|i| p[i].0 * p[(i + 1) % p.len()].1 - p[(i + 1) % p.len()].0 * p[i].1).sum::<f32>().abs() / 2.0;
+        let all: f32 = (0..BRICKS).map(|j| area(&Igloo::brick(j))).sum();
+        let half_oval = PI * DOME.0 * DOME.1 / 2.0;
+        assert!((all / half_oval - 1.0).abs() < 0.08, "the dome, brick by brick: {all} {half_oval}");
+        assert!(f.built_bounds(BRICKS).height() > f.built_bounds(5).height() * 3.0, "courses on courses");
     }
 
     #[test]
-    fn a_pile_becomes_an_ice_figure_rising_from_its_foot_bigger_for_more_pages() {
-        for which in 0..FIGURES {
-            let f = (0..FIGURES).map(|k| figure(k, 8)).find(|f| f.which == which).expect("every figure for some chapter");
-            let pile = f.pile_bounds(8);
-            let top = |q: f32| around(&f.draw(8.0, q, 0.0).into_iter().filter(|s| matches!(s, Shape::Path(p) if p.closed)).collect::<Vec<_>>()).top();
-            assert!(f.draw(8.0, 0.0, 0.0).iter().all(|s| !matches!(s, Shape::Path(p) if p.closed)), "{which}: a pile, no figure yet");
-            assert!(top(0.4) > top(0.6) && top(0.6) > top(1.0), "{which}: rising from its foot");
-            assert!(f.bounds().height() > pile.height(), "{which}: the figure taller than its pile: {:?} {pile:?}", f.bounds());
-            assert!(f.bounds().width() < 100.0 && f.bounds().height() < 120.0, "{which}: no bigger than a place: {:?}", f.bounds());
-            assert!(f.bounds().center().distance(f.foot) < f.bounds().height(), "{which}: in its place");
-            let blocks = |q: f32| f.draw(8.0, q, 0.0).iter().filter(|s| matches!(s, Shape::Mesh(m) if m.vertices.len() == 4 && m.vertices[0].color.a() > 0)).count();
-            assert!(blocks(0.1) >= 16 && f.draw(8.0, 1.0, 0.0).len() == f.draw(0.0, 1.0, 0.0).len(), "{which}: the blocks gone into it");
+    fn an_igloo_is_finished_when_its_chapter_is_and_a_warm_light_comes_on_inside() {
+        let f = igloo(1);
+        let warm = |shapes: &[Shape]| shapes.iter().filter(|s| match s {
+            Shape::Mesh(m) => m.vertices.iter().any(|v| v.color.r() as i32 > v.color.b() as i32 + 60 && v.color.a() > 60),
+            Shape::Path(p) => p.fill.r() as i32 > p.fill.b() as i32 + 60 && p.fill.a() > 60,
+            _ => false,
+        }).count();
+        let bricks = |shapes: &[Shape]| shapes.iter().filter(|s| matches!(s, Shape::Path(p) if p.closed && p.fill.a() == 255)).count();
+        let building = f.draw(5.0, 0.0, 0.0);
+        assert!(warm(&building) == 0 && bricks(&building) == 5, "five bricks laid, dark");
+        let half = f.draw(5.0, 0.3, 0.0);
+        assert!(bricks(&half) > 5 && bricks(&half) < BRICKS, "the bricks it lacks dropping in: {}", bricks(&half));
+        let done = f.draw(5.0, 1.0, 0.0);
+        assert_eq!(bricks(&done), BRICKS, "all of them");
+        assert!(warm(&done) >= 3, "lit inside, through the doorway and on the snow: {}", warm(&done));
+        assert!(f.draw(5.0, 1.0, 0.0) != f.draw(5.0, 1.0, 0.7), "the light flickers");
+        for q in 0..100 {
+            assert!(around(&f.draw(5.0, q as f32 / 100.0, 0.0)).bottom() < f.foot.y + 16.0, "on the snow at {q}");
         }
-        assert!(figure(0, BLOCKS).bounds().height() > figure(0, 2).bounds().height() * 1.2, "a long chapter's figure bigger");
-        let whiches: Vec<usize> = (0..60).map(|k| chosen("a story", k).0).collect();
-        assert!(whiches.windows(2).all(|w| w[0] != w[1]), "never the same twice running: {whiches:?}");
-        for round in whiches.chunks(FIGURES) {
-            let mut all = round.to_vec();
-            all.sort();
-            assert_eq!(all, (0..FIGURES).collect::<Vec<_>>(), "all of them before any comes again");
-        }
-        assert_ne!(whiches[..FIGURES], (0..FIGURES).collect::<Vec<_>>()[..], "at random, not in a row");
-        assert_ne!(whiches[..6], (0..6).map(|k| chosen("another story", k).0).collect::<Vec<_>>()[..], "each story its own");
-    }
-
-    #[test]
-    fn each_figure_glows_with_a_light_of_its_own_from_inside() {
-        let lights: Vec<Color32> = (0..40).map(|k| chosen("a story", k).1).collect();
-        assert!(lights.windows(2).all(|w| w[0] != w[1]), "never the same twice running: {lights:?}");
-        let mut seen = lights.clone();
-        seen.sort_by_key(|c| c.to_array());
-        seen.dedup();
-        assert!(seen.len() >= 8, "many colours: {seen:?}");
-        let f = figure(2, 8);
-        let tinted = |q: f32| f.draw(8.0, q, 0.0).iter().filter(|s| matches!(s, Shape::Mesh(m) if m.vertices.len() > 4 && m.vertices.len() < 40)).map(|s| match s {
-            Shape::Mesh(m) => {
-                let [r, g, b, _] = m.vertices[0].color.to_array();
-                let [lr, lg, lb, _] = f.light.to_array();
-                (r as i32 - lr as i32).abs() + (g as i32 - lg as i32).abs() + (b as i32 - lb as i32).abs()
-            }
-            _ => 0,
-        }).min().unwrap_or(i32::MAX);
-        assert!(tinted(1.0) + 60 < tinted(0.5), "its light comes on inside it as it forms: {} {}", tinted(0.5), tinted(1.0));
-    }
-
-    #[test]
-    fn a_figure_carved_sparkles_now_and_then_and_is_ice() {
-        let f = figure(1, 6);
-        let sparks = |t: f64| f.draw(6.0, 1.0, t).iter().filter(|s| matches!(s, Shape::LineSegment { stroke, .. } if stroke.color.a() > 0)).count();
-        assert!((0..400).any(|i| sparks(i as f64 * 0.1) > 0) && (0..400).any(|i| sparks(i as f64 * 0.1) == 0), "now and then");
-        let icy = f.draw(6.0, 1.0, 0.0).iter().any(|s| matches!(s, Shape::Mesh(m) if m.vertices.iter().any(|v| v.color.b() > v.color.r() + 20)));
-        assert!(icy, "clear blue ice");
+        assert!(f.bounds().width() > f.built_bounds(BRICKS).width(), "a tunnel before the doorway");
     }
 
     #[test]

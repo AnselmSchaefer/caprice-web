@@ -7065,11 +7065,11 @@ mod tests {
     const SENTENCE: &str = "It was nearly midnight and the Prime Minister sat alone in his office. ";
 
     #[test]
-    fn in_the_magic_snow_each_page_cuts_a_block_out_of_the_lake_onto_the_chapter_s_pile() {
+    fn in_the_magic_snow_each_page_cuts_a_block_out_of_the_lake_for_the_chapter_s_igloo() {
         let mut h = Harness::new();
         in_the_theme(&mut h, theme::Theme::Snow, 0.0);
         let seen = |h: &Harness| h.app.eggs.snow.clone().expect("the hillside is there");
-        assert_eq!(seen(&h).figures.iter().map(|f| f.1).collect::<Vec<_>>(), [1], "a block for the first page");
+        assert_eq!(seen(&h).igloos.iter().map(|f| f.1).collect::<Vec<_>>(), [1], "a brick for the first page");
         let lake = h.painted.iter().find_map(|cs| match &cs.shape {
             egui::Shape::Mesh(m) if m.vertices.iter().any(|v| v.color == eggs::snow::LAKE_FAR) => Some(m.calc_bounds()),
             _ => None,
@@ -7081,31 +7081,31 @@ mod tests {
         assert!(pages >= 4, "pages: {pages}");
         h.frames(20, vec![], Modifiers::NONE);
         let hill = seen(&h);
-        assert!(hill.figures[0].1 < pages, "cut in sight");
-        let foot = hill.figures[0].0.bottom();
+        assert!(hill.igloos[0].1 < pages, "cut in sight");
+        let foot = hill.igloos[0].0.bottom();
         let mut lowest = f32::MIN;
         for _ in 0..(eggs::snow::HANG * 60.0) as usize {
             h.frames(1, vec![], Modifiers::NONE);
             lowest = lowest.max(seen(&h).coming.map_or(f32::MIN, |p| p.y));
         }
-        assert!(lowest > foot + 15.0, "out of the lake at the foot of the desk, below the pile: {lowest} {foot}");
+        assert!(lowest > foot + 15.0, "out of the lake at the foot of the desk, below the igloo: {lowest} {foot}");
         h.frames((eggs::snow::HANG * 60.0) as usize * pages, vec![], Modifiers::NONE);
         let hill = seen(&h);
-        let pile = hill.figures[0];
-        assert_eq!(pile.1, pages, "a block a page");
-        assert!(beside_the_page(&h, pile.0) && pile.2 == 0.0 && hill.formed == 0 && hill.coming.is_none(), "a pile beside the page while its chapter is written: {pile:?}");
-        let ice = |h: &Harness| h.painted.iter().any(|cs| matches!(&cs.shape, egui::Shape::Mesh(m) if m.vertices.len() == 4 && m.vertices.iter().any(|v| v.color.b() as i32 > v.color.r() as i32 + 30)));
-        assert!(ice(&h), "blocks of ice");
+        let igloo = hill.igloos[0];
+        assert_eq!(igloo.1, pages, "a brick a page");
+        assert!(beside_the_page(&h, igloo.0) && igloo.2 == 0.0 && hill.lit == 0 && hill.coming.is_none(), "an igloo beside the page while its chapter is written: {igloo:?}");
+        let warm = |h: &Harness| h.painted.iter().any(|cs| matches!(&cs.shape, egui::Shape::Mesh(m) if m.vertices.iter().any(|v| v.color.r() as i32 > v.color.b() as i32 + 60 && v.color.a() > 60)));
+        assert!(!warm(&h), "dark while it is built");
 
         // Taking the pages away takes no block off.
         h.key(Key::A, Modifiers::COMMAND);
         h.key(Key::Backspace, Modifiers::NONE);
         h.frames(60, vec![], Modifiers::NONE);
-        assert_eq!(seen(&h).figures[0].1, pages);
+        assert_eq!(seen(&h).igloos[0].1, pages, "no brick taken out");
     }
 
     #[test]
-    fn in_the_magic_snow_a_chapter_s_pile_becomes_an_ice_figure_when_the_next_begins() {
+    fn in_the_magic_snow_a_chapter_s_igloo_is_finished_and_lit_when_the_next_begins() {
         let mut h = Harness::new();
         in_the_theme(&mut h, theme::Theme::Snow, 1.0);
         let seen = |h: &Harness| h.app.eggs.snow.clone().unwrap();
@@ -7114,26 +7114,28 @@ mod tests {
         h.key(Key::Enter, Modifiers::NONE);
         h.type_text(&SENTENCE.repeat(100));
         h.frames(400, vec![], Modifiers::NONE);
-        let first = seen(&h).figures[0];
+        let first = seen(&h).igloos[0];
+        let warm = |h: &Harness| h.painted.iter().filter(|cs| matches!(&cs.shape, egui::Shape::Mesh(m) if m.vertices.iter().any(|v| v.color.r() as i32 > v.color.b() as i32 + 60 && v.color.a() == 255))).count();
         for (n, chapters) in [("Two", 2), ("Three", 3)] {
+            let was = warm(&h);
+            let built = seen(&h).igloos[chapters - 2];
             h.key(Key::Enter, Modifiers::NONE);
             h.type_text(&format!("Chapter {n}"));
             h.click_widget("Chapter");
             assert!(h.app.eggs.lift.is_none(), "Chapter {n}: nothing brings the title");
-            let pile = seen(&h).figures[chapters - 2];
-            h.frames((eggs::snow::FORM * 60.0 * 0.2) as usize, vec![], Modifiers::NONE);
+            h.frames((eggs::snow::FINISH * 60.0 * 0.3) as usize, vec![], Modifiers::NONE);
             let hill = seen(&h);
-            assert!(hill.figures.len() == chapters && hill.forming, "Chapter {n}: the pile before forming");
-            assert!(hill.figures[chapters - 2].2 > 0.0 && hill.figures[chapters - 2].2 < 0.5, "Chapter {n}: still a pile: {:?}", hill.figures);
-            h.frames((eggs::snow::FORM * 60.0 * 0.8) as usize + 10, vec![], Modifiers::NONE);
+            assert!(hill.igloos.len() == chapters && hill.finishing, "Chapter {n}: the igloo before being finished");
+            assert!(hill.igloos[chapters - 2].2 > 0.0 && hill.igloos[chapters - 2].2 < 0.5 && warm(&h) == was, "Chapter {n}: not lit yet: {:?}", hill.igloos);
+            h.frames((eggs::snow::FINISH * 60.0 * 0.7) as usize + 10, vec![], Modifiers::NONE);
             let hill = seen(&h);
-            let carved = hill.figures[chapters - 2];
-            assert!(!hill.forming && carved.2 == 1.0 && hill.formed == chapters - 1, "Chapter {n}: every chapter before carved: {:?}", hill.figures);
-            assert!(carved.0.height() > pile.0.height() && (carved.0.bottom() - pile.0.bottom()).abs() < 2.0, "Chapter {n}: a figure taller than its pile, in its place: {:?} {:?}", carved.0, pile.0);
-            assert!(hill.figures[chapters - 1].2 == 0.0, "Chapter {n}: the new chapter's pile begun");
-            assert!(hill.which.windows(2).all(|w| w[0].0 != w[1].0 && w[0].1 != w[1].1), "a figure and a light of its own: {:?}", hill.which);
+            let done = hill.igloos[chapters - 2];
+            assert!(!hill.finishing && done.2 == 1.0 && hill.lit == chapters - 1, "Chapter {n}: every igloo before lit: {:?}", hill.igloos);
+            assert!(warm(&h) > was, "Chapter {n}: a warm light inside");
+            assert!(done.0.height() > built.0.height() && (done.0.bottom() - built.0.bottom()).abs() < 2.0, "Chapter {n}: finished, in its place: {:?} {:?}", done.0, built.0);
+            assert!(hill.igloos[chapters - 1].2 == 0.0, "Chapter {n}: the new chapter's igloo begun");
         }
-        assert_eq!(seen(&h).figures[0].1, first.1, "the first as it was cut");
+        assert_eq!(seen(&h).igloos[0].1, first.1, "the first as it was built");
 
         // Picked again, the theme shows it as it stands at once.
         let ctx = h.ctx.clone();
@@ -7142,17 +7144,17 @@ mod tests {
         h.app.themes.choose(&ctx, theme::Theme::Snow);
         h.frames(2, vec![], Modifiers::NONE);
         let hill = seen(&h);
-        assert!(hill.figures.len() == 3 && hill.formed == 2 && !hill.forming && hill.coming.is_none() && hill.figures[0].1 == first.1);
+        assert!(hill.igloos.len() == 3 && hill.lit == 2 && !hill.finishing && hill.coming.is_none() && hill.igloos[0].1 == first.1);
     }
 
     #[test]
-    fn a_long_story_s_figures_are_spread_beside_the_page_and_a_narrower_window_moves_none() {
+    fn a_long_story_s_igloos_are_spread_beside_the_page_and_a_narrower_window_moves_none() {
         let mut h = Harness::new();
         // Twenty chapters, nineteen of them done.
         h.app.doc.garden = vec![6; 20];
         in_the_theme(&mut h, theme::Theme::Snow, 0.0);
-        let figures = |h: &Harness| h.app.eggs.snow.clone().unwrap().figures;
-        let all = figures(&h);
+        let igloos = |h: &Harness| h.app.eggs.snow.clone().unwrap().igloos;
+        let all = igloos(&h);
         let desk = h.app.eggs.desk;
         assert_eq!(all.len(), 20);
         assert!(all.iter().all(|f| beside_the_page(&h, f.0) && desk.contains_rect(f.0)), "on the desk beside the page: {all:?}");
@@ -7163,7 +7165,7 @@ mod tests {
         // A narrower window leaves each where it is beside the page.
         let beside = |h: &Harness| {
             let page = h.app.last_page_rect;
-            figures(h).iter().map(|f| f.0.center_bottom() - egui::pos2(if f.0.center().x < page.center().x { page.left() } else { page.right() }, page.bottom())).collect::<Vec<_>>()
+            igloos(h).iter().map(|f| f.0.center_bottom() - egui::pos2(if f.0.center().x < page.center().x { page.left() } else { page.right() }, page.bottom())).collect::<Vec<_>>()
         };
         let was = beside(&h);
         h.width = 900.0;
@@ -7195,7 +7197,7 @@ mod tests {
     }
 
     #[test]
-    fn zooming_in_on_the_magic_snow_brings_the_whole_hillside_nearer_not_the_ice_alone() {
+    fn zooming_in_on_the_magic_snow_brings_the_whole_hillside_nearer_not_the_igloos_alone() {
         let mut h = Harness::new();
         h.app.doc.garden = vec![6; 6];
         in_the_theme(&mut h, theme::Theme::Snow, 0.0);
@@ -7203,7 +7205,7 @@ mod tests {
             egui::Shape::Circle(c) if c.fill == eggs::snow::MOON => Some(c.radius),
             _ => None,
         }).expect("the moon");
-        let trees = |h: &Harness| h.app.eggs.snow.clone().unwrap().figures.iter().map(|f| f.0).collect::<Vec<_>>();
+        let trees = |h: &Harness| h.app.eggs.snow.clone().unwrap().igloos.iter().map(|f| f.0).collect::<Vec<_>>();
         let foot = |h: &Harness| {
             let page = h.app.last_page_rect;
             let ground = trees(h)[0].bottom();
@@ -7217,7 +7219,7 @@ mod tests {
         let z = moon(&h) / was_moon;
         assert!(z > 1.2, "the hillside nearer: {z}");
         for (a, b) in was_trees.iter().zip(trees(&h)) {
-            assert!((b.height() / a.height() - z).abs() < 0.02, "each figure as much bigger as the hillside: {} {z}", b.height() / a.height());
+            assert!((b.height() / a.height() - z).abs() < 0.02, "each igloo as much bigger as the hillside: {} {z}", b.height() / a.height());
             let (from, to) = (a.center() - was_foot, b.center() - foot(&h));
             assert!((to - from * z).length() < 3.0, "and as much further from the foot of the page: {from:?} {to:?} {z}");
         }
@@ -7254,33 +7256,84 @@ mod tests {
     }
 
     #[test]
-    fn the_garden_is_kept_with_the_story_and_does_not_shrink_when_it_is_opened_again_smaller() {
+    fn a_story_opened_again_shows_its_chapters_and_pages_as_they_are_not_as_they_once_were() {
         let dir = test_dir("garden");
         let path = dir.join("story.caprice");
-        // Written in another theme: the garden grows all the same.
+        // Three chapters written, then two of them taken out again: while it is open, all three stay.
         let mut h = Harness::new();
-        pages_of_text(&mut h);
-        let pages = h.app.doc.pages() as u32;
-        assert!(h.app.eggs.plants.is_empty(), "nothing drawn outside the Magic Garden");
+        in_the_theme(&mut h, theme::Theme::Snow, 0.0);
+        for n in ["One", "Two", "Three"] {
+            h.type_text(&format!("Chapter {n}"));
+            h.click_widget("Chapter");
+            h.key(Key::Enter, Modifiers::NONE);
+            h.type_text(&SENTENCE.repeat(60));
+            h.key(Key::Enter, Modifiers::NONE);
+        }
+        h.frames(30, vec![], Modifiers::NONE);
+        assert_eq!(h.app.doc.garden.len(), 3);
         h.key(Key::A, Modifiers::COMMAND);
         h.key(Key::Backspace, Modifiers::NONE);
         h.type_text("Only this is left.");
-        assert_eq!(h.app.doc.pages(), 1);
+        h.frames(30, vec![], Modifiers::NONE);
+        assert_eq!(h.app.doc.garden.len(), 3, "nothing comes down while it is open");
+        assert_eq!(h.app.eggs.snow.clone().unwrap().igloos.len(), 3);
         h.app.save_to(path.clone());
-        assert!(std::fs::read_to_string(&path).unwrap().contains(r#""garden""#), "kept in the file");
+        assert!(!std::fs::read_to_string(&path).unwrap().contains(r#""garden""#), "not kept in the file");
 
+        // Opened again: one igloo, for the one page it has, and the next page is the next brick.
         let mut other = Harness::new();
-        in_the_garden(&mut other, 0.0);
+        in_the_theme(&mut other, theme::Theme::Snow, 0.0);
         let ctx = other.ctx.clone();
         other.app.open_path(&ctx, path.clone());
-        assert!(!other.app.unsaved(), "the garden is no change to save");
-        assert_eq!(other.app.doc.garden, [pages]);
-        let opened = first_plant(&mut other);
-        let mut fresh = Harness::new();
-        in_the_garden(&mut fresh, 0.0);
-        fresh.app.doc.garden = vec![pages];
-        assert_eq!(opened, first_plant(&mut fresh), "as tall as its most pages, not its one page now");
+        other.frames(2, vec![], Modifiers::NONE);
+        assert!(!other.app.unsaved(), "nothing to save for it");
+        assert_eq!(other.app.doc.garden, [1], "as it is now");
+        let hill = other.app.eggs.snow.clone().unwrap();
+        assert!(hill.igloos.len() == 1 && hill.igloos[0].1 == 1, "{:?}", hill.igloos);
+        while other.app.doc.pages() == 1 {
+            other.type_text(&SENTENCE.repeat(10));
+        }
+        other.frames((eggs::snow::HANG * 60.0) as usize * 3, vec![], Modifiers::NONE);
+        assert!(other.app.eggs.snow.clone().unwrap().igloos[0].1 > 1, "a page added is a brick more at once");
+
+        // A file from before still holds what it once had: that is no longer read.
+        let mut old: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        old["garden"] = serde_json::json!([9, 9, 9]);
+        std::fs::write(&path, old.to_string()).unwrap();
+        let mut older = Harness::new();
+        older.frames(3, vec![], Modifiers::NONE);
+        let ctx = older.ctx.clone();
+        older.app.open_path(&ctx, path.clone());
+        older.frames(2, vec![], Modifiers::NONE);
+        assert_eq!(older.app.doc.garden, [1], "an older file's garden left behind");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_story_opened_shows_what_it_has_grown_at_once_rather_than_growing_it_again() {
+        let mut h = Harness::new();
+        in_the_theme(&mut h, theme::Theme::Snow, 0.0);
+        for n in ["One", "Two", "Three"] {
+            h.type_text(&format!("Chapter {n}"));
+            h.click_widget("Chapter");
+            h.key(Key::Enter, Modifiers::NONE);
+            h.type_text(&SENTENCE.repeat(60));
+            h.key(Key::Enter, Modifiers::NONE);
+        }
+        h.frames(30, vec![], Modifiers::NONE);
+        let mut o = h.reopened("garden-at-once");
+        o.app.themes.theme = theme::Theme::Snow;
+        // In the browser its pages are counted only once its fonts have come, a few frames on:
+        // until then it is drawn with nothing counted (here, as if counted already).
+        o.app.doc.garden.clear();
+        o.app.eggs.measured = Some((o.app.story_id.clone(), o.app.doc.version, o.app.doc.spans.len()));
+        o.frames(3, vec![], Modifiers::NONE);
+        assert_eq!(o.app.eggs.snow.clone().unwrap().igloos.len(), 1, "nothing counted yet");
+        o.app.eggs.measured = None;
+        o.frames(1, vec![], Modifiers::NONE);
+        let hill = o.app.eggs.snow.clone().unwrap();
+        assert!(hill.igloos.len() == 3 && !hill.finishing && hill.coming.is_none() && hill.lit == 2, "all there at once, nothing growing: {hill:?}");
+        assert_eq!(hill.igloos.iter().map(|i| i.1 as u32).collect::<Vec<_>>(), o.app.doc.garden, "every brick laid");
     }
 
     #[test]
@@ -7681,6 +7734,8 @@ mod tests {
         h.app.again = again::Again::kept_in(Some(dir.join("again.json")));
         h.frames(3, vec![], Modifiers::NONE);
         h.type_text("Not saved anywhere.");
+        // What the magic themes have grown, as if it once had more chapters and pages.
+        h.app.doc.garden = vec![7, 3];
         platform::lose_drawing(true);
         h.frames(2, vec![], Modifiers::NONE);
         assert!(platform::reloaded(), "loaded again");
@@ -7692,6 +7747,7 @@ mod tests {
         back.frames(3, vec![], Modifiers::NONE);
         assert_eq!(back.app.doc.visible_text(), "Not saved anywhere.");
         assert!(back.app.path.is_none() && back.app.unsaved(), "still to be saved");
+        assert_eq!(back.app.doc.garden, [7, 3], "never closed, so nothing grown comes down");
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -8196,6 +8252,67 @@ mod tests {
         assert_eq!(phone.text(), laptop.text());
         let said = server.0.borrow().rooms.borrow().values().flat_map(|r| r.said.clone()).collect::<Vec<_>>();
         assert!(!said.iter().any(|(d, kind)| *d == phone.app.live.device && kind == "edits"), "the phone sent no edits: {said:?}");
+        for d in dirs {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+
+    #[test]
+    fn chapters_taken_out_on_one_device_leave_the_other_s_igloos_until_it_opens_the_story_again() {
+        let (mut laptop, mut phone, _server, dirs) = laptop_and_phone("live-garden");
+        for h in [&mut laptop, &mut phone] {
+            let ctx = h.ctx.clone();
+            h.app.themes.choose(&ctx, theme::Theme::Snow);
+            h.app.eggs.odds = Some(0.0);
+        }
+        side_by_side(&mut laptop, &mut phone, 6);
+        assert!(laptop.app.can_edit() && !phone.app.can_edit(), "written on the laptop, followed on the phone");
+        let igloos = |h: &Harness| h.app.eggs.snow.clone().unwrap().igloos.len();
+        laptop.key(Key::Enter, Modifiers::NONE);
+        for n in ["One", "Two", "Three"] {
+            laptop.type_text(&format!("Chapter {n}"));
+            laptop.click_widget("Chapter");
+            laptop.key(Key::Enter, Modifiers::NONE);
+            laptop.type_text(&SENTENCE.repeat(60));
+            laptop.key(Key::Enter, Modifiers::NONE);
+        }
+        laptop.wait(live::BATCH_EVERY + 0.1);
+        side_by_side(&mut laptop, &mut phone, 6);
+        assert_eq!(phone.text(), laptop.text(), "followed");
+        assert!(igloos(&laptop) == 3 && igloos(&phone) == 3, "an igloo a chapter on both");
+
+        // The chapters taken out on the laptop: on the phone, following, nothing comes down.
+        laptop.key(Key::A, Modifiers::COMMAND);
+        laptop.key(Key::Backspace, Modifiers::NONE);
+        laptop.type_text("Only this is left.");
+        laptop.wait(live::BATCH_EVERY + 0.1);
+        side_by_side(&mut laptop, &mut phone, 6);
+        assert_eq!(phone.text(), "Only this is left.");
+        assert!(igloos(&laptop) == 3 && igloos(&phone) == 3, "nothing comes down where the story is open");
+        // The laptop saves and closes it: the phone keeps showing what it had.
+        laptop.key(Key::S, Modifiers::COMMAND);
+        let ctx = laptop.ctx.clone();
+        laptop.app.close_story(&ctx);
+        laptop.later(cloud::UP_AFTER + 1.0);
+        for _ in 0..4 {
+            side_by_side(&mut laptop, &mut phone, 3);
+            phone.later(1.0);
+        }
+        assert_eq!(phone.text(), "Only this is left.");
+        assert_eq!(igloos(&phone), 3, "closed elsewhere, still open here");
+
+        // Opened again on the phone, it is counted as it is: one igloo, the same as anywhere.
+        let ctx = phone.ctx.clone();
+        let path = phone.app.path.clone().expect("on the phone's shelf");
+        // Closed (as if the question about its changes had been answered).
+        phone.app.leave(&ctx, fileio::Leaving::Home);
+        phone.frames(3, vec![], Modifiers::NONE);
+        assert!(phone.app.start.open, "back at the welcome page");
+        phone.later(cloud::LOOK_EVERY + 1.0);
+        phone.app.open_path(&ctx, path);
+        phone.frames(3, vec![], Modifiers::NONE);
+        assert_eq!(phone.text(), "Only this is left.");
+        assert_eq!(igloos(&phone), 1, "opened again, as it is now: {:?}", phone.app.doc.garden);
         for d in dirs {
             let _ = std::fs::remove_dir_all(d);
         }

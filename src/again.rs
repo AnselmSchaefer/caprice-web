@@ -29,6 +29,10 @@ pub struct Place {
     /// being locked out by itself for as long as the room keeps the pen for a device gone.
     #[serde(default)]
     device: String,
+    /// What the magic themes had grown (`Doc::garden`): the story was never closed, so nothing
+    /// comes down, though the file no longer holds it (R30).
+    #[serde(default)]
+    garden: Vec<u32>,
 }
 
 pub struct Again {
@@ -82,6 +86,7 @@ impl App {
                 caret: self.caret,
                 anchor: self.anchor,
                 device: self.live.device.clone(),
+                garden: self.doc.garden.clone(),
             };
             if let Ok(json) = serde_json::to_string(&place) {
                 let _ = fs::write(file, json);
@@ -95,6 +100,7 @@ impl App {
         let Some(place) = self.again.waiting.take() else { return };
         (self.story_id, self.created) = (place.file.id.clone(), place.file.created);
         self.adopt(ctx, place.file);
+        self.doc.garden = place.garden;
         (self.path, self.saved_hash, self.as_saved, self.saved_at) = (place.path, place.saved_hash, place.as_saved, place.saved_at);
         self.keep.opened(&self.story_id);
         if !place.device.is_empty() {

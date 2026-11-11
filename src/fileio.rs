@@ -177,10 +177,9 @@ pub struct DocFile {
     /// Where page numbering changes (`numbers.rs`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     numbers: Vec<crate::numbers::NumberMark>,
-    /// The most pages each plant of the garden has grown to (`eggs.rs`). Older files have none: their
-    /// garden starts from the pages they have.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    garden: Vec<u32>,
+    // Files once kept the most pages each chapter had had (`Doc::garden`), as "garden". It is no
+    // longer written, and read no more: a story opened shows its chapters and pages as they are,
+    // the same in every browser (R30).
 }
 
 fn yes() -> bool {
@@ -315,7 +314,6 @@ impl DocFile {
             created: 0,
             boxes,
             numbers: doc.number_marks.clone(),
-            garden: doc.garden.clone(),
         }
     }
 
@@ -382,7 +380,6 @@ impl DocFile {
             doc.number_marks.push(crate::numbers::NumberMark { at: shift(m.at).min(total - 1), ..m });
         }
         doc.number_marks.sort_by_key(|m| m.at);
-        doc.garden = self.garden;
         for n in self.notes {
             let (start, end) = (shift(n.start).min(total), shift(n.end).min(total));
             let id = doc.next_note_id;
@@ -430,20 +427,16 @@ impl App {
 
     /// A fingerprint of what saving would write, to tell whether anything changed since.
     /// The story as two devices of a story live on several must agree on it (R34): the document
-    /// only, without what is this device's own (the scene being described, which pictures show)
-    /// or what each grows for itself (the garden).
+    /// only, without what is this device's own (the scene being described, which pictures show).
     pub fn live_hash(&self) -> u64 {
-        let file = DocFile { garden: Vec::new(), ..DocFile::from_doc(&self.doc) };
+        let file = DocFile::from_doc(&self.doc);
         crate::cloud::fingerprint(serde_json::to_string(&file).unwrap_or_default().as_bytes())
     }
 
     pub fn content_hash(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        // The garden only grows with the text, so it is no change of its own: left out, a story
-        // just opened or begun is not unsaved for its garden being worked out.
-        let file = DocFile { garden: Vec::new(), ..self.doc_file() };
-        serde_json::to_string(&file).unwrap_or_default().hash(&mut h);
+        serde_json::to_string(&self.doc_file()).unwrap_or_default().hash(&mut h);
         h.finish()
     }
 
