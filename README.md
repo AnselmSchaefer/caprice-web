@@ -1,57 +1,67 @@
 # Caprice Web
 
-The browser version of Caprice, in the making. Below is the desktop app's description, which this
-copy started from.
+**A word processor for creative, fun story telling, in the browser.**
 
-**A word processing app for creative, fun story telling.**
+Open it at **https://caprice-web.caprice-web-checks.workers.dev**. Nothing to install: it runs in
+Chrome, Edge or Brave, on a computer or a phone.
 
-Caprice is a word processor for writing stories, not reports. It gives you real pages that turn like a book’s or slide onto a stack, post-it notes for your ideas, and Claude as a helper: it can paint the scene you are writing behind the page, or read along when you circle a passage.
+Caprice is for writing stories, not reports. It gives you real pages that turn like a book's or
+slide onto a stack, post-it notes for your ideas, and Claude as a helper that paints the scene you
+are writing behind the page. Caprice Web is a copy of the desktop app, built for WebAssembly: the
+same app, drawing on the page's canvas.
+
+![The Magic City theme: a chapter title is typed, and a dragon flies in with it in its feet, breathes fire, sets it on the page and flies away, over a street of little houses that grows a house for each chapter](assets/dragon.gif)
+
+*In the Magic City a street of houses grows with the story, a floor for every page. Make a line a
+chapter title, and a dragon brings it in.*
 
 ![Caprice: a story page with a lake at dusk painted behind the text, children walking towards a little house, and post-it notes at the edge](assets/Example.png)
 
 ## Why Caprice
 
 - **Easy to use.** One small toolbar, real pages and no clutter. Start typing, and the story fills page after page.
-- **A welcome to come back to.** Opened without a file, Caprice greets you with a page of its own: begin something new, or pick up one of the stories you opened last, each shown with its first page, its first words, how many words it holds and when you last had it open. Choose one and its sheet flies onto the desk and becomes the page.
-- **Joy in writing.** Pages turn over like a book’s, or slide onto a stack (pick the look under Page → View: *Book* or *Paperstack*). Under Page → Theme, the desk and docks come in seven moods: *Midnight Ink*, *Lagoon*, *Marmalade*, *Disco Grape*, *Bubblegum*, *Pistachio Sorbet* and *Typewriter*; the new one washes in over the old. The pages you have already written pile up beside the one you are on, so you can watch the story grow.
+- **A welcome to come back to.** Caprice greets you with a page of its own: begin something new, or pick up one of your stories, each shown with its first page, its first words, how many words it holds and when you last had it open. Choose one and its sheet flies onto the desk and becomes the page.
+- **Joy in writing.** Pages turn over like a book's, or slide onto a stack (Page → View: *Book* or *Paperstack*). Under Page → Theme the desk comes in seven moods (*Midnight Ink*, *Lagoon*, *Marmalade*, *Disco Grape*, *Bubblegum*, *Pistachio Sorbet* and *Typewriter*) and seven magic ones, where something grows with your story: a garden, a city, ships in a bay, a forest of lanterns, a coral reef, a snowy hillside of Christmas trees, a vineyard.
 - **Room for ideas.** Stick post-its to any line for plot twists, names and "what if…" thoughts. They peek out of the page piles, and clicking one takes you back to its page.
 
 ## Features
 
-- **Begin a story as a kind.** A *Blank page*; a *Novel* on 6 × 9 in book pages, justified, with chapter titles, drop caps and page numbers, starting at "Chapter One"; a *Manuscript* in typewriter type, double spaced, to send out; or a *Journal* on A5 with today’s date as its first title. Each sets up the paper, type and headers and footers; change any of it later as usual.
-- **Scenes behind the page.** Describe a place ("a village between the mountains and the sea, at dusk") and Claude paints it faintly behind your writing. Or let it follow along, painting each paragraph as you finish it. Every scene is kept with its part of the story, and the picture changes as your caret moves on. You can save a picture as a PNG or SVG.
-- **The same people in every scene.** Describe the people of your story once under Scene → Cast (a name, other names the story uses for them, how they look), and let Claude draw each one a model sheet. Every scene whose passage names them then paints them from it, so Mara looks like Mara in every picture of the book, though the story never says again how she looks. A paragraph that only says "she" or "the boy" is painted with whoever the paragraph before named, and the list of scenes shows who each scene was painted with, to choose others and paint it again. Someone who changes over the story can keep several looks (as a girl, after the shipwreck), each with its own description and sheet; switch which one is in use, and scenes painted from then on show that one.
-
-  ![Four passages that only name Mara, painted from the passage alone, with her description, and with her model sheet](assets/cast-example.jpg)
-- **Circle to ask Claude.** Turn on the pen (Ctrl+Shift+P) and draw a loop around a passage. Claude can review it, fix awkward wording, check grammar, summarize it, or answer your own question about it. A rewrite can replace the passage, and one undo brings the original back.
+- **Begin a story as a kind.** A *Blank page*; a *Novel* on 6 × 9 in book pages, justified, with chapter titles, drop caps and page numbers, starting at "Chapter One"; a *Manuscript* in typewriter type, double spaced, to send out; or a *Journal* on A5 with today's date as its first title.
+- **Scenes behind the page.** Describe a place ("a village between the mountains and the sea, at dusk") and Claude paints it faintly behind your writing; parts of it move, a dragon's wings gliding, smoke rising from chimneys, clouds drifting. Every scene is kept with its part of the story, and the picture changes as your caret moves on. In the browser this needs signing in, and for now Caprice paints 10 scenes a day for everyone together.
+- **Your stories in any browser.** Stories are kept in your browser. Sign in with Google and each one also has a copy online, so the same stories are there on your phone and your computer. A story changed in two places is kept twice, never written over.
+- **One story on several devices.** Open a story on your computer and your phone at once: one writes, the other follows every word as it is typed, and "Transfer here" moves the pen.
+- **On a phone** the page fills the width and scrolls, a tap puts the caret in and brings the keyboard, a finger swiped sideways turns a page, and two pinch to zoom.
 - **Post-it notes** on any selection or line (Ctrl+Alt+N), in several colours.
-- **Leafing through pages** with the scrollbar at the bottom, a two-finger swipe or Page Up / Page Down. In *Paperstack*, dragging the scrollbar slides each page it passes halfway out, and letting go moves them all together.
 - **Pictures** in your text that you can move, resize and rotate.
-- **Page numbers** in Page > Page numbers, for the page you are on: show them or not, type a new number to start counting again (figures or roman), and see every page where that changes. No footer with numbers yet? One click adds it.
+- **Page numbers**, headers and footers, text boxes, chapters with drop caps.
 - **Formatting** that stays out of the way: fonts, sizes, bold, italic, underline, text colour, alignment, lists and page setup; the brush copies formatting from one place to another.
-- **Chapters with drop caps.** The first letter of a chapter sinks two or three lines deep, and the text flows around it, the next paragraphs too; a letter with a tail (j, p, q, y) is sized to keep it within those lines.
-- **Search and replace** (Ctrl+F, Ctrl+H), with match case and whole words, to rename someone across the whole story in one go (and one undo).
-- **Document info** (File → Document info): words of the story, the chapter and the selection, when the story was begun and last saved, its versions, and the words written today towards a daily goal.
-- **Undo** and **zoom** (Ctrl + / − / 0).
-- **Your work is safe.** A story with a file saves itself half a minute after each change; closing still lets you keep the changes or drop them back to how you last saved it. Before you leave a story with changes, Caprice tells you what is at stake: its words and chapters, how much changed since you saved it and when. A story never saved is offered a file name from its first chapter or first words. And every story, saved or not, keeps earlier versions of itself, even when you choose not to save: go back to one under File → Versions, where stories never saved can be opened again too.
-- **Export to Word** (.docx) when the story is ready to share.
-- **Print** (Ctrl+P) on any printer set up on your Mac or Linux machine, or save the pages as a PDF, looking just as they do on screen.
+- **Search and replace** (Ctrl+F, Ctrl+H), with match case and whole words.
+- **Document info**: words of the story, the chapter and the selection, its versions, and the words written today towards a daily goal.
+- **Your work is safe.** A saved story saves itself half a minute after each change, and when you switch tabs or apps. Every story, saved or not, keeps earlier versions of itself: go back to one under File → Versions.
+- **Files in and out.** Download a story as a `.caprice` file and upload it again, export it to Word (.docx), or save the pages as a PDF and print them, looking just as they do on screen.
 
-## Getting started
+The desktop app has a few things the browser does not have yet: circling a passage with the pen to
+ask Claude about it, the cast's model sheets, and having Claude paint along as you write.
 
-Caprice is written in Rust and runs on Linux and macOS.
+## Building it
+
+Caprice is written in Rust on egui/eframe. The native build runs the tests; the browser build is
+WebAssembly with threads, on a nightly Rust named in `web/build.sh`.
 
 ```sh
-cargo run --release              # try it: the welcome page
-cargo run --release -- story.caprice   # open a story directly
+cargo test                       # the tests, headless
+cargo run --release              # the app on the desktop, keeping its files apart from desktop Caprice's
+web/build.sh                     # the browser build, into web/dist
+node web/serve.mjs 8080          # serve it with the headers its threads need: http://localhost:8080/
+node web/smoke.mjs out/          # headless Chromium through the app, with screenshots (cd web && npm install first)
 ```
 
-### Claude features
-
-The scene painting and the pen use [Claude Code](https://claude.com/claude-code) on your machine. Install it and sign in by running `claude` once in a terminal. Caprice stores no keys of its own; it runs your local `claude` command with tools, project settings and session history turned off. Everything else in Caprice works without Claude.
+The server behind sign-in, stories online and scenes is a Cloudflare Worker (`web/api`), tested with
+`cd web && node --test api/api.test.mjs`. `ARCHITECTURE.md` explains how the code fits together, and
+the rules every change keeps.
 
 ## Files
 
-Stories are saved as `.caprice` files: plain JSON holding the text, notes, pictures, the scenes behind the pages and the cast.
-
-Caprice keeps its own things in its data folder (`~/.local/share/caprice` on Linux, `~/Library/Application Support/Caprice` on macOS): the versions of every story, the list of stories last opened for the welcome page, your daily word goal and the theme you picked.
+Stories are saved as `.caprice` files: plain JSON holding the text, notes, pictures, the scenes
+behind the pages and the cast. In the browser they are kept in the browser's own storage
+(IndexedDB), with their versions and your settings; signed in, a copy of each story is kept online.
