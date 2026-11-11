@@ -8546,6 +8546,9 @@ mod tests {
         assert_eq!(h.text(), "First words. Written here.", "the open story keeps what was written here");
         let copy = std::fs::read_to_string(dir.join("First words (from another browser).caprice")).unwrap();
         assert!(copy.contains("more from the train"), "the other browser's words are kept beside it");
+        let id = |json: &str| serde_json::from_str::<serde_json::Value>(json).unwrap()["id"].as_str().unwrap_or_default().to_owned();
+        let original = std::fs::read_to_string(dir.join("First words.caprice")).unwrap();
+        assert!(!id(&copy).is_empty() && id(&copy) != id(&original), "a story of its own, so another browser's copy is never the same story");
         let mut online: Vec<String> = stories_online(&server).into_iter().map(|(name, _)| name).collect();
         online.sort();
         assert_eq!(online, ["First words", "First words (from another browser)"], "both are online");
@@ -8568,6 +8571,38 @@ mod tests {
         h.click_widget("two copies");
         assert_eq!(h.labels().lines().filter(|l| *l == "two copies").count(), 0, "sorted out, neither is marked");
         assert!(story.exists() && copy.exists(), "and both are still there");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_story_that_differs_in_another_browser_only_in_what_each_keeps_for_itself_is_kept_once() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "online-own-parts");
+        let server = online(&mut h, &dir, true);
+        h.frames(12, vec![], Modifiers::NONE);
+        h.type_text("First words.");
+        h.save_on_shelf();
+        h.later(cloud::UP_AFTER + 1.0);
+        // Online and here, the same words; each file holds what its browser kept for itself (the
+        // garden older files held), different in each.
+        let path = dir.join("First words.caprice");
+        let own = |json: &str, garden: &str| json.replacen('{', &format!("{{\"garden\":{garden},"), 1);
+        let here = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, own(&here, "[1]")).unwrap();
+        let (key, name, there) = {
+            let o = server.0.borrow();
+            let (key, (name, _, bytes)) = o.stories.iter().next().unwrap();
+            (key.clone(), name.clone(), String::from_utf8_lossy(bytes).into_owned())
+        };
+        server.put(&key, &name, own(&there, "[4, 4]").as_bytes());
+        for _ in 0..3 {
+            h.later(cloud::LOOK_EVERY + 1.0);
+        }
+        let stories = std::fs::read_dir(&dir).unwrap().filter(|e| e.as_ref().unwrap().path().extension().is_some_and(|x| x == "caprice")).count();
+        assert_eq!(stories, 1, "not kept twice");
+        assert_eq!(stories_online(&server).len(), 1, "and one story online");
+        assert_eq!(h.text(), "First words.");
+        assert!(h.app.cloud.mark(&path).is_none_or(|(m, _)| m != cloud::Mark::Twice), "nor marked so");
         std::fs::remove_dir_all(dir).unwrap();
     }
 

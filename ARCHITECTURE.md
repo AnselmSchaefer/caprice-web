@@ -1861,6 +1861,18 @@ In the app (`cloud.rs`) **the shelf is where a story is; online is a copy, and n
   in `cloud.json`, its fingerprint by key), and a story compared (`Task::Compare`) whose copy online
   is what this browser sent is agreed on, not kept twice; what was written since goes up over it.
   Test: `a_story_saved_online_whose_answer_was_lost_is_not_kept_twice`.
+- **Two copies are compared as stories, not as files** (`same_story`): what each browser keeps
+  for itself in the file (the scene being described and whether pictures show, R34; the garden
+  older files held, R30) is left out, and when only that differs, this browser's file is agreed on
+  as it is (its own fingerprint recorded, so it is not sent up and fetched back by the other).
+  Compared byte for byte, a story open in two browsers was kept twice without a word differing.
+  **A copy kept "from another browser" is a story of its own** (`own_story`: a new id). With the
+  original's id its key online (`key`, from id and name) came out the same in two browsers that
+  had each kept one, so the two copies were kept twice again ("(from another browser)" twice
+  over), and its versions mixed with the original's. Anything new a file holds that is a
+  browser's own goes into `same_story` too. Tests:
+  `a_story_that_differs_in_another_browser_only_in_what_each_keeps_for_itself_is_kept_once`,
+  `a_story_changed_here_and_in_another_browser_is_kept_twice_and_loses_no_word`.
 - **The open story is never written over** while it has changes not saved: the copy from online
   goes beside it. Without such changes it is written and shown again (`Cloud::reload`), the caret
   kept, its page shown with `go_to_page` (R5). **Its scenes stay on screen**: `adopt` takes the

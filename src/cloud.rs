@@ -261,6 +261,38 @@ fn id_of(bytes: &[u8]) -> String {
     serde_json::from_slice::<Id>(bytes).map(|i| i.id).unwrap_or_default()
 }
 
+/// Whether two files hold the same story: the same but for what each browser keeps for itself
+/// (the scene being described and whether pictures show, R34; the garden older files held, R30).
+/// Compared byte for byte, a story open in two browsers differed in these alone, and was kept
+/// twice ("… (from another browser)") though not a word differed.
+fn same_story(a: &[u8], b: &[u8]) -> bool {
+    let story = |bytes: &[u8]| {
+        serde_json::from_slice::<serde_json::Value>(bytes).ok().map(|mut v| {
+            if let Some(o) = v.as_object_mut() {
+                o.remove("scene");
+                o.remove("garden");
+            }
+            v
+        })
+    };
+    match (story(a), story(b)) {
+        (Some(a), Some(b)) => a == b,
+        _ => a == b,
+    }
+}
+
+/// The story in `bytes` as a story of its own: the same, with an id of its own. A copy kept from
+/// another browser had the original's, so its key online (`key`, from id and name) came out the
+/// same in both browsers, and their two copies were kept twice again, "(from another browser)"
+/// twice over; and its versions mixed with the original's.
+fn own_story(bytes: &[u8]) -> Vec<u8> {
+    let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(bytes) else { return bytes.to_vec() };
+    if let Some(o) = v.as_object_mut() {
+        o.insert("id".into(), serde_json::Value::String(crate::versions::new_id()));
+    }
+    serde_json::to_vec(&v).unwrap_or_else(|_| bytes.to_vec())
+}
+
 /// A story's name as a header can carry it (the server reads it with `decodeURIComponent`).
 pub fn encode(name: &str) -> String {
     let mut out = String::new();
@@ -944,11 +976,15 @@ impl App {
                 }
             }
             Task::Compare { key, path } => {
-                let same = fs::read(&path).is_ok_and(|b| fingerprint(&b) == hash) && !(self.path.as_deref() == Some(path.as_path()) && self.unsaved());
+                let here = fs::read(&path).ok();
+                let same = here.as_deref().is_some_and(|b| same_story(b, &bytes)) && !(self.path.as_deref() == Some(path.as_path()) && self.unsaved());
                 // What this browser sent, its answer lost: agreed on, and what was written since goes up over it.
                 let ours = self.cloud.kept.sending.get(&key) == Some(&hash);
                 if same || ours {
                     self.cloud.kept.sending.remove(&key);
+                    // The same story: this browser's file is agreed on as it is, with what it keeps
+                    // for itself, rather than sent up again and fetched back by the other browser.
+                    let hash = if same { here.as_deref().map_or(hash, fingerprint) } else { hash };
                     self.cloud.kept.stories.insert(key, Record { path, version, hash });
                     self.cloud.keep();
                     if !same {
@@ -966,7 +1002,7 @@ impl App {
     /// goes up in its place: both are kept, on both sides.
     fn keep_both(&mut self, dir: &Path, key: &str, path: &Path, name: &str, bytes: &[u8], version: &str) {
         let copy = crate::platform::free_name(dir, &format!("{} (from another browser).caprice", crate::shelf::file_name(name)));
-        if fs::write(&copy, bytes).is_err() {
+        if fs::write(&copy, own_story(bytes)).is_err() {
             return;
         }
         self.start.remember(&copy, self.keep.now());
