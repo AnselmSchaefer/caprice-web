@@ -7070,6 +7070,12 @@ mod tests {
         in_the_theme(&mut h, theme::Theme::Snow, 0.0);
         let seen = |h: &Harness| h.app.eggs.snow.clone().expect("the hillside is there");
         assert_eq!(seen(&h).figures.iter().map(|f| f.1).collect::<Vec<_>>(), [1], "a block for the first page");
+        let lake = h.painted.iter().find_map(|cs| match &cs.shape {
+            egui::Shape::Mesh(m) if m.vertices.iter().any(|v| v.color == eggs::snow::LAKE_FAR) => Some(m.calc_bounds()),
+            _ => None,
+        }).expect("the lake");
+        let (page, window) = (h.app.last_page_rect, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(h.width, h.height)));
+        assert!(window.contains_rect(lake) && lake.left() < page.left() - 100.0 && lake.right() > page.right() + 100.0, "the whole lake in the window, either side of the page: {lake:?} {page:?}");
         h.type_text(&SENTENCE.repeat(220));
         let pages = h.app.doc.pages();
         assert!(pages >= 4, "pages: {pages}");

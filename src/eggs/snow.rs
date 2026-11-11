@@ -1,6 +1,6 @@
 //! The Magic Snow. A snowy hillside at twilight lies on the desk: a few stars and the moon come out
 //! over hills with pines on them, a frozen lake lies along the foot of the desk, under the page and
-//! either side of it, and snow falls softly in front of everything. Each chapter has a place on
+//! either side of it, the whole of it in the window, and snow falls softly in front of everything. Each chapter has a place on
 //! the hillside beside the page, some near and big, some further up the hill, smaller and bluer in
 //! the dusk. Each page of the chapter being written cuts a block of ice out of the lake: a glint
 //! traces round it, it rises out of the water, floats up to the chapter's place and settles on its
@@ -25,7 +25,7 @@ pub const MOON: Color32 = Color32::from_rgb(250, 246, 226);
 /// The dusk that pales and blues what lies further up the hill.
 const DUSK: Color32 = Color32::from_rgb(120, 130, 182);
 /// The lake: its ice far off, mirroring the dusk, and near, and the water under a hole cut in it.
-const LAKE_FAR: Color32 = Color32::from_rgb(132, 150, 204);
+pub const LAKE_FAR: Color32 = Color32::from_rgb(132, 150, 204);
 const LAKE_NEAR: Color32 = Color32::from_rgb(196, 214, 242);
 const WATER: Color32 = Color32::from_rgb(30, 44, 92);
 /// Ice cut and carved: in the light, clear, in shade and deep within.
@@ -47,10 +47,8 @@ pub const FORM: f32 = 7.0;
 /// How far the places reach from the page whatever the window, and how far up the hill they go,
 /// in units; how many depths there are.
 const REACH: f32 = 1800.0;
-const RISE: f32 = 110.0;
+const RISE: f32 = 100.0;
 const DEPTHS: usize = 5;
-/// How far the lake reaches either side of the middle of the desk, in units.
-const LAKE: f32 = 1150.0;
 /// How big the ice is beside the hillside: a figure stands as tall as a tree did.
 const SIZE: f32 = 1.3;
 
@@ -66,20 +64,98 @@ fn painted(points: &[Pos2], colors: &[Color32]) -> Shape {
     Shape::mesh(mesh)
 }
 
-/// The far shore of the lake at `x`, laid out from `middle` and `ground`: highest under the
-/// page, curving down to the foot of the desk at its ends, a little uneven.
-fn shore(middle: f32, ground: f32, u: f32, x: f32) -> f32 {
-    let d = (x - middle) / u;
-    let f = (1.0 - (d / LAKE).powi(2)).max(0.0).powf(0.3);
-    ground + 30.0 * u - 82.0 * u * f + (2.0 * (d / 37.0).sin() + 1.5 * (d / 91.0 + 1.0).sin()) * u * f
+/// The frozen lake as laid out at the fitting zoom: across the window, a little in from its
+/// edges, so the whole of it shows, and just above the foot of the desk; `u` its unit.
+#[derive(Clone, Copy, Debug)]
+pub struct Lake {
+    pub left: f32,
+    pub right: f32,
+    ground: f32,
+    u: f32,
 }
 
-/// Where block `j` of chapter `k` is cut out of the lake, below `x` (kept within the lake).
-fn cut_at(story: &str, k: usize, j: usize, middle: f32, ground: f32, u: f32, x: f32) -> Pos2 {
-    let mut s = Seeds::of(story, 99_700 + k * BLOCKS + j);
-    let reach = (LAKE - 90.0) * u;
-    let x = (x + s.next(-40.0, 40.0) * u).clamp(middle - reach, middle + reach);
-    pos2(x, shore(middle, ground, u, x) + s.next(14.0, 30.0) * u)
+impl Lake {
+    pub fn of(area: Rect, ground: f32, u: f32) -> Lake {
+        Lake { left: area.left() + 36.0 * u, right: area.right() - 36.0 * u, ground, u }
+    }
+
+    /// How far from its ends `x` is, from 0 at an end to 1 in its middle, rounded so that its
+    /// shores meet in a curve.
+    fn round(&self, x: f32) -> f32 {
+        let d = (2.0 * x - self.left - self.right) / (self.right - self.left);
+        (1.0 - d * d).max(0.0).powf(0.4)
+    }
+
+    /// The level its shores meet at, at its ends.
+    fn waist(&self) -> f32 {
+        self.ground - 32.0 * self.u
+    }
+
+    /// Its far shore at `x`, a little uneven.
+    pub fn far(&self, x: f32) -> f32 {
+        let (u, f, d) = (self.u, self.round(x), (x - self.left) / self.u);
+        self.waist() - 34.0 * u * f + (2.0 * (d / 37.0).sin() + 1.5 * (d / 91.0 + 1.0).sin()) * u * f
+    }
+
+    /// Its near shore at `x`.
+    pub fn near(&self, x: f32) -> f32 {
+        self.waist() + 24.0 * self.u * self.round(x)
+    }
+
+    /// Where block `j` of chapter `k` is cut out of it, below `x` (kept well within it).
+    fn cut_at(&self, story: &str, k: usize, j: usize, x: f32) -> Pos2 {
+        let mut s = Seeds::of(story, 99_700 + k * BLOCKS + j);
+        let u = self.u;
+        let x = (x + s.next(-40.0, 40.0) * u).clamp(self.left + 70.0 * u, self.right - 70.0 * u);
+        let (far, near) = (self.far(x) + 10.0 * u, self.near(x) - 8.0 * u);
+        pos2(x, far + (near - far) * s.next(0.2, 0.8))
+    }
+
+    /// The lake: its ice mirroring the dusk far off and paler near, the moon's light lying on it
+    /// below `moon`, faint scratches in it, and snow heaped along both its shores.
+    fn draw(&self, story: &str, moon: f32, time: f64) -> Vec<Shape> {
+        let mut out = Vec::new();
+        let u = self.u;
+        let n = 96;
+        let at = |i: usize| self.left + (self.right - self.left) * i as f32 / n as f32;
+        let mut mesh = egui::epaint::Mesh::default();
+        for i in 0..=n {
+            let x = at(i);
+            mesh.colored_vertex(pos2(x, self.far(x)), LAKE_FAR);
+            mesh.colored_vertex(pos2(x, self.near(x)), LAKE_NEAR);
+        }
+        for i in 0..n as u32 {
+            let (a, b) = (2 * i, 2 * i + 2);
+            mesh.add_triangle(a, a + 1, b);
+            mesh.add_triangle(b, a + 1, b + 1);
+        }
+        out.push(Shape::mesh(mesh));
+        // The moon's light on the ice, shimmering a little.
+        if moon > self.left + 60.0 * u && moon < self.right - 60.0 * u {
+            let shine = 0.3 + 0.04 * (time as f32 * 0.8).sin();
+            out.push(radial(pos2(moon, (self.far(moon) + self.near(moon)) / 2.0), 46.0 * u, 16.0 * u, MOON, shine));
+        }
+        let mut s = Seeds::of(story, 97_500);
+        for _ in 0..40 {
+            let x = self.left + (self.right - self.left) * s.next(0.1, 0.85);
+            let y = self.far(x) + (self.near(x) - self.far(x)) * s.next(0.25, 0.8);
+            let (len, tilt) = (s.next(10.0, 40.0) * u, s.next(-0.08, 0.08));
+            out.push(Shape::line_segment([pos2(x, y), pos2(x + len, y + len * tilt)], Stroke::new(0.6 * u, glow(ICE_LIT, s.next(0.15, 0.35)))));
+        }
+        // Snow heaped along its shores, in shade underneath, smaller round its ends.
+        for (shore, big) in [(0, 1.0), (1, 0.7)] {
+            let mut x = self.left;
+            while x < self.right {
+                let f = self.round(x).max(0.3);
+                let w = s.next(14.0, 30.0) * u * f;
+                let y = if shore == 0 { self.far(x) } else { self.near(x) };
+                out.push(oval(pos2(x, y + 1.6 * u), vec2(1.0, 0.0), w, s.next(2.5, 4.0) * u * big, SNOW_SHADE));
+                out.push(oval(pos2(x, y), vec2(1.0, 0.0), w, s.next(2.5, 4.5) * u * big, SNOW));
+                x += w * s.next(1.0, 1.6);
+            }
+        }
+        out
+    }
 }
 
 /// A block of ice standing on `at` (the middle of its foot), `u` its size, faded to `alpha`, lit
@@ -443,7 +519,7 @@ pub fn places(story: &str, page: Rect, ground: f32, u: f32) -> Vec<Place> {
         let depth = level as f32 / (DEPTHS - 1) as f32;
         let k = 1.0 - 0.5 * depth;
         let (k, step) = (k * SIZE, 115.0 * u * k * SIZE);
-        let y = ground - 66.0 * u - depth * RISE * u;
+        let y = ground - 82.0 * u - depth * RISE * u;
         let near = 70.0 * u * k;
         let mut j = 0.0;
         while near + step * (j + 1.5) <= REACH * u {
@@ -474,8 +550,7 @@ pub fn places(story: &str, page: Rect, ground: f32, u: f32) -> Vec<Place> {
 }
 
 /// The hillside behind the ice: stars coming out and the moon risen, hills far off and nearer with
-/// pines on them, the snow reaching up to them, and the frozen lake at its foot with the moon in
-/// it. All of it is laid out from `middle` (across) and `ground` (up), as far as `REACH` either
+/// pines on them, and the snow reaching up to them. All of it is laid out from `middle` (across) and `ground` (up), as far as `REACH` either
 /// side, whatever part of it shows in `area`: only the plain fills below the hills reach to
 /// `area`'s edges. So zooming, which shows more or less of it, only makes it bigger or smaller and
 /// never moves one hill against another.
@@ -491,8 +566,8 @@ fn hillside(story: &str, area: Rect, middle: f32, ground: f32, u: f32, time: f64
         out.push(Shape::circle_filled(at, s.next(0.5, 1.4) * u, glow(STAR, 0.3 + 0.5 * a)));
     }
     let mut s = Seeds::of(story, 97_000);
-    // The moon off to one side, where the page does not hide it.
-    let moon = pos2(middle + if s.next(0.0, 1.0) < 0.5 { -490.0 } else { 490.0 } * u, ground - 620.0 * u);
+    let moon = moon(story, middle, ground, u);
+    s.next(0.0, 1.0);
     out.push(radial(moon, 110.0 * u, 110.0 * u, MOON, 0.22));
     out.push(Shape::circle_filled(moon, 22.0 * u, MOON));
     for (layer, (color, y, high)) in [(HILL_FAR, horizon, 90.0), (HILL, horizon + 60.0 * u, 60.0)].into_iter().enumerate() {
@@ -547,48 +622,13 @@ fn hillside(story: &str, area: Rect, middle: f32, ground: f32, u: f32, time: f64
     mesh.add_triangle(0, 2, 3);
     out.push(Shape::mesh(mesh));
     out.push(Shape::rect_filled(Rect::from_min_max(pos2(area.left(), ground), area.max), 0.0, SNOW));
-    out.extend(lake(story, middle, ground, u, moon.x, time));
     out
 }
 
-/// The frozen lake along the foot of the desk: its ice mirroring the dusk far off and paler near,
-/// the moon's light lying on it, faint scratches in it, and snow heaped along its far shore.
-fn lake(story: &str, middle: f32, ground: f32, u: f32, moon: f32, time: f64) -> Vec<Shape> {
-    let mut out = Vec::new();
-    let bottom = ground + 30.0 * u;
-    let n = 96;
-    let mut mesh = egui::epaint::Mesh::default();
-    for i in 0..=n {
-        let x = middle + LAKE * u * (2.0 * i as f32 / n as f32 - 1.0);
-        mesh.colored_vertex(pos2(x, shore(middle, ground, u, x)), LAKE_FAR);
-        mesh.colored_vertex(pos2(x, bottom), LAKE_NEAR);
-    }
-    for i in 0..n as u32 {
-        let (a, b) = (2 * i, 2 * i + 2);
-        mesh.add_triangle(a, a + 1, b);
-        mesh.add_triangle(b, a + 1, b + 1);
-    }
-    out.push(Shape::mesh(mesh));
-    // The moon's light on the ice, shimmering a little.
-    let shine = 0.3 + 0.04 * (time as f32 * 0.8).sin();
-    out.push(radial(pos2(moon, shore(middle, ground, u, moon) + 26.0 * u), 46.0 * u, 22.0 * u, MOON, shine));
-    let mut s = Seeds::of(story, 97_500);
-    for _ in 0..40 {
-        let x = middle + s.next(-1.0, 1.0) * (LAKE - 80.0) * u;
-        let y = shore(middle, ground, u, x) + s.next(10.0, 40.0) * u;
-        let (len, tilt) = (s.next(10.0, 40.0) * u, s.next(-0.08, 0.08));
-        out.push(Shape::line_segment([pos2(x, y), pos2(x + len, y + len * tilt)], Stroke::new(0.6 * u, glow(ICE_LIT, s.next(0.15, 0.35)))));
-    }
-    // Snow heaped along the far shore, in shade underneath.
-    let mut x = middle - LAKE * u;
-    while x < middle + LAKE * u {
-        let w = s.next(14.0, 30.0) * u;
-        let y = shore(middle, ground, u, x);
-        out.push(oval(pos2(x, y + 1.6 * u), vec2(1.0, 0.0), w, s.next(2.5, 4.0) * u, SNOW_SHADE));
-        out.push(oval(pos2(x, y), vec2(1.0, 0.0), w, s.next(2.5, 4.5) * u, SNOW));
-        x += w * s.next(1.0, 1.6);
-    }
-    out
+/// The moon, off to one side of `middle`, where the page does not hide it.
+fn moon(story: &str, middle: f32, ground: f32, u: f32) -> Pos2 {
+    let mut s = Seeds::of(story, 97_000);
+    pos2(middle + if s.next(0.0, 1.0) < 0.5 { -490.0 } else { 490.0 } * u, ground - 620.0 * u)
 }
 
 /// Snow falling softly over everything, each flake drifting from side to side. It falls in the
@@ -642,7 +682,11 @@ impl App {
         let anchor = pos2(page.center().x, ground);
         let seen_area = Rect::from_min_max(anchor + (area.min - anchor) / z, anchor + (area.max - anchor) / z);
         let zoom = egui::emath::TSTransform::new(anchor.to_vec2() * (1.0 - z), z);
-        painter.extend(hillside(story, seen_area, anchor.x, ground, unzoomed, now).into_iter().map(|mut s| {
+        // The lake fits the window at the fitting zoom, so the whole of it shows; zoomed in, it
+        // comes nearer with the rest.
+        let lake = Lake::of(area, ground, unzoomed);
+        let laid = [hillside(story, seen_area, anchor.x, ground, unzoomed, now), lake.draw(story, moon(story, anchor.x, ground, unzoomed).x, now)];
+        painter.extend(laid.into_iter().flatten().map(|mut s| {
             s.transform(zoom);
             s
         }));
@@ -666,7 +710,7 @@ impl App {
             if k == n - 1 && blocks.fract() > 0.0 {
                 // The block on its way, cut out of the lake below the place, as laid out unzoomed.
                 let below = anchor.x + (place.foot.x - anchor.x) / z;
-                let from = zoom * cut_at(story, k, blocks as usize, anchor.x, ground, unzoomed, below);
+                let from = zoom * lake.cut_at(story, k, blocks as usize, below);
                 let (lake, block, at) = figure.coming(blocks as usize, blocks.fract(), from, u, now);
                 coming.0.extend(lake);
                 coming.1.extend(block);
@@ -720,7 +764,7 @@ mod tests {
     #[test]
     fn the_hillside_is_there_from_the_start_the_same_for_the_same_story() {
         let shapes = |story: &str| [hillside(story, desk(), 700.0, 880.0, 1.0, 0.0), snowfall(story, desk(), 1.0, 0.0)].concat();
-        assert!(shapes("a story").len() > 200, "stars, hills, pines, the lake and snow: {}", shapes("a story").len());
+        assert!(shapes("a story").len() > 200, "stars, hills, pines and snow: {}", shapes("a story").len());
         let at = |story: &str| shapes(story).iter().map(|s| s.visual_bounding_rect().center()).collect::<Vec<_>>();
         assert_eq!(at("a story"), at("a story"));
     }
@@ -736,28 +780,35 @@ mod tests {
 
     #[test]
     fn the_hillside_is_laid_out_the_same_whatever_part_of_it_shows() {
-        // As when zoomed out (more of it shows) or in (less of it): the hills, pines, stars, moon
-        // and lake are where they were, only the plain fills reaching further.
+        // As when zoomed out (more of it shows) or in (less of it): the hills, pines, stars and moon
+        // are where they were, only the plain fills reaching further.
         let laid = |area: Rect| hillside("a story", area, 700.0, 880.0, 1.0, 3.0).into_iter().filter(|s| !matches!(s, Shape::Rect(_) | Shape::Mesh(_))).map(|s| s.visual_bounding_rect()).collect::<Vec<_>>();
         assert_eq!(laid(desk()), laid(desk().expand2(vec2(500.0, 300.0))));
         assert_eq!(laid(desk()), laid(desk().shrink(200.0)));
     }
 
     #[test]
-    fn the_lake_lies_along_the_foot_of_the_desk_under_the_page_and_either_side() {
-        let (middle, ground) = (700.0, 880.0);
-        let ice = hillside("a story", desk(), middle, ground, 1.0, 0.0).into_iter().find_map(|s| match s {
+    fn the_whole_lake_shows_along_the_foot_of_the_window_either_side_of_the_page() {
+        let ground = 880.0;
+        let lake = Lake::of(desk(), ground, 1.0);
+        let ice = lake.draw("a story", 1190.0, 0.0);
+        let all = around(&ice);
+        let water = ice.iter().find_map(|s| match s {
             Shape::Mesh(m) if m.vertices.iter().any(|v| v.color == LAKE_FAR) => Some(m.calc_bounds()),
             _ => None,
         }).expect("the lake");
-        assert!(ice.left() < 0.0 && ice.right() > desk().right(), "either side of the page: {ice:?}");
-        assert!(ice.top() > ground - 90.0 && ice.top() < ground - 40.0 && ice.bottom() > desk().bottom(), "along the foot: {ice:?}");
-        for x in [100.0, 700.0, 1300.0] {
-            let at = cut_at("a story", 0, 3, middle, ground, 1.0, x);
-            assert!(at.y > shore(middle, ground, 1.0, at.x) + 10.0 && at.y < desk().bottom(), "cut out of the ice: {at:?}");
+        assert!(desk().contains_rect(all), "all of it in the window, shores and all: {all:?}");
+        assert!(water.left() < page().left() - 300.0 && water.right() > page().right() + 300.0, "either side of the page: {water:?}");
+        assert!(water.bottom() < ground && water.top() > ground - 80.0 && water.height() > 40.0, "along the foot, wide enough to be a lake: {water:?}");
+        for x in [lake.left, lake.right] {
+            assert!((lake.far(x) - lake.near(x)).abs() < 1.0, "its shores meet at its ends");
+        }
+        for x in [-200.0, 100.0, 700.0, 1300.0, 1600.0] {
+            let at = lake.cut_at("a story", 0, 3, x);
+            assert!(at.y > lake.far(at.x) + 5.0 && at.y < lake.near(at.x) - 5.0, "cut out of the ice: {at:?}");
         }
         let places = places("a story", page(), ground, 1.0);
-        assert!(places.iter().all(|p| p.foot.y < shore(middle, ground, 1.0, p.foot.x)), "the ice stands beyond the lake");
+        assert!(places.iter().all(|p| p.foot.y < lake.far(p.foot.x)), "the ice stands beyond the lake");
     }
 
     #[test]

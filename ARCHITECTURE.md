@@ -1319,9 +1319,12 @@ Snow (`Theme::Snow`) the frozen lake and its ice figures, the Magic Vineyard (`T
   chapter title (`Carrier::Octopus`, below).
 - **The hillside lies on the desk the same way**, in the Magic Snow only (`eggs/snow.rs`):
   `draw_snow` is called right after `draw_reef`. The hillside itself (`hillside`: stars, the moon
-  to one side, hills with pines, the snow, and the frozen lake along the foot of the desk under
-  the page and either side, `lake` and `shore`; `snowfall`, drawn in front of everything) is there
-  from the start, from `story_id`. It keeps what the reef keeps, in one `Tended` (`Eggs::ice`;
+  to one side, hills with pines, the snow; `snowfall`, drawn in front of everything) is there
+  from the start, from `story_id`. The frozen lake (`Lake`) lies along the foot of the desk under
+  the page and either side, and the whole of it shows: it is laid out from the window at the
+  fitting zoom, a little in from its edges and above the page bar, its shores meeting in a curve
+  at its ends (it first reached beyond the window and under the bar, and did not read as a lake;
+  `the_whole_lake_shows_along_the_foot_of_the_window_either_side_of_the_page`). It keeps what the reef keeps, in one `Tended` (`Eggs::ice`;
   `Tended::tend`): the story and the chapter growing, how far it has grown, the one before
   finishing, and each chapter's place, the first free one in sight when first drawn
   (`Tended::place`), kept while the story is shown and forgotten in another theme
@@ -1329,7 +1332,7 @@ Snow (`Theme::Snow`) the frozen lake and its ice figures, the Magic Vineyard (`T
   as it stands. As in the reef and the forest, the newest is the last of `Doc::garden`, not of
   `Doc::chapters`. Each chapter has a pile of ice (`Figure`), a block for each page up to
   `BLOCKS`, stacked in `ROWS` (`Figure::slot`). Each block is cut out of the lake below its place
-  (`cut_at`) over `HANG` (`Figure::coming`): a glint traces round it, it rises out of the dark
+  (`Lake::cut_at`) over `HANG` (`Figure::coming`): a glint traces round it, it rises out of the dark
   water, floats up over an arc onto its slot, and the hole freezes over. The lake's part of it is
   drawn in front of the ice, the block last, before the snow. When the next chapter begins (over
   `FORM`) the pile before shimmers and fades and its figure rises out of it from its foot (each
@@ -1345,7 +1348,8 @@ Snow (`Theme::Snow`) the frozen lake and its ice figures, the Magic Vineyard (`T
   window's edges (`hillside`: only its plain fills reach the edges of what shows, and hills of
   their own seeds beyond `REACH` when the page is pushed to one side), then
   transformed; the ice's units are zoomed, and its places are measured from the page's edges,
-  which zoom about the same point. Where a block is cut is found on the lake as laid out, then
+  which zoom about the same point. The lake is zoomed with the hillside, so zoomed in it reaches
+  beyond the window like the rest; where a block is cut is found on the lake as laid out, then
   zoomed with it. Laid out from the window alone, the hillside first stood still
   while the trees slid out with the page's edges, then, laid out from what showed, reshuffled as
   the zoom changed. The snowfall is the window's and is never zoomed; a flake's way down is a share
@@ -1503,7 +1507,7 @@ Snow (`Theme::Snow`) the frozen lake and its ice figures, the Magic Vineyard (`T
   `the_fish_swim_round_their_coral_gently`,
   `the_octopus_swims_down_from_above_sets_the_title_in_its_place_and_jets_back_up` (in `eggs/reef.rs`),
   `the_hillside_is_there_from_the_start_the_same_for_the_same_story`,
-  `the_lake_lies_along_the_foot_of_the_desk_under_the_page_and_either_side`,
+  `the_whole_lake_shows_along_the_foot_of_the_window_either_side_of_the_page`,
   `a_block_is_cut_out_of_the_lake_rises_and_floats_onto_the_pile`,
   `the_pile_stacks_a_block_a_page_in_rows_without_overlapping`,
   `a_pile_becomes_an_ice_figure_rising_from_its_foot_bigger_for_more_pages`,
@@ -2335,7 +2339,9 @@ result sent back, a stand-in answer in `api.test.mjs` and in `cloud::stand_in` (
   page each, collecting beside it, and an ice figure made of them at the end of a chapter. The
   figures are animals carved from convex parts, so the ice reveals itself by cutting each part at
   a rising level rather than by a mask, which egui has not got. The places are taken from either
-  side of the page in turn: bigger ice in a short story otherwise all fell on one side.
+  side of the page in turn: bigger ice in a short story otherwise all fell on one side. The lake
+  first reached beyond the window's edges; asked for: the whole lake in sight, so it is laid out
+  from the window rather than from the hillside's middle.
 - **2026-11-07 — The Magic Snow.** Asked for: two more magic themes, creative, quirky and
   imaginative. A Magic Cosmos (a planet a chapter, a moon a page, a flying saucer) and a Magic Hive
   (a comb a chapter, a cell of honey a page, bees) were made first and not liked; of six proposals
