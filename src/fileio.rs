@@ -690,6 +690,7 @@ impl App {
         if let Some(st) = doc.flow.styles.first() {
             self.typing = st.clone();
         }
+        let drawings = self.backdrop.take_drawings(&self.doc.scenes);
         self.doc = doc;
         self.textures.clear();
         self.ensure_textures(ctx);
@@ -699,6 +700,7 @@ impl App {
         self.set_caret(ctx, 0, false);
         self.fit = true;
         self.open_scene(scene);
+        self.backdrop.give_drawings(&self.doc.scenes, drawings);
     }
 }
 

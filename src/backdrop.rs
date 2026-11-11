@@ -111,6 +111,16 @@ impl Drop for Reading {
     }
 }
 
+/// Drawings rendered, full size and small, by a fingerprint of what they draw.
+pub struct Drawings(HashMap<u64, (Option<Drawn>, Option<TextureHandle>)>);
+
+fn drawing_hash(svg: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    svg.hash(&mut h);
+    h.finish()
+}
+
 /// A drawing rendered on a background thread, full size or small for the list.
 struct Rendered {
     key: DrawingKey,
@@ -411,6 +421,38 @@ impl Backdrop {
     #[cfg(test)]
     pub fn reading(&self) -> Option<&str> {
         self.reading.as_ref().map(|r| r.prompt.as_str())
+    }
+
+    /// The drawings of `scenes` already rendered, by what they draw, taken out to give to the
+    /// story shown next (`give_drawings`).
+    pub fn take_drawings(&mut self, scenes: &[Scene]) -> Drawings {
+        let mut out = HashMap::new();
+        for s in scenes {
+            for (i, svg) in s.versions.iter().enumerate() {
+                let (full, thumb) = (self.textures.remove(&(s.id, i)), self.thumbs.remove(&(s.id, i)));
+                if full.is_some() || thumb.is_some() {
+                    out.insert(drawing_hash(svg), (full, thumb));
+                }
+            }
+        }
+        Drawings(out)
+    }
+
+    /// The story shown again (as it is online, R33) keeps what was rendered of the drawings it
+    /// still has, whatever their scene's id now: rendering a drawing takes seconds on a phone, and
+    /// the page stood blank meanwhile.
+    pub fn give_drawings(&mut self, scenes: &[Scene], mut drawings: Drawings) {
+        for s in scenes {
+            for (i, svg) in s.versions.iter().enumerate() {
+                let Some((full, thumb)) = drawings.0.remove(&drawing_hash(svg)) else { continue };
+                if let Some(full) = full {
+                    self.textures.insert((s.id, i), full);
+                }
+                if let Some(thumb) = thumb {
+                    self.thumbs.insert((s.id, i), thumb);
+                }
+            }
+        }
     }
 
     /// Render the drawing `svg` of `key` on a background thread, unless it is or has been already.

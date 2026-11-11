@@ -7909,6 +7909,33 @@ mod tests {
     }
 
     #[test]
+    fn a_story_shown_again_from_online_keeps_its_scene_on_screen() {
+        let mut h = Harness::new();
+        h.app.claude = false;
+        let dir = with_shelf(&mut h, "online-scene-again");
+        let server = online(&mut h, &dir, true);
+        h.app.keep.autosave = true;
+        h.frames(12, vec![], Modifiers::NONE);
+        h.type_text("The lighthouse stood alone.");
+        describe_scene(&mut h, "A lighthouse at dusk");
+        h.later(cloud::UP_AFTER + 1.0);
+        let shown = h.scene_shown().expect("the scene behind the page");
+
+        changed_elsewhere(&server, "The lighthouse stood alone.", "The lighthouse stood alone, and waited.");
+        h.app.cloud.clock = h.app.cloud.clock.map(|t| t + cloud::LOOK_EVERY + 1.0);
+        for _ in 0..30 {
+            h.frames(1, vec![], Modifiers::NONE);
+            if h.text().contains("waited") {
+                break;
+            }
+        }
+        assert_eq!(h.text(), "The lighthouse stood alone, and waited.", "shown as it is online");
+        // Not rendered again (seconds on a phone, the page blank meanwhile): there in the same frame.
+        assert_eq!(h.app.shown_scene(), Some(shown), "the scene stays behind the page");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn a_scene_painted_while_the_page_went_comes_back_when_the_story_opens_again() {
         let mut h = Harness::new();
         h.app.claude = false;

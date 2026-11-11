@@ -1842,7 +1842,12 @@ In the app (`cloud.rs`) **the shelf is where a story is; online is a copy, and n
   Test: `a_story_saved_online_whose_answer_was_lost_is_not_kept_twice`.
 - **The open story is never written over** while it has changes not saved: the copy from online
   goes beside it. Without such changes it is written and shown again (`Cloud::reload`), the caret
-  kept, its page shown with `go_to_page` (R5).
+  kept, its page shown with `go_to_page` (R5). **Its scenes stay on screen**: `adopt` takes the
+  drawings already rendered (`Backdrop::take_drawings`, by a fingerprint of the SVG, not the
+  scene's id) and gives them to the story shown next (`give_drawings`). Rendered again, a scene
+  took seconds on a phone, with the page blank behind the text meanwhile. Something new kept
+  rendered per scene (in `Backdrop`) goes through them too
+  (`a_story_shown_again_from_online_keeps_its_scene_on_screen`).
 - **A story online is named by its id and its file's name together** (`cloud::key`): "Save as"
   keeps the id, so two stories on a shelf may share one. The record keeps the path, so a story
   brought down under another name (`free_name`) keeps its name online.
