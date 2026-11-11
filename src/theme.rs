@@ -136,7 +136,7 @@ impl Theme {
             Theme::Sea => "Salt air, and a story that sets sail",
             Theme::Forest => "Moss, moonlight, and a path that goes on",
             Theme::Reef => "Warm water, sunlight, and something that grows",
-            Theme::Snow => "Hush, falling flakes, and a warm light",
+            Theme::Snow => "Hush, falling flakes, and moonlit ice",
             Theme::Vineyard => "Turning leaves, ripe grapes, and the year's last light",
         }
     }
@@ -352,7 +352,7 @@ impl Theme {
                 thumb: rgb(86, 176, 190),
                 light: true,
             },
-            // A twilight sky over snow; the hills, the snowmen and the snowfall are drawn on it
+            // A twilight sky over snow; the hills, the frozen lake, the ice and the snowfall are drawn on it
             // (`eggs::snow`).
             Theme::Snow => Palette {
                 desk: rgb(122, 128, 178),

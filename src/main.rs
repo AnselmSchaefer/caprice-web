@@ -7065,32 +7065,41 @@ mod tests {
     const SENTENCE: &str = "It was nearly midnight and the Prime Minister sat alone in his office. ";
 
     #[test]
-    fn in_the_magic_snow_each_page_hangs_an_ornament_on_the_chapter_s_tree() {
+    fn in_the_magic_snow_each_page_cuts_a_block_out_of_the_lake_onto_the_chapter_s_pile() {
         let mut h = Harness::new();
         in_the_theme(&mut h, theme::Theme::Snow, 0.0);
         let seen = |h: &Harness| h.app.eggs.snow.clone().expect("the hillside is there");
-        assert_eq!(seen(&h).trees.iter().map(|t| t.1).collect::<Vec<_>>(), [1], "an ornament for the first page");
+        assert_eq!(seen(&h).figures.iter().map(|f| f.1).collect::<Vec<_>>(), [1], "a block for the first page");
         h.type_text(&SENTENCE.repeat(220));
         let pages = h.app.doc.pages();
         assert!(pages >= 4, "pages: {pages}");
         h.frames(20, vec![], Modifiers::NONE);
-        assert!(seen(&h).trees[0].1 < pages, "hung in sight");
+        let hill = seen(&h);
+        assert!(hill.figures[0].1 < pages, "cut in sight");
+        let foot = hill.figures[0].0.bottom();
+        let mut lowest = f32::MIN;
+        for _ in 0..(eggs::snow::HANG * 60.0) as usize {
+            h.frames(1, vec![], Modifiers::NONE);
+            lowest = lowest.max(seen(&h).coming.map_or(f32::MIN, |p| p.y));
+        }
+        assert!(lowest > foot + 15.0, "out of the lake at the foot of the desk, below the pile: {lowest} {foot}");
         h.frames((eggs::snow::HANG * 60.0) as usize * pages, vec![], Modifiers::NONE);
-        let tree = seen(&h).trees[0];
-        assert_eq!(tree.1, pages, "an ornament a page");
-        assert!(beside_the_page(&h, tree.0) && tree.2 == 0.0 && tree.3 == 1.0 && seen(&h).lit == 0, "standing beside the page, dark while its chapter is written: {tree:?}");
-        let fir = |h: &Harness| h.painted.iter().any(|cs| matches!(&cs.shape, egui::Shape::Mesh(m) if m.vertices.iter().any(|v| v.color.g() as i32 > v.color.r() as i32 + 20)));
-        assert!(fir(&h) && seen(&h).penguins.is_empty(), "a fir tree, no penguins about");
+        let hill = seen(&h);
+        let pile = hill.figures[0];
+        assert_eq!(pile.1, pages, "a block a page");
+        assert!(beside_the_page(&h, pile.0) && pile.2 == 0.0 && hill.formed == 0 && hill.coming.is_none(), "a pile beside the page while its chapter is written: {pile:?}");
+        let ice = |h: &Harness| h.painted.iter().any(|cs| matches!(&cs.shape, egui::Shape::Mesh(m) if m.vertices.len() == 4 && m.vertices.iter().any(|v| v.color.b() as i32 > v.color.r() as i32 + 30)));
+        assert!(ice(&h), "blocks of ice");
 
-        // Taking the pages away takes no ornament off.
+        // Taking the pages away takes no block off.
         h.key(Key::A, Modifiers::COMMAND);
         h.key(Key::Backspace, Modifiers::NONE);
         h.frames(60, vec![], Modifiers::NONE);
-        assert_eq!(seen(&h).trees[0].1, pages);
+        assert_eq!(seen(&h).figures[0].1, pages);
     }
 
     #[test]
-    fn in_the_magic_snow_penguins_bring_a_tree_for_each_new_chapter_and_the_one_before_is_lit() {
+    fn in_the_magic_snow_a_chapter_s_pile_becomes_an_ice_figure_when_the_next_begins() {
         let mut h = Harness::new();
         in_the_theme(&mut h, theme::Theme::Snow, 1.0);
         let seen = |h: &Harness| h.app.eggs.snow.clone().unwrap();
@@ -7098,28 +7107,27 @@ mod tests {
         assert!(h.app.eggs.lift.is_none(), "nothing brings the title");
         h.key(Key::Enter, Modifiers::NONE);
         h.type_text(&SENTENCE.repeat(100));
-        h.frames(240, vec![], Modifiers::NONE);
-        let first = seen(&h).trees[0];
-        for (n, trees) in [("Two", 2), ("Three", 3)] {
+        h.frames(400, vec![], Modifiers::NONE);
+        let first = seen(&h).figures[0];
+        for (n, chapters) in [("Two", 2), ("Three", 3)] {
             h.key(Key::Enter, Modifiers::NONE);
             h.type_text(&format!("Chapter {n}"));
             h.click_widget("Chapter");
             assert!(h.app.eggs.lift.is_none(), "Chapter {n}: nothing brings the title");
-            h.frames((eggs::snow::ARRIVE * 60.0 * 0.25) as usize, vec![], Modifiers::NONE);
+            let pile = seen(&h).figures[chapters - 2];
+            h.frames((eggs::snow::FORM * 60.0 * 0.2) as usize, vec![], Modifiers::NONE);
             let hill = seen(&h);
-            assert!(hill.trees.len() == trees && hill.trees[trees - 1].3 == 0.0, "Chapter {n}: a new tree, lying as it is dragged in");
-            assert!(hill.penguins.len() == 3 && hill.pulling, "Chapter {n}: three penguins pulling it on ropes");
-            assert!(hill.trees[trees - 2].2 == 0.0, "Chapter {n}: the one before not lit yet");
-            h.frames((eggs::snow::ARRIVE * 60.0 * 0.4) as usize, vec![], Modifiers::NONE);
+            assert!(hill.figures.len() == chapters && hill.forming, "Chapter {n}: the pile before forming");
+            assert!(hill.figures[chapters - 2].2 > 0.0 && hill.figures[chapters - 2].2 < 0.5, "Chapter {n}: still a pile: {:?}", hill.figures);
+            h.frames((eggs::snow::FORM * 60.0 * 0.8) as usize + 10, vec![], Modifiers::NONE);
             let hill = seen(&h);
-            assert!(hill.trees[trees - 1].3 == 1.0 && hill.trees[trees - 2].2 > 0.0, "Chapter {n}: raised, and the one before lighting");
-            h.frames((eggs::snow::ARRIVE * 60.0 * 0.4) as usize + 10, vec![], Modifiers::NONE);
-            let hill = seen(&h);
-            assert!(hill.penguins.is_empty() && !hill.pulling, "Chapter {n}: the penguins gone");
-            assert_eq!(hill.lit, trees - 1, "Chapter {n}: every tree before lit");
-            assert!(hill.trees[trees - 1].2 == 0.0 && hill.trees[trees - 1].3 == 1.0, "Chapter {n}: the new one standing dark: {:?}", hill.trees);
+            let carved = hill.figures[chapters - 2];
+            assert!(!hill.forming && carved.2 == 1.0 && hill.formed == chapters - 1, "Chapter {n}: every chapter before carved: {:?}", hill.figures);
+            assert!(carved.0.height() > pile.0.height() && (carved.0.bottom() - pile.0.bottom()).abs() < 2.0, "Chapter {n}: a figure taller than its pile, in its place: {:?} {:?}", carved.0, pile.0);
+            assert!(hill.figures[chapters - 1].2 == 0.0, "Chapter {n}: the new chapter's pile begun");
+            assert!(hill.which.windows(2).all(|w| w[0] != w[1]) || chapters < 2, "{:?}", hill.which);
         }
-        assert_eq!(seen(&h).trees[0].1, first.1, "the first as it was hung");
+        assert_eq!(seen(&h).figures[0].1, first.1, "the first as it was cut");
 
         // Picked again, the theme shows it as it stands at once.
         let ctx = h.ctx.clone();
@@ -7128,28 +7136,28 @@ mod tests {
         h.app.themes.choose(&ctx, theme::Theme::Snow);
         h.frames(2, vec![], Modifiers::NONE);
         let hill = seen(&h);
-        assert!(hill.trees.len() == 3 && hill.lit == 2 && hill.penguins.is_empty() && hill.trees[0].1 == first.1);
+        assert!(hill.figures.len() == 3 && hill.formed == 2 && !hill.forming && hill.coming.is_none() && hill.figures[0].1 == first.1);
     }
 
     #[test]
-    fn a_long_story_s_trees_are_spread_beside_the_page_and_a_narrower_window_moves_none() {
+    fn a_long_story_s_figures_are_spread_beside_the_page_and_a_narrower_window_moves_none() {
         let mut h = Harness::new();
         // Twenty chapters, nineteen of them done.
         h.app.doc.garden = vec![6; 20];
         in_the_theme(&mut h, theme::Theme::Snow, 0.0);
-        let trees = |h: &Harness| h.app.eggs.snow.clone().unwrap().trees;
-        let all = trees(&h);
+        let figures = |h: &Harness| h.app.eggs.snow.clone().unwrap().figures;
+        let all = figures(&h);
         let desk = h.app.eggs.desk;
         assert_eq!(all.len(), 20);
-        assert!(all.iter().all(|t| beside_the_page(&h, t.0) && desk.contains_rect(t.0)), "on the desk beside the page: {all:?}");
-        let mut heights: Vec<i32> = all.iter().map(|t| (t.0.height() / 10.0).round() as i32).collect();
+        assert!(all.iter().all(|f| beside_the_page(&h, f.0) && desk.contains_rect(f.0)), "on the desk beside the page: {all:?}");
+        let mut heights: Vec<i32> = all.iter().map(|f| (f.0.bottom() / 10.0).round() as i32).collect();
         heights.sort();
         heights.dedup();
         assert!(heights.len() >= 3, "near and far, not in a row: {heights:?}");
         // A narrower window leaves each where it is beside the page.
         let beside = |h: &Harness| {
             let page = h.app.last_page_rect;
-            trees(h).iter().map(|t| t.0.center() - egui::pos2(if t.0.center().x < page.center().x { page.left() } else { page.right() }, page.bottom())).collect::<Vec<_>>()
+            figures(h).iter().map(|f| f.0.center_bottom() - egui::pos2(if f.0.center().x < page.center().x { page.left() } else { page.right() }, page.bottom())).collect::<Vec<_>>()
         };
         let was = beside(&h);
         h.width = 900.0;
@@ -7181,7 +7189,7 @@ mod tests {
     }
 
     #[test]
-    fn zooming_in_on_the_magic_snow_brings_the_whole_hillside_nearer_not_the_trees_alone() {
+    fn zooming_in_on_the_magic_snow_brings_the_whole_hillside_nearer_not_the_ice_alone() {
         let mut h = Harness::new();
         h.app.doc.garden = vec![6; 6];
         in_the_theme(&mut h, theme::Theme::Snow, 0.0);
@@ -7189,7 +7197,7 @@ mod tests {
             egui::Shape::Circle(c) if c.fill == eggs::snow::MOON => Some(c.radius),
             _ => None,
         }).expect("the moon");
-        let trees = |h: &Harness| h.app.eggs.snow.clone().unwrap().trees.iter().map(|t| t.0).collect::<Vec<_>>();
+        let trees = |h: &Harness| h.app.eggs.snow.clone().unwrap().figures.iter().map(|f| f.0).collect::<Vec<_>>();
         let foot = |h: &Harness| {
             let page = h.app.last_page_rect;
             let ground = trees(h)[0].bottom();
@@ -7203,7 +7211,7 @@ mod tests {
         let z = moon(&h) / was_moon;
         assert!(z > 1.2, "the hillside nearer: {z}");
         for (a, b) in was_trees.iter().zip(trees(&h)) {
-            assert!((b.height() / a.height() - z).abs() < 0.02, "each tree as much bigger as the hillside: {} {z}", b.height() / a.height());
+            assert!((b.height() / a.height() - z).abs() < 0.02, "each figure as much bigger as the hillside: {} {z}", b.height() / a.height());
             let (from, to) = (a.center() - was_foot, b.center() - foot(&h));
             assert!((to - from * z).length() < 3.0, "and as much further from the foot of the page: {from:?} {to:?} {z}");
         }
