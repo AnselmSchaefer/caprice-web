@@ -85,14 +85,27 @@ jobs:
       - name: Deploy
         working-directory: web
         run: npx wrangler deploy --message "${GITHUB_SHA::7} (CI run $CI_RUN)"
-      - name: Wait until the live page names this build
+      # Not only the page: worker.js and the snippets keep their names across builds, and the same
+      # snippet can come under another number in a new build. Checked while the old version was
+      # still answering some requests, the new page got an old snippet that failed its integrity,
+      # and the deploy rolled back. So every one of them must be served as built, three times running.
+      - name: Wait until the live site serves this build
         run: |
           wasm=$(basename web/dist/*_bg.wasm)
-          for i in $(seq 1 30); do
-            if curl -fsS "$LIVE_URL" | grep -q "$wasm"; then echo "live: $wasm"; exit 0; fi
+          files=(worker.js $(cd web/dist && ls snippets/*/*.js))
+          live() {
+            curl -fsS "$LIVE_URL" | grep -q "$wasm" || return 1
+            for f in "${files[@]}"; do
+              curl -fsS -H "Cache-Control: no-cache" "${LIVE_URL%/}/$f" | cmp -s - "web/dist/$f" || return 1
+            done
+          }
+          running=0
+          for i in $(seq 1 60); do
+            if live; then running=$((running + 1)); else running=0; fi
+            if [ "$running" -ge 3 ]; then echo "live: $wasm, worker.js and ${#files[@]} files"; exit 0; fi
             sleep 5
           done
-          echo "::error::the live page does not name $wasm after 150 s"
+          echo "::error::the live site does not serve this build after 300 s"
           exit 1
       - name: Smoke test against the live site
         run: |
