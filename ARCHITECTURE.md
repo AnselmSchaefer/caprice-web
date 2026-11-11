@@ -357,6 +357,7 @@ a `TOC` field (Caprice's page numbers are only its cached result, and Word updat
 |---|---|---|
 | Zoomed line heights rounded to pixels | Rescale rows to page-size height × zoom, per line | `layout.rs::true_to_scale` |
 | Text background fills the whole line height | Trim background quads to the font height | `layout.rs::tight_highlights` |
+| The caret fills the whole line height, reaching far below the letters with line spacing above 1 | Divide its height by the spacing (the letters sit at the row's top): `with_airy_lines_the_caret_is_as_tall_as_the_letters_beside_it` | `layout.rs::caret_rect` |
 | No text flowing around a box | Drop cap paragraph as three pieces; text boxes lie in front of the text | `dropcap.rs`, `textbox.rs` |
 | Only convex shapes are filled | Fleurons and circles built of convex pieces (`leaf`, `circle`); the emblem's tile a fan of triangles, its pencil quads | `bands.rs`, `emblem.rs` |
 | A field's galley is shown from its left, whatever its alignment | Box text laid out left, rows moved within the width (`box_galley`) | `textbox.rs` |

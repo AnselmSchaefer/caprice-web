@@ -664,6 +664,11 @@ impl PageLayout {
             // The cap's line reaches high above the letter: keep the caret beside it.
             return Rect::from_x_y_ranges(r.x_range(), p.y..=p.y + p.height);
         }
+        // With line spacing above 1 the letters sit at the top of a taller row, as for highlights
+        // (`tight_highlights`): the caret is as tall as the letters, not the row.
+        if p.attrs.spacing > 1.0 {
+            return Rect::from_min_size(r.min, vec2(r.width(), r.height() / p.attrs.spacing));
+        }
         r
     }
 

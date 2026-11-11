@@ -5521,6 +5521,26 @@ mod tests {
     }
 
     #[test]
+    fn with_airy_lines_the_caret_is_as_tall_as_the_letters_beside_it() {
+        // Like a journal's lines, in the usual font: the kinds' fonts are shared by tests running alongside (`fonts::LOADED`).
+        let mut h = Harness::new();
+        h.frames(3, vec![], Modifiers::NONE);
+        let ctx = h.ctx.clone();
+        h.app.set_para(&ctx, |p| p.spacing = 1.35);
+        h.type_text("What os.");
+        let layout = h.app.doc.layout_page(&ctx, 0, 1.0, &[]);
+        let caret = layout.caret_rect(h.app.caret, h.app.prefer_next);
+        // The airy lines leave room below the letters; the caret stays beside them.
+        let p = layout.paras.last().unwrap();
+        let (row, dot) = (&p.galley.rows[0], p.galley.rows[0].glyphs.last().unwrap());
+        let top = p.y + row.pos.y + dot.pos.y - dot.font_ascent;
+        let letters = top..=top + dot.font_height;
+        assert!(dot.line_height > dot.font_height + 3.0, "the line is airy");
+        assert!((caret.top() - letters.start()).abs() < 1.0, "the caret begins at the letters' top: {caret:?} {letters:?}");
+        assert!((caret.bottom() - letters.end()).abs() < 1.0, "and ends at their foot: {caret:?} {letters:?}");
+    }
+
+    #[test]
     fn escape_on_the_welcome_page_begins_a_blank_story() {
         let dir = test_dir("start-escape");
         let mut h = started_without_a_file(&dir);
