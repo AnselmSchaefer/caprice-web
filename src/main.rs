@@ -1,3 +1,4 @@
+mod again;
 mod backdrop;
 mod bands;
 mod book;
@@ -118,6 +119,8 @@ fn main() {
                 Box::new(|cc| {
                     let mut app = start_app(cc);
                     app.start.open = true;
+                    // Loaded again for a drawing lost (`again.rs`): back to the story, not the welcome.
+                    app.again.look();
                     platform::frame_on_visibility_change(&cc.egui_ctx);
                     platform::frame_on_back(&cc.egui_ctx);
                     platform::note_what_presses();
@@ -230,6 +233,8 @@ pub struct App {
     /// Textures of the document's pictures, by picture id.
     pub textures: HashMap<u32, egui::TextureHandle>,
     pub startup_file: Option<PathBuf>,
+    /// Where the writer was, kept over loading the page again (`again.rs`).
+    pub again: again::Again,
     /// The status message being shown (taken from `status`), when it appeared, and the window title last set.
     pub shown_status: String,
     /// Right-click menu of a picture (where it was opened), a picture being dragged, a resize in progress.
@@ -370,6 +375,7 @@ impl App {
             screen: egui::Vec2::ZERO,
             textures: HashMap::new(),
             startup_file: None,
+            again: again::Again::new(),
             shown_status: String::new(),
             pic_menu: None,
             pic_menu_fresh: false,
@@ -627,6 +633,7 @@ impl App {
         platform::warn_on_leaving(self.keep.has_changes());
         self.tend_cloud();
         self.live_hidden();
+        self.start_again_if_lost();
     }
 
     /// One frame of the whole app (separate from `eframe::App::ui` so tests can drive it).
@@ -645,6 +652,7 @@ impl App {
         if let Some(path) = self.startup_file.take() {
             self.open_path(&ctx, path);
         }
+        self.come_back(&ctx);
         self.poll_dialog(&ctx);
         self.cloud_frame(&ctx);
         self.live_frame(&ctx);
@@ -905,6 +913,7 @@ mod tests {
             app.words.progress = Default::default();
             app.themes = theme::Themes::kept_in(None);
             app.bar = ui::BarPlace::kept_in(None);
+            app.again = again::Again::kept_in(None);
             Self { ctx, app, time: 0.0, mods: Modifiers::NONE, access: None, painted: Vec::new(), width: 1240.0, height: 900.0, ime: Vec::new() }
         }
 
@@ -2302,6 +2311,25 @@ mod tests {
         let now = h.app.last_page_rect;
         assert!(now.top() < was.top() - 100.0 && (now.left() - was.left()).abs() < 1.0, "{was:?} → {now:?}");
         assert_eq!(h.app.target, 0);
+    }
+
+    #[test]
+    fn on_a_phone_a_fitted_page_shorter_than_the_screen_moves_with_the_finger_and_stays() {
+        let mut h = three_pages_on_a_phone();
+        h.height = 900.0;
+        h.frames(30, vec![], Modifiers::NONE);
+        let was = h.app.last_page_rect;
+        assert!(h.app.fit && was.height() < 700.0, "fitted, and all of it in sight: {was:?}");
+        swipe(&mut h, was.center(), egui::vec2(3.0, 120.0));
+        h.frames(60, vec![], Modifiers::NONE);
+        let now = h.app.last_page_rect;
+        assert!(now.top() > was.top() + 100.0, "it stays where the finger took it: {was:?} → {now:?}");
+        assert!((now.width() - was.width()).abs() < 0.5 && !h.app.fit, "no longer fitted, at the same size");
+        assert_eq!(h.app.target, 0);
+        // Fit puts it back.
+        h.key(Key::Num0, Modifiers::COMMAND);
+        h.frames(90, vec![], Modifiers::NONE);
+        assert!(h.app.fit && (h.app.last_page_rect.top() - was.top()).abs() < 1.0);
     }
 
     /// Two fingers from `a` and `b` to `a2` and `b2`, as eframe tells it in a browser (seen there): the
@@ -7592,6 +7620,68 @@ mod tests {
     }
 
     #[test]
+    fn a_page_that_lost_its_drawing_loads_again_back_at_the_story_and_the_caret() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "lost-drawing");
+        h.app.keep.autosave = true;
+        h.app.again = again::Again::kept_in(Some(dir.join("again.json")));
+        h.frames(3, vec![], Modifiers::NONE);
+        h.type_text("Kept on the shelf.");
+        h.key(Key::S, Modifiers::COMMAND);
+        h.key(Key::Enter, Modifiers::NONE);
+        let path = dir.join("Kept on the shelf.caprice");
+        h.type_text(" Written since.");
+        for _ in 0.." since.".len() {
+            h.key(Key::ArrowLeft, Modifiers::SHIFT);
+        }
+        let (caret, anchor) = (h.app.caret, h.app.anchor);
+
+        platform::lose_drawing(true);
+        h.frames(2, vec![], Modifiers::NONE);
+        platform::lose_drawing(false);
+        assert!(std::fs::read_to_string(&path).unwrap().contains("Written since."), "saved before loading again");
+
+        // The page loaded again: a new app, which begins at the welcome in the browser.
+        let mut back = Harness::new();
+        back.app.shelf.dir = Some(dir.clone());
+        back.app.keep.autosave = true;
+        back.app.again = again::Again::kept_in(Some(dir.join("again.json")));
+        back.app.start.open = true;
+        back.app.again.look();
+        back.frames(3, vec![], Modifiers::NONE);
+        assert!(!back.app.start.open, "the story, not the welcome");
+        assert_eq!(back.app.doc.visible_text(), "Kept on the shelf. Written since.");
+        assert_eq!((back.app.caret, back.app.anchor), (caret, anchor), "the selection as it was");
+        assert_eq!(back.app.path.as_deref(), Some(path.as_path()));
+        assert_eq!(back.app.story_id, h.app.story_id);
+        assert_eq!(back.app.live.device, h.app.live.device, "the same device in the story's room, which keeps its pen");
+        assert!(!back.app.unsaved() && back.app.changed_since_saved(), "saved, and still changed since saving by hand");
+        assert!(!dir.join("again.json").exists(), "only once: opened later, Caprice welcomes");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_story_never_saved_comes_back_unsaved_when_the_page_loads_again() {
+        let mut h = Harness::new();
+        let dir = test_dir("lost-drawing-unsaved");
+        h.app.again = again::Again::kept_in(Some(dir.join("again.json")));
+        h.frames(3, vec![], Modifiers::NONE);
+        h.type_text("Not saved anywhere.");
+        platform::lose_drawing(true);
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(platform::reloaded(), "loaded again");
+        platform::lose_drawing(false);
+
+        let mut back = Harness::new();
+        back.app.again = again::Again::kept_in(Some(dir.join("again.json")));
+        back.app.again.look();
+        back.frames(3, vec![], Modifiers::NONE);
+        assert_eq!(back.app.doc.visible_text(), "Not saved anywhere.");
+        assert!(back.app.path.is_none() && back.app.unsaved(), "still to be saved");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn a_story_just_saved_has_no_changes_to_lose() {
         let mut h = Harness::new();
         let dir = with_shelf(&mut h, "no-changes");
@@ -7737,6 +7827,7 @@ mod tests {
         server.0.borrow_mut().signed_in = Some(("Ada".into(), "ada".into()));
         let mut back = Harness::new();
         back.app.shelf.dir = Some(dir.clone());
+        back.app.keep.autosave = true;
         back.app.cloud = cloud::Cloud::with(Some(server.clone()), Some(dir.join("cloud.json")));
         back.app.cloud.clock = Some(2000.0);
         back.frames(12, vec![], Modifiers::NONE);
@@ -7840,6 +7931,7 @@ mod tests {
         let mut back = Harness::new();
         back.app.claude = false;
         back.app.shelf.dir = Some(dir.clone());
+        back.app.keep.autosave = true;
         back.app.keep.autosave = true;
         back.app.cloud = cloud::Cloud::with(Some(server.clone()), Some(dir.join("cloud.json")));
         back.app.cloud.clock = Some(2000.0);
@@ -8322,6 +8414,36 @@ mod tests {
     }
 
     #[test]
+    fn a_story_saved_online_whose_answer_was_lost_is_not_kept_twice() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "online-lost-answer");
+        let server = online(&mut h, &dir, true);
+        h.frames(12, vec![], Modifiers::NONE);
+        h.type_text("First words.");
+        h.save_on_shelf();
+        h.later(cloud::UP_AFTER + 1.0);
+        // Saved and going up as the phone puts the page away: the server has it, the page never hears.
+        h.type_text(" Written on the phone.");
+        h.key(Key::S, Modifiers::COMMAND);
+        server.0.borrow_mut().lose_saves = true;
+        h.later(cloud::UP_AFTER + 1.0);
+        server.0.borrow_mut().lose_saves = false;
+        assert!(stories_online(&server)[0].1.contains("Written on the phone."), "it went up");
+        // Back on the page, written on before it looks again.
+        h.type_text(" And on.");
+        h.key(Key::S, Modifiers::COMMAND);
+        h.later(cloud::LOOK_EVERY + 1.0);
+        h.later(cloud::UP_AFTER + 1.0);
+        h.later(cloud::LOOK_EVERY + 1.0);
+        let stories = std::fs::read_dir(&dir).unwrap().filter(|e| e.as_ref().unwrap().path().extension().is_some_and(|x| x == "caprice")).count();
+        assert_eq!(stories, 1, "its own words are no other browser's");
+        assert_eq!(stories_online(&server).len(), 1);
+        assert!(stories_online(&server)[0].1.contains("And on."), "what was written since goes up over them");
+        assert_eq!(h.app.cloud.mark(&dir.join("First words.caprice")).map(|m| m.0), Some(cloud::Mark::Online));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn words_typed_and_not_yet_saved_are_never_written_over_by_a_story_from_online() {
         let mut h = Harness::new();
         let dir = with_shelf(&mut h, "online-unsaved");
@@ -8352,6 +8474,7 @@ mod tests {
         server.0.borrow_mut().offline = true;
         let mut back = started_without_a_file(&dir);
         back.app.shelf.dir = Some(dir.clone());
+        back.app.keep.autosave = true;
         back.app.cloud = cloud::Cloud::with(Some(server.clone()), Some(dir.join("cloud.json")));
         back.app.cloud.clock = Some(2000.0);
         back.frames(12, vec![], Modifiers::NONE);
@@ -8413,6 +8536,7 @@ mod tests {
 
         let mut back = started_without_a_file(&dir);
         back.app.shelf.dir = Some(dir.clone());
+        back.app.keep.autosave = true;
         back.app.cloud = cloud::Cloud::with(Some(server.clone()), Some(dir.join("cloud.json")));
         back.app.cloud.clock = Some(2000.0);
         back.app.start.stories = None;

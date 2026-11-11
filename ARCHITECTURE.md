@@ -82,6 +82,7 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `export.rs` | Hand-written Office Open XML for `.docx` |
 | `emblem.rs` | The emblem beside the name on the welcome page: the app icon's tile and page, a pencil drawing its loop over and over |
 | `leave.rs` | The question before leaving a story with changes (save or not; keep or drop): its first page, what is at stake, that a version is kept; the name suggested for a story never saved |
+| `again.rs` | In the browser: a page that lost its drawing (the GPU, taken by a phone in the background) loads again, back at the story, caret and device it had (R31) |
 | `versions.rs` | Autosaving a story with a file; versions of every story kept in the data folder; the Versions window |
 | `print.rs` | The Print window; pages drawn into a PDF (krilla) from `PageLayout::ink`; printers and jobs through CUPS (`Spooler`) |
 | `claude.rs` | Pen loop or cursor selection → passage → `claude -p` → streamed answer panel, a conversation; story notes |
@@ -1648,6 +1649,22 @@ The native tests cover the desktop half.
   eframe failing to start (`main`), takes its place in words, and after 20 s with nothing said it
   names what it may be (a slow connection, or a browser without shared memory: another app's own
   browser). A phone has no console to look in, and "opening" stayed for good.
+- **A page that lost its drawing loads again, back where it was** (`again.rs`). A phone's browser
+  takes the GPU from a page in the background (Chrome on Android: its WebGL context or WebGPU
+  device is lost), and eframe cannot make a new one: back in the browser, the page stayed blank.
+  The page notes the loss (`platform::drawing_lost`: `webglcontextlost`, or the device's `lost`,
+  watched by wrapping `GPUAdapter.requestDevice` before eframe asks). Once it is shown again
+  (`App::logic`), the app saves and keeps a version as on leaving, writes where the writer is
+  (`again::Place`: the whole story, saved or not, its path and what it knew of its saving, the
+  caret and selection, its device id in the story's room) to `again.json`, and loads the page
+  again (`platform::reload`, without the leaving question, once IndexedDB holds every write). The
+  new page reads that file once, takes it away, and opens the story without the welcome
+  (`App::come_back`). Undo starts afresh. **The device id goes with it**: a new one would find
+  the room keeping the pen for the old one (`LIVE_FREE_AFTER_MS`, R34) and lock the writer out
+  of their own story. Something new that the writer would miss after a reload (a story's state
+  kept only in `App`) goes into `Place`. Tests:
+  `a_page_that_lost_its_drawing_loads_again_back_at_the_story_and_the_caret`,
+  `a_story_never_saved_comes_back_unsaved_when_the_page_loads_again`.
 
 ### R32 — On a phone the page fills the width, scrolls, and keeps the caret in sight
 
@@ -1672,7 +1689,12 @@ whole page, centred, as always.
   editable). What it was drawn for (caret, `Doc::version`, view height) is compared, never its
   rectangle: that wobbles by a rounding as the page moves, and a page moved by hand snapped back.
 - **Two fingers on a touch screen pan as they pinch** (`multi_touch().translation_delta`, only over
-  the pages as in R16); fitted on a phone, only up and down. egui starts such a gesture only with a
+  the pages as in R16); fitted on a phone, a page taller than the view only up and down, staying
+  fitted. **A fitted page with no room to scroll goes with the fingers and is no longer fitted**
+  (as Ctrl+drag): all of it in sight (a phone with the keyboard put away), the fit put it back in
+  the middle each frame, and it zipped back from under the finger. Not in a frame that zooms: a
+  pinch may have just stopped at the fitting size
+  (`on_a_phone_a_fitted_page_shorter_than_the_screen_moves_with_the_finger_and_stays`). egui starts such a gesture only with a
   pointer position, which the browser gives with the first finger: a test sends one too.
 - **One finger on the text shows what it is for before the caret moves** (`editor::Finger`): lifted
   still, a tap puts the caret there; held still `FINGER_HOLD`, it selects as a mouse drags; moved
@@ -1811,6 +1833,13 @@ In the app (`cloud.rs`) **the shelf is where a story is; online is a copy, and n
   refusal) must leave `mark_of` right. Tests:
   `each_story_on_the_welcome_page_says_whether_it_is_online_or_only_in_this_browser`,
   `a_story_changed_here_and_in_another_browser_is_kept_twice_and_loses_no_word`.
+- **A save whose answer was lost is this browser's own.** A page frozen or gone in the background
+  (a phone) may never hear the answer to a `PUT` that the server took: the record still names the
+  version before, the version online is newer, and the shelf's file may have changed since, which
+  `decide` reads as changed on both sides. So what goes up is written down first (`Kept::sending`,
+  in `cloud.json`, its fingerprint by key), and a story compared (`Task::Compare`) whose copy online
+  is what this browser sent is agreed on, not kept twice; what was written since goes up over it.
+  Test: `a_story_saved_online_whose_answer_was_lost_is_not_kept_twice`.
 - **The open story is never written over** while it has changes not saved: the copy from online
   goes beside it. Without such changes it is written and shown again (`Cloud::reload`), the caret
   kept, its page shown with `go_to_page` (R5).
@@ -2344,5 +2373,11 @@ result sent back, a stand-in answer in `api.test.mjs` and in `cloud::stand_in` (
   Then: a dragon's wings beating once a second, without end, were too distracting to write by.
   So wings beat by their size, mostly glide and turn smoothly, and the whole picture rests while
   the writer writes, starting again slowly half a minute after the last edit.
+- **2026-11-11 — A page that lost its GPU loads again, rather than eframe being forked.** On a
+  phone, Caprice came back from the background as a white page: Android had taken the GPU, and
+  eframe 0.36 neither notices nor makes a new one. Making one in place would mean forking eframe
+  to rebuild its painter and every texture egui and the app hold. A reload gets a new one for
+  nothing; what it would lose (the story shown, unsaved words, the caret, the device in the
+  story's room) is written down first and read back (R31). Only undo is lost.
 - **No `.docx` import.** Export only.
 - **Contents heading is "Contents"** (English), in the app and in Word.

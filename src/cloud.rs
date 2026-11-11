@@ -89,6 +89,11 @@ struct Kept {
     /// story it came beside. Both are marked until the writer says they are sorted out.
     #[serde(default)]
     twice: BTreeMap<PathBuf, PathBuf>,
+    /// Stories on their way up, by name online, with the fingerprint of what went. A page frozen
+    /// or gone in the background may never hear the answer: the version online is then newer than
+    /// the record says, and it is this browser's own, not another's (`fetched`).
+    #[serde(default)]
+    sending: BTreeMap<String, u64>,
 }
 
 /// How a story on the shelf stands online, while signed in: the mark beside it, its shape and its
@@ -688,6 +693,9 @@ impl App {
                     None => headers.push(("If-None-Match", "*".into())),
                 }
                 let request = Request { method: "PUT", path: format!("/api/stories/{key}"), headers, body: Some(bytes) };
+                // Written down before it goes: the page may be gone before the answer comes.
+                self.cloud.kept.sending.insert(key.clone(), hash);
+                self.cloud.keep();
                 self.cloud.send(Asking::Put(task, hash), request);
             }
             Task::Download { key, .. } | Task::Compare { key, .. } => {
@@ -786,6 +794,7 @@ impl App {
                 match answer.status {
                     200 => {
                         let Ok(saved) = serde_json::from_slice::<Saved>(&answer.body) else { return };
+                        self.cloud.kept.sending.remove(&key);
                         self.cloud.kept.stories.insert(key, Record { path, version: saved.version, hash });
                         self.cloud.keep();
                         if !self.cloud.busy() {
@@ -936,9 +945,15 @@ impl App {
             }
             Task::Compare { key, path } => {
                 let same = fs::read(&path).is_ok_and(|b| fingerprint(&b) == hash) && !(self.path.as_deref() == Some(path.as_path()) && self.unsaved());
-                if same {
+                // What this browser sent, its answer lost: agreed on, and what was written since goes up over it.
+                let ours = self.cloud.kept.sending.get(&key) == Some(&hash);
+                if same || ours {
+                    self.cloud.kept.sending.remove(&key);
                     self.cloud.kept.stories.insert(key, Record { path, version, hash });
                     self.cloud.keep();
+                    if !same {
+                        self.cloud.due_now();
+                    }
                 } else {
                     self.keep_both(&dir, &key, &path, &name, &bytes, &version);
                 }
@@ -1177,6 +1192,9 @@ pub mod stand_in {
         /// a painting is kept but its answer never reaches the app, as if the page had gone.
         pub kept: Vec<(String, String, usize, String)>,
         pub lose_answers: bool,
+        /// A story saved online whose answer never reaches the app, as from a page frozen in the
+        /// background meanwhile.
+        pub lose_saves: bool,
         versions: u32,
     }
 
@@ -1293,6 +1311,9 @@ pub mod stand_in {
                     let name = super::decode(&header("X-Caprice-Name").unwrap_or_default());
                     o.stories.insert(key.into(), (name, version.clone(), r.body.unwrap_or_default()));
                     o.gone.remove(key);
+                    if o.lose_saves {
+                        return Answer::default();
+                    }
                     json(serde_json::json!({ "version": version }))
                 }
                 _ => status(404),

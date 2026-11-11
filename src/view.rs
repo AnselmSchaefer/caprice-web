@@ -226,12 +226,20 @@ impl App {
             self.origin.y += scroll.y;
         }
         // Two fingers on a touch screen move the page as they pinch, and so does one moved up or down
-        // over the text (`Finger`); fitted on a phone, only up and down.
+        // over the text (`Finger`). Fitted on a phone, a page taller than the view scrolls up and down
+        // and stays fitted. Fitted with no room to scroll (all of it in sight), the page goes with the
+        // fingers as Ctrl+drag takes it: no longer fitted, or it went back to the middle at once. Not
+        // while pinching, which may have just stopped at the fitting size.
         let two = touch.filter(|(_, at)| view.contains(*at) && ctx.layer_id_at(*at).is_none_or(|l| l.order == egui::Order::Background));
         let d = two.map_or(Vec2::ZERO, |(d, _)| d) + std::mem::take(&mut self.finger_pan);
+        let scrolls = narrow && size.y * self.zoom > view.height() - 16.0;
+        if self.fit && !scrolls && d != Vec2::ZERO && (z - 1.0).abs() <= 1e-4 {
+            self.fit = false;
+            self.fit_settling = false;
+        }
         if !self.fit {
             self.origin += d;
-        } else if narrow {
+        } else if scrolls {
             self.origin.y += d.y;
         }
         self.follow_caret(view);

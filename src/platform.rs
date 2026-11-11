@@ -157,6 +157,54 @@ pub fn frame_on_visibility_change(ctx: &egui::Context) {
 }
 
 thread_local! {
+    /// Tests lose the page's drawing here, and see the page loaded again.
+    #[cfg(not(target_arch = "wasm32"))]
+    static LOST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    #[cfg(not(target_arch = "wasm32"))]
+    static RELOADED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Has the page lost what it draws with, the GPU's WebGL context or WebGPU device? A phone's
+/// browser takes it from a page in the background, and eframe cannot draw again (`again.rs`).
+/// Never on the desktop.
+pub fn drawing_lost() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    return browser::drawing_lost();
+    #[cfg(not(target_arch = "wasm32"))]
+    LOST.with(|l| l.get())
+}
+
+/// Tests lose the page's drawing, as a phone's browser does.
+#[cfg(test)]
+pub fn lose_drawing(lost: bool) {
+    LOST.with(|l| l.set(lost));
+    RELOADED.with(|r| r.set(false));
+}
+
+/// In the browser: load the page again, without asking before leaving, once the files written
+/// so far are kept (IndexedDB writes after the app has written to `fs`).
+pub fn reload() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        browser::warn_on_leaving(false);
+        wasm_bindgen_futures::spawn_local(async {
+            let _ = wasm_bindgen_futures::JsFuture::from(fs::settled()).await;
+            if let Some(window) = web_sys::window() {
+                let _ = window.location().reload();
+            }
+        });
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    RELOADED.with(|r| r.set(true));
+}
+
+/// Tests: was the page loaded again?
+#[cfg(test)]
+pub fn reloaded() -> bool {
+    RELOADED.with(|r| r.get())
+}
+
+thread_local! {
     static BY_FINGER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -436,6 +484,22 @@ mod browser {
     #[wasm_bindgen(inline_js = r#"
         let warn = false;
         export function warn_on_leaving(on) { warn = on; }
+        // The GPU taken from the page (`drawing_lost`): its WebGL context, told on the canvas, or its
+        // WebGPU device, told only to whoever asked for it, so the asking is watched from here on.
+        // This runs before the app starts, and so before eframe asks.
+        let lost = false;
+        export function drawing_lost() { return lost; }
+        if (typeof document !== "undefined") {
+            addEventListener("webglcontextlost", () => { lost = true; }, true);
+            if (typeof GPUAdapter !== "undefined") {
+                const ask = GPUAdapter.prototype.requestDevice;
+                GPUAdapter.prototype.requestDevice = async function (...args) {
+                    const device = await ask.apply(this, args);
+                    device.lost.then((info) => { if (info.reason !== "destroyed") lost = true; });
+                    return device;
+                };
+            }
+        }
         // While a story is shown the page's history has an entry for it: back (a phone's too)
         // takes it away, and Caprice hears of it rather than the page going.
         let went_back = false;
@@ -552,6 +616,7 @@ mod browser {
         #[wasm_bindgen(js_name = download)]
         fn js_download(name: &str, bytes: &[u8]);
         pub fn warn_on_leaving(on: bool);
+        pub fn drawing_lost() -> bool;
         pub fn story_entry();
         pub fn took_back() -> bool;
         pub fn on_back(wake: &js_sys::Function);

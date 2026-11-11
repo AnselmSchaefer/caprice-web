@@ -164,12 +164,22 @@ mod web {
         export function files_delete(path) {
             if (db) db.transaction(STORE, "readwrite").objectStore(STORE).delete(path);
         }
+        // Done once every write asked for before is: a transaction waits for those before it.
+        export function files_settled() {
+            return new Promise((done) => {
+                if (!db) return done();
+                const t = db.transaction(STORE, "readwrite");
+                t.objectStore(STORE).count();
+                t.oncomplete = t.onerror = t.onabort = () => done();
+            });
+        }
     "#)]
     extern "C" {
         #[wasm_bindgen(catch)]
         async fn files_load() -> Result<JsValue, JsValue>;
         fn files_put(path: &str, bytes: &[u8], modified: f64);
         fn files_delete(path: &str);
+        fn files_settled() -> js_sys::Promise;
     }
 
     thread_local! {
@@ -190,6 +200,11 @@ mod web {
             }
         });
         Ok(found.length() as usize)
+    }
+
+    /// A promise kept once IndexedDB has every file written so far.
+    pub fn settled() -> js_sys::Promise {
+        files_settled()
     }
 
     pub fn read(path: &Path) -> io::Result<Vec<u8>> {
@@ -245,7 +260,7 @@ mod web {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub use web::load;
+pub use web::{load, settled};
 #[cfg(target_arch = "wasm32")]
 use web as sys;
 
