@@ -10,12 +10,10 @@ slide onto a stack, post-it notes for your ideas, and Claude as a helper that pa
 are writing behind the page. Caprice Web is a copy of the desktop app, built for WebAssembly: the
 same app, drawing on the page's canvas.
 
-![The Magic City theme: a chapter title is typed, and a dragon flies in with it in its feet, breathes fire, sets it on the page and flies away, over a street of little houses that grows a house for each chapter](assets/dragon.gif)
+![Caprice in the browser: a story about a dragon over a village, with the scene Claude painted for it faintly behind the page, the dragon's wings gliding, windows flickering and clouds drifting past the moon](assets/scene.gif)
 
-*In the Magic City a street of houses grows with the story, a floor for every page. Make a line a
-chapter title, and a dragon brings it in.*
-
-![Caprice: a story page with a lake at dusk painted behind the text, children walking towards a little house, and post-it notes at the edge](assets/Example.png)
+*The scene behind the page moves: Claude marks the parts that can (wings, smoke, lit windows,
+clouds), and Caprice moves them, resting while you write.*
 
 ## Why Caprice
 
