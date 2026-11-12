@@ -1286,7 +1286,10 @@ Snow (`Theme::Snow`) the frozen lake and its igloos, the Magic Vineyard (`Theme:
   like plants. A story opened comes with its fleet in the bay and its ship built. What each ship
   looks like (its stripe, sails and flags) and how it rocks come from `story_id` and its chapter.
   The water in front of a hull below its waterline is drawn over it (`Bay::cover`), farther ships
-  first, so ships sit in the sea rather than on it. The Magic Sea has no `Carrier` yet: nothing
+  first, so ships sit in the sea rather than on it. That water must not hide the dock: the slipway
+  in the water and its posts (`Bay::piles`) are drawn after the ships at the front, all in the order
+  `Bay::scene` gives; once a ship just launched hid the slipway beside its hull and left its end
+  showing below the water (test `the_water_around_a_ship_just_launched_leaves_the_slipway_in_the_water_in_sight`). The Magic Sea has no `Carrier` yet: nothing
   brings a title there.
 - **The forest stands on the desk the same way**, in the Magic Forest only (`eggs/forest.rs`):
   `draw_forest` is called right after `draw_sea`. The forest itself is there from the start and

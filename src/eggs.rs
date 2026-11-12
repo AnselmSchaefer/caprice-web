@@ -1948,8 +1948,8 @@ impl Bay {
         out
     }
 
-    /// The yard's quay of stone under the ship, and the slipway from it down into the water, on
-    /// posts. It stands at the front: ships lying further back are behind it (`behind`).
+    /// The yard's quay of stone under the ship, and the slipway from it down to the water. It
+    /// stands at the front: ships lying further back are behind it (`behind`).
     pub fn dock(&self) -> Vec<Shape> {
         let mut out = Vec::new();
         let way = self.way();
@@ -1960,11 +1960,48 @@ impl Bay {
             let y = b.y + (bottom - b.y) * k as f32 / 5.0;
             out.push(Shape::line_segment([pos2(a.x, y), pos2(b.x, y)], Stroke::new(0.008 * self.len, QUAY_DARK)));
         }
+        out.push(way.line(&[(-0.7, -0.1), (self.wet(), -0.1)], 0.03, WOOD_DARK));
+        out
+    }
+
+    /// The slipway in the water, on its posts. Drawn after the ships at the front: the water in
+    /// front of a ship just launched would cover the wood beside its hull and leave the slipway's
+    /// end showing below it, though the slipway is just as wet with no ship there.
+    pub fn piles(&self) -> Vec<Shape> {
+        let way = self.way();
+        let mut out = Vec::new();
         for x in [0.55, 0.85] {
             let top = way.p(x, -0.1);
             out.push(Shape::line_segment([top, pos2(top.x, self.front + 0.05 * self.len)], Stroke::new(0.022 * self.len, WOOD_DARK)));
         }
-        out.push(way.line(&[(-0.7, -0.1), (1.35, -0.1)], 0.03, WOOD_DARK));
+        out.push(way.line(&[(self.wet(), -0.1), (1.35, -0.1)], 0.03, WOOD_DARK));
+        out
+    }
+
+    /// How far along the slipway it goes into the water.
+    fn wet(&self) -> f32 {
+        let way = self.way();
+        let (a, b) = (way.p(0.0, -0.1).y, way.p(1.0, -0.1).y);
+        (self.front - a) / (b - a)
+    }
+
+    /// The harbour at `time` with `ships` (from `ships`), and the scaffold if one is being built:
+    /// the sea, the ships further back than the dock, the dock and the scaffold, the ships at the
+    /// front, and last the slipway in the water.
+    pub fn scene(&self, story: &str, ships: &[Ship], scaffold: bool, time: f64) -> Vec<Shape> {
+        let mut out = self.sea(story, time);
+        let (back, front): (Vec<&Ship>, Vec<&Ship>) = ships.iter().partition(|s| self.behind(s));
+        let draw = |out: &mut Vec<Shape>, s: &Ship| {
+            out.extend(s.draw(story, time));
+            out.extend(self.cover(s));
+        };
+        back.into_iter().for_each(|s| draw(&mut out, s));
+        out.extend(self.dock());
+        if scaffold {
+            out.extend(self.scaffold());
+        }
+        front.into_iter().for_each(|s| draw(&mut out, s));
+        out.extend(self.piles());
         out
     }
 
@@ -2302,21 +2339,10 @@ impl App {
         }
         let launch = e.launch.map(|(k, at, had)| (k, (now - at) as f32, had));
         let building = (yard < ships).then_some((yard, e.rigged));
-        let painter = ui.painter();
-        painter.extend(bay.sea(&self.story_id, now));
-        // The ships further back than the dock first, then the dock, then those at the front.
-        let (back, front): (Vec<Ship>, Vec<Ship>) = bay.ships(&self.story_id, &fleet, building, launch, now).into_iter().partition(|s| bay.behind(s));
-        let mut draw = |s: Ship| {
-            painter.extend(s.draw(&self.story_id, now));
-            painter.extend(bay.cover(&s));
-            e.ships.push((s.k, s.bounds(), s.shown(), s.afloat));
-        };
-        back.into_iter().for_each(&mut draw);
-        painter.extend(bay.dock());
-        if launch.is_none() && building.is_some_and(|(_, parts)| parts > 0.0 && parts < PARTS as f32) {
-            painter.extend(bay.scaffold());
-        }
-        front.into_iter().for_each(&mut draw);
+        let ships = bay.ships(&self.story_id, &fleet, building, launch, now);
+        let scaffold = launch.is_none() && building.is_some_and(|(_, parts)| parts > 0.0 && parts < PARTS as f32);
+        ui.painter().extend(bay.scene(&self.story_id, &ships, scaffold, now));
+        e.ships.extend(ships.iter().map(|s| (s.k, s.bounds(), s.shown(), s.afloat)));
     }
 
     /// The paragraph at the caret was just made a chapter title: in the Magic City the dragon comes
@@ -2887,6 +2913,29 @@ mod tests {
         assert_eq!(at(LAUNCH), lying, "and lying in its place");
         // No ship in the yard while one is launched, nor before its first page.
         assert!(bay.ships("a", &in_turn(&[0, 1]), Some((2, 0.0)), None, 0.0).iter().all(|s| s.k != 2));
+    }
+
+    #[test]
+    fn the_water_around_a_ship_just_launched_leaves_the_slipway_in_the_water_in_sight() {
+        let (_, _, bay) = bay();
+        let key = |s: &Shape| format!("{s:?}");
+        let piles: Vec<String> = bay.piles().iter().map(key).collect();
+        let wet = bay.dock().iter().chain(&bay.piles()).fold(Rect::NOTHING, |r, s| r.union(s.visual_bounding_rect()));
+        for t in [0.92, 0.96, 1.0] {
+            let ships = bay.ships("a", &in_turn(&[0, 1]), None, Some((1, FINISH + SLIDE * t, 3.0)), 0.0);
+            let ship = ships.iter().find(|s| s.k == 1).unwrap();
+            assert!(ship.afloat && !bay.behind(ship), "in the water by the slipway at {t}: {ship:?}");
+            let cover: Vec<String> = bay.cover(ship).iter().map(key).collect();
+            assert!(bay.cover(ship)[0].visual_bounding_rect().intersects(wet), "its water reaches the slipway at {t}");
+            let scene: Vec<String> = bay.scene("a", &ships, false, 0.0).iter().map(key).collect();
+            let water = scene.iter().rposition(|s| cover.contains(s)).unwrap();
+            for pile in &piles {
+                assert!(scene.iter().rposition(|s| s == pile).unwrap() > water, "the wood is not hidden by the water at {t}");
+            }
+        }
+        // The slipway is whole: it goes from the quay into the water without a gap.
+        let (dry, wet) = (bay.dock().last().unwrap().visual_bounding_rect(), bay.piles().last().unwrap().visual_bounding_rect());
+        assert!(dry.intersects(wet) && dry.max.y <= wet.max.y, "{dry:?} {wet:?}");
     }
 
     #[test]
