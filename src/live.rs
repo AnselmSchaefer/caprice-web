@@ -137,9 +137,10 @@ impl Live {
 }
 
 impl App {
-    /// May the story be changed here? Not while another device holds the pen (R34).
+    /// May the story be changed here? Not while another device holds the pen (R34), nor while a
+    /// story just opened waits for a newer copy online (R33, `Cloud::checking`).
     pub fn can_edit(&self) -> bool {
-        !self.live.following()
+        !self.live.following() && !self.cloud.checking(self.path.as_deref())
     }
 
     /// The room the open story belongs in: signed in, with Caprice's server, a story on the shelf.
@@ -327,7 +328,9 @@ impl App {
             self.cloud.agree(key, Record { path, version, hash: crate::cloud::fingerprint(&answer.body) });
         }
         self.save_quietly();
-        self.cloud.saved();
+        if let Some(path) = self.path.clone() {
+            self.cloud.saved(&path);
+        }
     }
 
     /// Holding the pen: the edits of the last second, and the story's hash after them, if anything
@@ -365,19 +368,19 @@ impl App {
     }
 
     /// Changes made here that the room never had (written while out of reach, then the pen had
-    /// moved on): the story as it is here goes on the shelf beside it, "… (written here)", before
-    /// the holder's replaces it. No word is lost, nothing is merged.
+    /// moved on): the story as it is here is kept among its backups for a week (R33), before the
+    /// holder's replaces it. No word is lost, nothing is merged, and there is still one story.
     fn keep_unsent(&mut self) {
         let unsent = self.doc.outbox.as_ref().is_some_and(|o| !o.is_empty()) || (self.live.hash != 0 && self.live_hash() != self.live.hash);
-        let Some(dir) = self.path.as_ref().and_then(|p| p.parent()).map(|d| d.to_path_buf()) else { return };
+        let Some(path) = self.path.clone() else { return };
         if !unsent {
             return;
         }
-        let copy = crate::platform::free_name(&dir, &format!("{} (written here).caprice", self.story_name()));
-        if let Ok(json) = serde_json::to_string_pretty(&self.doc_file())
-            && crate::platform::fs::write(&copy, json).is_ok()
+        let id = self.story_id.clone();
+        if let Ok(json) = serde_json::to_vec(&self.doc_file())
+            && self.keep_backup(&id, &path, &json)
         {
-            self.status = format!("- what you wrote while away is kept as \u{201c}{}\u{201d}", crate::shelf::file_name(&copy.file_stem().unwrap_or_default().to_string_lossy()));
+            self.status = "- what you wrote while away is a backup in Versions, kept for a week".into();
         }
     }
 
@@ -493,6 +496,13 @@ impl App {
     /// where it writes, and Transfer here.
     pub fn live_bar(&mut self, ctx: &egui::Context) {
         if !self.live.following() {
+            if self.cloud.checking(self.path.as_deref()) {
+                egui::Area::new(Id::new("live_bar")).anchor(Align2::CENTER_TOP, vec2(0.0, 52.0)).show(ctx, |ui| {
+                    egui::Frame::popup(ui.style()).fill(pal().dock).show(ui, |ui| {
+                        ui.label(RichText::new("Looking for a newer copy online\u{2026}").color(pal().text));
+                    });
+                });
+            }
             return;
         }
         let name = self.live.holder.as_ref().map(|(_, n)| n.clone()).unwrap_or_default();

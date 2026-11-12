@@ -1,8 +1,10 @@
 //! Stories online (R33). The shelf (`shelf.rs`) is where a story is kept. Signed in, every story
 //! on it also has a copy on Caprice's own server (`web/api`), so the same stories are there in any
 //! browser. The copy follows the shelf: a story saved goes up a little later, and one newer online
-//! comes down onto the shelf. Nothing is overwritten unseen: a story changed in two places is kept
-//! twice, and nothing is asked of the server at all unless the writer has signed in.
+//! comes down onto the shelf. There is one story, the same in every browser: one changed in two
+//! places is kept as the newer, the other's words among its backups for a week (`settle`), and a
+//! story opened is first brought up to date (`checking`). Nothing is asked of the server at all
+//! unless the writer has signed in.
 //!
 //! What to do with each story is `decide`, from three things: the file on the shelf, what was
 //! known to be online when the two last agreed (kept in `cloud.json`), and what is online now.
@@ -26,6 +28,8 @@ use crate::platform::{Answer, LiveSocket, Request, Waker, fs};
 pub const UP_AFTER: f64 = 20.0;
 /// Seconds between looks for what changed elsewhere, while the page is shown.
 pub const LOOK_EVERY: f64 = 600.0;
+/// Seconds a story just opened waits, at most, for a newer copy online before it can be written in.
+pub const CHECK_FOR: f64 = 6.0;
 /// Seconds to wait before trying again with no network, when the server says nothing sooner.
 pub const AGAIN_AFTER: f64 = 60.0;
 /// What online backup being off means for the writer.
@@ -85,10 +89,10 @@ struct Kept {
     /// Stories deleted here, by their name online, with the version deleted: to delete online.
     #[serde(default)]
     deleting: BTreeMap<String, String>,
-    /// Stories kept twice, changed here and elsewhere (`keep_both`): the copy from online, and the
-    /// story it came beside. Both are marked until the writer says they are sorted out.
+    /// When each story on the shelf was last saved here, in seconds since 1970: changed here and
+    /// elsewhere, the newer is kept (`settle`).
     #[serde(default)]
-    twice: BTreeMap<PathBuf, PathBuf>,
+    changed: BTreeMap<PathBuf, f64>,
     /// Stories on their way up, by name online, with the fingerprint of what went. A page frozen
     /// or gone in the background may never hear the answer: the version online is then newer than
     /// the record says, and it is this browser's own, not another's (`fetched`).
@@ -106,8 +110,6 @@ pub enum Mark {
     Waiting,
     /// Only in this browser for now: the server cannot be reached, or the story is too big.
     HereOnly,
-    /// Changed here and elsewhere, and kept twice: this one and its other copy.
-    Twice,
 }
 
 impl Mark {
@@ -116,7 +118,6 @@ impl Mark {
             Mark::Online => "online",
             Mark::Waiting => "going online",
             Mark::HereOnly => "only in this browser",
-            Mark::Twice => "two copies",
         }
     }
 
@@ -124,12 +125,12 @@ impl Mark {
     pub fn color(self) -> Color32 {
         match self {
             Mark::Online | Mark::Waiting => crate::theme::pal().text_dim,
-            Mark::HereOnly | Mark::Twice => crate::theme::pal().accent,
+            Mark::HereOnly => crate::theme::pal().accent,
         }
     }
 
-    /// The mark itself in `r` (a square): a cloud with a tick, a cloud with an arrow going up, a
-    /// screen, or two sheets one over the other. Shapes rather than letters, so every font has
+    /// The mark itself in `r` (a square): a cloud with a tick, a cloud with an arrow going up, or a
+    /// screen. Shapes rather than letters, so every font has
     /// them; nothing is hidden by painting over it, as the row under it may be seen through.
     pub fn draw(self, p: &Painter, r: egui::Rect) {
         let c = self.color();
@@ -160,11 +161,6 @@ impl Mark {
                 p.line_segment([at(0.5, 0.66), at(0.5, 0.8)], stroke);
                 p.line_segment([at(0.32, 0.82), at(0.68, 0.82)], stroke);
             }
-            Mark::Twice => {
-                // The sheet behind in outline, the one in front filled over it.
-                p.rect_stroke(egui::Rect::from_min_max(at(0.18, 0.14), at(0.62, 0.7)), 2.0, stroke, StrokeKind::Middle);
-                p.rect_filled(egui::Rect::from_min_max(at(0.38, 0.3), at(0.82, 0.86)), 2.0, c);
-            }
         }
     }
 }
@@ -174,6 +170,9 @@ impl Mark {
 struct Online {
     id: String,
     version: String,
+    /// When it was saved online, in milliseconds since 1970 (none from a server before this).
+    #[serde(default)]
+    modified: f64,
 }
 
 /// What the server lists: its stories, and the ones deleted lately (`?gone=1`).
@@ -199,9 +198,8 @@ pub enum Do {
     Nothing,
     Upload,
     Download,
-    /// It changed on both sides: the copy online comes down as a story of its own, then this one
-    /// goes up in its place.
-    KeepBoth,
+    /// It changed on both sides: the newer is kept, on both, and the other among its backups.
+    Settle,
     /// Gone from both sides: its record goes too.
     Forget,
     /// Deleted on another device, and the same here: it is deleted here too, once it is not open.
@@ -227,12 +225,12 @@ pub fn decide(local: Option<&Local>, known: Option<&Record>, online: Option<&str
         (None, _, None) => Do::Forget,
         (None, _, Some(_)) => Do::Download,
         // Never agreed: the two may hold the same words, or not.
-        (Some(_), None, Some(_)) => Do::KeepBoth,
+        (Some(_), None, Some(_)) => Do::Settle,
         (Some(l), Some(k), Some(version)) => {
             let saved_here = l.hash != k.hash;
             let there = version != k.version;
             match (saved_here || l.open_unsaved, there) {
-                (true, true) => Do::KeepBoth,
+                (true, true) => Do::Settle,
                 (false, true) => Do::Download,
                 _ if saved_here => Do::Upload,
                 _ => Do::Nothing,
@@ -263,8 +261,8 @@ fn id_of(bytes: &[u8]) -> String {
 
 /// Whether two files hold the same story: the same but for what each browser keeps for itself
 /// (the scene being described and whether pictures show, R34; the garden older files held, R30).
-/// Compared byte for byte, a story open in two browsers differed in these alone, and was kept
-/// twice ("… (from another browser)") though not a word differed.
+/// Compared byte for byte, a story open in two browsers differed in these alone, and was settled
+/// as changed in both though not a word differed.
 fn same_story(a: &[u8], b: &[u8]) -> bool {
     let story = |bytes: &[u8]| {
         serde_json::from_slice::<serde_json::Value>(bytes).ok().map(|mut v| {
@@ -281,16 +279,11 @@ fn same_story(a: &[u8], b: &[u8]) -> bool {
     }
 }
 
-/// The story in `bytes` as a story of its own: the same, with an id of its own. A copy kept from
-/// another browser had the original's, so its key online (`key`, from id and name) came out the
-/// same in both browsers, and their two copies were kept twice again, "(from another browser)"
-/// twice over; and its versions mixed with the original's.
-fn own_story(bytes: &[u8]) -> Vec<u8> {
-    let Ok(mut v) = serde_json::from_slice::<serde_json::Value>(bytes) else { return bytes.to_vec() };
-    if let Some(o) = v.as_object_mut() {
-        o.insert("id".into(), serde_json::Value::String(crate::versions::new_id()));
-    }
-    serde_json::to_vec(&v).unwrap_or_else(|_| bytes.to_vec())
+/// The story a copy kept beside it by an older Caprice was of: "<name> (from another browser)",
+/// or "<name> (written here)", perhaps with a number after it (`free_name`).
+fn copy_of(stem: &str) -> Option<&str> {
+    let stem = stem.rsplit_once(' ').filter(|(_, n)| n.parse::<u32>().is_ok()).map_or(stem, |(s, _)| s);
+    stem.strip_suffix(" (from another browser)").or_else(|| stem.strip_suffix(" (written here)"))
 }
 
 /// A story's name as a header can carry it (the server reads it with `decodeURIComponent`).
@@ -335,9 +328,10 @@ fn unquote(tag: &str) -> String {
 enum Task {
     Upload { key: String, path: PathBuf, name: String, replaces: Option<String> },
     /// Bring a story down: to where its record says it is, or onto the shelf under its own name.
-    Download { key: String, to: Option<PathBuf> },
+    /// When it was saved online (seconds since 1970), should it meet words not yet saved here.
+    Download { key: String, to: Option<PathBuf>, modified: f64 },
     /// The copy online may hold other words than the shelf's: fetch it and see.
-    Compare { key: String, path: PathBuf },
+    Compare { key: String, path: PathBuf, modified: f64 },
     /// A story deleted here goes online too, if it is still the version deleted.
     Delete { key: String, version: String },
 }
@@ -369,8 +363,8 @@ pub struct Cloud {
     /// How it goes now: paused by a limit, no network, a fault of the server's; or signed out. It
     /// goes when that is over. Signed in, a note means online backup is off (`backup_off`).
     pub note: Option<String>,
-    /// What happened that the writer should know (a story kept twice, one too big), until they
-    /// close the window.
+    /// What happened that the writer should know (one too big, one deleted that is kept), until
+    /// they close the window.
     pub told: Option<String>,
     kept: Kept,
     asking: Option<(Asking, Receiver<Answer>)>,
@@ -382,8 +376,15 @@ pub struct Cloud {
     /// Stories too big to keep online, as they were when the server said so.
     too_big: BTreeMap<String, u64>,
     wake: Option<Waker>,
-    /// The open story was changed online and brought down: it is shown again from its file.
+    /// The open story was changed online and brought down: it is shown again from its file, and
+    /// the writer told this, if anything more than that it changed.
     reload: bool,
+    said: Option<String>,
+    /// The story just opened, and since when: it cannot be written in until a newer copy online,
+    /// if there is one, is brought down (or `CHECK_FOR` has gone by). Written in at once, it was
+    /// changed in two browsers, and the words it opened with were older than the ones online.
+    checking: Option<(PathBuf, f64)>,
+    looked_at: Option<PathBuf>,
     /// The story on the shelf at this path follows another device live (R34): it is neither
     /// sent up nor brought down meanwhile, as the device holding the pen keeps it online.
     pub skip: Option<PathBuf>,
@@ -423,6 +424,9 @@ impl Cloud {
             too_big: BTreeMap::new(),
             wake: None,
             reload: false,
+            said: None,
+            checking: None,
+            looked_at: None,
             skip: None,
             begun: false,
             was_off: false,
@@ -459,7 +463,6 @@ impl Cloud {
     /// The story at `path` is being deleted here: online it goes next, if it is there. Its record
     /// goes now, so that it is neither sent up nor brought down meanwhile.
     pub fn deleted(&mut self, path: &Path) {
-        self.sorted_out(path);
         let Some(key) = self.kept.stories.iter().find(|(_, r)| r.path == path).map(|(k, _)| k.clone()) else { return };
         if let Some(record) = self.kept.stories.remove(&key) {
             self.kept.deleting.insert(key, record.version);
@@ -502,8 +505,13 @@ impl Cloud {
         self.asking.is_some() || !self.tasks.is_empty()
     }
 
-    /// A story was saved on the shelf: it goes up a little later.
-    pub fn saved(&mut self) {
+    /// The story at `path` was saved on the shelf: it goes up a little later.
+    pub fn saved(&mut self, path: &Path) {
+        if self.server.is_some() {
+            let now = self.now();
+            self.kept.changed.insert(path.to_owned(), now);
+            self.keep();
+        }
         if self.who.is_some() {
             let soon = self.now() + UP_AFTER;
             self.next_round = Some(self.next_round.map_or(soon, |t| t.min(soon)));
@@ -522,11 +530,6 @@ impl Cloud {
     /// The same, for the story at `path` whose file's fingerprint is `hash`.
     pub fn mark_of(&self, path: &Path, hash: u64) -> Option<(Mark, String)> {
         self.who.as_ref()?;
-        if let Some(other) = self.other_copy(path) {
-            let said = format!("Changed here and in another browser, so both are kept: the other is \u{201c}{}\u{201d}. \
-                Compare them, and delete the one you do not want, or keep both. Click when they are sorted out.", story_name(&other));
-            return Some((Mark::Twice, said));
-        }
         if self.kept.stories.values().any(|r| r.path == path && r.hash == hash) {
             return Some((Mark::Online, "Kept online as it is here, to find in any browser.".into()));
         }
@@ -539,18 +542,9 @@ impl Cloud {
         })
     }
 
-    /// The other copy of a story kept twice, while both are there.
-    fn other_copy(&self, path: &Path) -> Option<PathBuf> {
-        let other = self.kept.twice.iter().find_map(|(copy, story)| {
-            if copy == path { Some(story) } else if story == path { Some(copy) } else { None }
-        })?;
-        fs::exists(other).then(|| other.clone())
-    }
-
-    /// The writer has sorted out the story at `path` and its other copy: neither is marked now.
-    pub fn sorted_out(&mut self, path: &Path) {
-        self.kept.twice.retain(|copy, story| copy != path && story != path);
-        self.keep();
+    /// Is the story at `path` just opened, and waiting for a newer copy online, if there is one?
+    pub fn checking(&self, path: Option<&Path>) -> bool {
+        self.checking.as_ref().is_some_and(|(p, since)| Some(p.as_path()) == path && self.now() - since < CHECK_FOR) && self.note.is_none()
     }
 
     /// Send what is saved here now, or ask the server again now if it could not be reached.
@@ -646,7 +640,24 @@ impl App {
         if self.cloud.wake.is_none() {
             self.cloud.wake = Some(Waker::new(ctx));
         }
+        // A story opened that is online waits for a newer copy there, if there is one.
+        if self.path != self.cloud.looked_at {
+            self.cloud.looked_at = self.path.clone();
+            let cloud = &mut self.cloud;
+            let signed_in = cloud.who.is_some() || !cloud.kept.user.is_empty();
+            cloud.checking = None;
+            if let Some(path) = &self.path
+                && signed_in
+                && cloud.kept.stories.values().any(|r| r.path == *path)
+            {
+                cloud.checking = Some((path.clone(), cloud.now()));
+                cloud.up_now();
+            }
+        }
         self.tend_cloud();
+        if self.cloud.checking(self.path.as_deref()) {
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        }
         let off = self.cloud.backup_off().is_some();
         if off != std::mem::replace(&mut self.cloud.was_off, off) {
             self.status = if off { "- online backup is off for now: stories are kept in this browser only" } else { "- online backup is on again" }.into();
@@ -659,7 +670,7 @@ impl App {
             let caret = caret.min(self.doc.total_chars().saturating_sub(1));
             self.set_caret(ctx, caret, false);
             self.go_to_page(ctx, self.doc.page_of(caret));
-            self.status = "- changed in another browser".into();
+            self.status = self.cloud.said.take().unwrap_or_else(|| "- changed in another browser".into());
         }
         if self.cloud.busy() {
             ctx.request_repaint_after(std::time::Duration::from_millis(200));
@@ -877,6 +888,7 @@ impl App {
     fn plan(&mut self, listed: Listed) {
         let Listed { stories: online, gone } = listed;
         let Some(dir) = self.shelf.dir.clone() else { return };
+        self.fold_copies(&dir);
         let here = self.shelf_stories(&dir);
         let open_unsaved = self.unsaved();
         let mut keys: Vec<String> = here.iter().map(|(k, ..)| k.clone()).collect();
@@ -928,15 +940,22 @@ impl App {
                 }
                 Do::Download => {
                     let to = known.map(|k| k.path.clone());
-                    cloud.tasks.push_back(Task::Download { key, to });
+                    let modified = there.map_or(0.0, |o| o.modified / 1000.0);
+                    cloud.tasks.push_back(Task::Download { key, to, modified });
                 }
-                Do::KeepBoth => {
+                Do::Settle => {
                     let (_, path, _) = shelf.expect("both sides have it");
-                    cloud.tasks.push_back(Task::Compare { key, path: path.clone() });
+                    let modified = there.map_or(0.0, |o| o.modified / 1000.0);
+                    cloud.tasks.push_back(Task::Compare { key, path: path.clone(), modified });
                 }
             }
         }
         cloud.keep();
+        // The story just opened can be written in, unless a newer copy is on its way down.
+        let coming = |t: &Task| matches!(t, Task::Download { to: Some(to), .. } | Task::Compare { path: to, .. } if Some(to) == cloud.checking.as_ref().map(|c| &c.0));
+        if !cloud.tasks.iter().any(coming) {
+            cloud.checking = None;
+        }
         cloud.next_round = Some(cloud.now() + LOOK_EVERY);
         if cloud.tasks.is_empty() && cloud.now() >= cloud.paused_until {
             cloud.note = None;
@@ -954,13 +973,16 @@ impl App {
         let bytes = answer.body;
         let hash = fingerprint(&bytes);
         match task {
-            Task::Download { key, to } => {
+            Task::Download { key, to, modified } => {
                 let new_here = to.is_none();
                 let path = to.unwrap_or_else(|| crate::platform::free_name(&dir, &format!("{}.caprice", crate::shelf::file_name(&name))));
                 let open = self.path.as_deref() == Some(path.as_path());
+                if self.cloud.checking.as_ref().is_some_and(|c| c.0 == path) {
+                    self.cloud.checking = None;
+                }
                 if open && self.unsaved() {
-                    // Written in here meanwhile: the words from online are kept beside it.
-                    self.keep_both(&dir, &key, &path, &name, &bytes, &version);
+                    // Written in here meanwhile: the newer is kept.
+                    self.settle(&key, &path, &bytes, &version, modified);
                     return;
                 }
                 let _ = fs::create_dir_all(&dir);
@@ -975,7 +997,10 @@ impl App {
                     }
                 }
             }
-            Task::Compare { key, path } => {
+            Task::Compare { key, path, modified } => {
+                if self.cloud.checking.as_ref().is_some_and(|c| c.0 == path) {
+                    self.cloud.checking = None;
+                }
                 let here = fs::read(&path).ok();
                 let same = here.as_deref().is_some_and(|b| same_story(b, &bytes)) && !(self.path.as_deref() == Some(path.as_path()) && self.unsaved());
                 // What this browser sent, its answer lost: agreed on, and what was written since goes up over it.
@@ -991,29 +1016,78 @@ impl App {
                         self.cloud.due_now();
                     }
                 } else {
-                    self.keep_both(&dir, &key, &path, &name, &bytes, &version);
+                    self.settle(&key, &path, &bytes, &version, modified);
                 }
             }
             Task::Upload { .. } | Task::Delete { .. } => {}
         }
     }
 
-    /// The copy online is saved on the shelf as a story of its own, and the shelf's story then
-    /// goes up in its place: both are kept, on both sides.
-    fn keep_both(&mut self, dir: &Path, key: &str, path: &Path, name: &str, bytes: &[u8], version: &str) {
-        let copy = crate::platform::free_name(dir, &format!("{} (from another browser).caprice", crate::shelf::file_name(name)));
-        if fs::write(&copy, own_story(bytes)).is_err() {
+    /// The story at `path` was changed here and online (`bytes`, saved there at `modified`): the
+    /// newer is the story, here and online, and the other's words are kept among its backups for a
+    /// week (`keep_backup`), out of sight. One story in every browser, and no word lost. If the
+    /// backup cannot be written nothing changes, and it is tried again on the next round.
+    fn settle(&mut self, key: &str, path: &Path, bytes: &[u8], version: &str, modified: f64) {
+        let open = self.path.as_deref() == Some(path);
+        let typing = open && self.unsaved();
+        let here = if typing { serde_json::to_vec(&self.doc_file()).ok() } else { fs::read(path).ok() };
+        let Some(here) = here else { return };
+        // Words being typed are the newest of all; a story never saved here since agreeing, the oldest.
+        let here_at = if typing { self.cloud.now() } else { self.cloud.kept.changed.get(path).copied().unwrap_or(0.0) };
+        let id = Some(id_of(&here)).filter(|i| !i.is_empty()).unwrap_or_else(|| key.to_owned());
+        let theirs = modified > here_at;
+        if !self.keep_backup(&id, path, if theirs { &here } else { bytes }) {
+            self.status = "- changed here and in another browser: kept as it is here until a backup can be made".into();
             return;
         }
-        self.start.remember(&copy, self.keep.now());
-        self.start.stories = None;
-        self.cloud.kept.twice.insert(copy.clone(), path.to_owned());
-        // Agreeing on the version online, but not on the words: the shelf's go up next.
-        let record = Record { path: path.to_owned(), version: version.to_owned(), hash: 0 };
-        self.cloud.kept.stories.insert(key.to_owned(), record);
+        let said = "- changed in another browser too: the newer is kept, the other is a backup in Versions";
+        if theirs {
+            if fs::write(path, bytes).is_err() {
+                return;
+            }
+            self.cloud.kept.stories.insert(key.to_owned(), Record { path: path.to_owned(), version: version.to_owned(), hash: fingerprint(bytes) });
+            if open {
+                // Shown again from its file, as saved: what was typed is the backup.
+                self.saved_hash = self.content_hash();
+                self.cloud.reload = true;
+                self.cloud.said = Some(said.into());
+            }
+        } else {
+            // Agreeing on the version online, but not on the words: the shelf's go up over it next.
+            let record = Record { path: path.to_owned(), version: version.to_owned(), hash: 0 };
+            self.cloud.kept.stories.insert(key.to_owned(), record);
+            // Words being typed are saved now, so what goes up is the story as it is on the page.
+            if typing && self.can_edit() {
+                self.save_quietly();
+            }
+            self.cloud.due_now();
+        }
         self.cloud.keep();
-        self.cloud.told = Some(format!("\u{201c}{}\u{201d} was changed here and in another browser: both are kept.", story_name(path)));
-        self.cloud.due_now();
+        if !open || !theirs {
+            self.status = said.into();
+        }
+    }
+
+    /// Copies an older Caprice kept beside a story, "<name> (from another browser)" or "(written
+    /// here)", become backups of the story they were of, and leave the shelf and online: there is
+    /// one story now. A copy open, or whose story is not on the shelf, stays as it is.
+    fn fold_copies(&mut self, dir: &Path) {
+        for path in fs::read_dir(dir).unwrap_or_default() {
+            if path.extension().is_none_or(|e| e != "caprice") || self.path.as_deref() == Some(path.as_path()) {
+                continue;
+            }
+            let stem = path.file_stem().map_or(String::new(), |s| s.to_string_lossy().into_owned());
+            let Some(story) = copy_of(&stem).map(|name| dir.join(format!("{name}.caprice"))) else { continue };
+            let (Ok(copy), Ok(original)) = (fs::read(&path), fs::read(&story)) else { continue };
+            let id = id_of(&original);
+            if id.is_empty() || !self.keep_backup(&id, &story, &copy) {
+                continue;
+            }
+            self.cloud.deleted(&path);
+            let _ = fs::remove_file(&path);
+            self.start.forget(&path);
+            self.start.stories = None;
+        }
     }
 
     /// Off to sign in: the page goes, so the story is saved, and a version kept, first.
@@ -1231,6 +1305,12 @@ pub mod stand_in {
         /// A story saved online whose answer never reaches the app, as from a page frozen in the
         /// background meanwhile.
         pub lose_saves: bool,
+        /// The server's time, in seconds since 1970: when each story was saved online, by key.
+        pub clock: f64,
+        modified: BTreeMap<String, f64>,
+        /// A slow network: requests wait unanswered until `answer_held`.
+        pub slow: bool,
+        held: Vec<(Request, Sender<Answer>)>,
         versions: u32,
     }
 
@@ -1244,6 +1324,17 @@ pub mod stand_in {
             o.versions += 1;
             let version = format!("v{}", o.versions);
             o.stories.insert(key.into(), (name.into(), version, bytes.into()));
+            let at = o.clock;
+            o.modified.insert(key.into(), at);
+        }
+
+        /// The network is quick again: what waited is answered.
+        pub fn answer_held(&self) {
+            self.0.borrow_mut().slow = false;
+            let held = std::mem::take(&mut self.0.borrow_mut().held);
+            for (request, tx) in held {
+                let _ = tx.send(self.answer(request));
+            }
         }
 
         /// Another browser deletes a story online.
@@ -1300,7 +1391,11 @@ pub mod stand_in {
                 return Answer { status: *code, headers: vec![("Retry-After".into(), retry.to_string())], body: said.clone().into_bytes() };
             }
             let listed = |o: &Online| {
-                o.stories.iter().map(|(id, (name, version, _))| serde_json::json!({ "id": id, "name": name, "version": version })).collect::<Vec<_>>()
+                let at = |id: &String| o.modified.get(id).copied().unwrap_or(0.0) * 1000.0;
+                let story = |(id, (name, version, _)): (&String, &(String, String, Vec<u8>))| {
+                    serde_json::json!({ "id": id, "name": name, "version": version, "modified": at(id) })
+                };
+                o.stories.iter().map(story).collect::<Vec<_>>()
             };
             match (r.method, r.path.strip_prefix("/api/stories").unwrap_or("")) {
                 ("GET", "") => json(serde_json::json!(listed(&o))),
@@ -1346,6 +1441,8 @@ pub mod stand_in {
                     let version = format!("v{}", o.versions);
                     let name = super::decode(&header("X-Caprice-Name").unwrap_or_default());
                     o.stories.insert(key.into(), (name, version.clone(), r.body.unwrap_or_default()));
+                    let at = o.clock;
+                    o.modified.insert(key.into(), at);
                     o.gone.remove(key);
                     if o.lose_saves {
                         return Answer::default();
@@ -1359,6 +1456,10 @@ pub mod stand_in {
 
     impl Server for StandIn {
         fn send(&self, request: Request, tx: Sender<Answer>, wake: Waker) {
+            if self.0.borrow().slow {
+                self.0.borrow_mut().held.push((request, tx));
+                return;
+            }
             let _ = tx.send(self.answer(request));
             wake.wake();
         }
@@ -1546,19 +1647,19 @@ mod tests {
     }
 
     #[test]
-    fn a_story_changed_on_one_side_follows_it_and_on_both_is_kept_twice() {
+    fn a_story_changed_on_one_side_follows_it_and_on_both_is_settled() {
         let known = record(1, "v1");
         assert_eq!(decide(Some(&local(1)), Some(&known), Some("v1"), None), Do::Nothing, "the same on both");
         assert_eq!(decide(Some(&local(2)), Some(&known), Some("v1"), None), Do::Upload, "saved here");
         assert_eq!(decide(Some(&local(1)), Some(&known), Some("v2"), None), Do::Download, "saved elsewhere");
-        assert_eq!(decide(Some(&local(2)), Some(&known), Some("v2"), None), Do::KeepBoth, "saved in both");
-        assert_eq!(decide(Some(&local(1)), None, Some("v1"), None), Do::KeepBoth, "never agreed: compared");
+        assert_eq!(decide(Some(&local(2)), Some(&known), Some("v2"), None), Do::Settle, "saved in both");
+        assert_eq!(decide(Some(&local(1)), None, Some("v1"), None), Do::Settle, "never agreed: compared");
     }
 
     #[test]
     fn a_story_open_with_changes_not_yet_saved_is_never_written_over() {
         let open = Local { hash: 1, open: true, open_unsaved: true };
-        assert_eq!(decide(Some(&open), Some(&record(1, "v1")), Some("v2"), None), Do::KeepBoth);
+        assert_eq!(decide(Some(&open), Some(&record(1, "v1")), Some("v2"), None), Do::Settle);
         assert_eq!(decide(Some(&open), Some(&record(1, "v1")), Some("v1"), None), Do::Nothing, "it goes up once saved");
     }
 

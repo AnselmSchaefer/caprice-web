@@ -524,8 +524,6 @@ enum Row {
     Ask,
     Delete,
     Keep,
-    /// The mark of two copies, clicked: the writer has sorted them out.
-    SortedOut,
 }
 
 impl App {
@@ -718,7 +716,6 @@ impl App {
                     Some(Row::Ask) => self.start.asking = Some(st.path.clone()),
                     Some(Row::Keep) => self.start.asking = None,
                     Some(Row::Delete) => chosen = Some(Chosen::Delete(st.path.clone())),
-                    Some(Row::SortedOut) => self.cloud.sorted_out(&st.path),
                     None => {}
                 }
                 ui.add_space(10.0 - ui.spacing().item_spacing.y);
@@ -856,14 +853,10 @@ fn story_row(
     if let (Some((m, said, word)), Some(r)) = (mark, mark_at) {
         m.draw(ui.painter(), Rect::from_min_size(pos2(r.left(), r.center().y - 8.0), vec2(16.0, 16.0)));
         ui.painter().galley(pos2(r.left() + 20.0, r.center().y - word.size().y / 2.0), word, m.color());
-        // Over the row, so the pointer finds it; two copies are sorted out with a click on it.
-        let sense = if live && m == Mark::Twice { Sense::click() } else { Sense::hover() };
-        let tag = ui.interact(r, Id::new(("welcome_mark", &st.path)), sense);
-        let kind = if m == Mark::Twice { egui::WidgetType::Button } else { egui::WidgetType::Label };
-        tag.widget_info(|| egui::WidgetInfo::labeled(kind, true, m.label()));
-        if tag.on_hover_text(said).clicked() {
-            done = Some(Row::SortedOut);
-        }
+        // Over the row, so the pointer finds it.
+        let tag = ui.interact(r, Id::new(("welcome_mark", &st.path)), Sense::hover());
+        tag.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, m.label()));
+        tag.on_hover_text(said);
     }
     if live {
         // Laid over the row, so a press on them is theirs, not the row's; their text ends where the

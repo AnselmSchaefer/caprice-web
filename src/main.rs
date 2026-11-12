@@ -8432,8 +8432,9 @@ mod tests {
     }
 
     #[test]
-    fn words_written_where_the_pen_was_lost_are_kept_beside_the_story() {
+    fn words_written_where_the_pen_was_lost_are_kept_as_a_backup() {
         let (mut laptop, mut phone, server, dirs) = laptop_and_phone("live-kept");
+        laptop.app.keep.dir = Some(dirs[0].join("versions"));
         side_by_side(&mut laptop, &mut phone, 6);
         // The laptop drops out long enough for the pen to pass to the phone, and writes on meanwhile.
         server.0.borrow_mut().unreachable = true;
@@ -8454,8 +8455,9 @@ mod tests {
             phone.later(1.0);
         }
         assert!(!laptop.app.can_edit(), "the laptop follows now");
-        let copy = dirs[0].join("Once upon a time (written here).caprice");
-        assert!(std::fs::read_to_string(&copy).is_ok_and(|f| f.contains("Written on the train.")), "its words are kept: {}", laptop.app.shown_status);
+        let kept = backups(&dirs[0].join("versions"));
+        assert!(kept.iter().any(|f| f.contains("Written on the train.")), "its words are kept: {}", laptop.app.shown_status);
+        assert_eq!(shelf_count(&dirs[0]), 1, "as a backup, not a story beside it");
         assert!(laptop.text().contains("Written at home.") && !laptop.text().contains("train"), "and it shows the phone's story: {}", laptop.text());
         for d in dirs {
             let _ = std::fs::remove_dir_all(d);
@@ -8549,48 +8551,145 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    /// The files kept among the backups (R33), in the versions folder `versions`, oldest first.
+    fn backups(versions: &std::path::Path) -> Vec<String> {
+        let mut found = Vec::new();
+        for story in std::fs::read_dir(versions).into_iter().flatten().flatten() {
+            let mut files: Vec<_> = std::fs::read_dir(story.path().join("backups")).into_iter().flatten().flatten().map(|e| e.path()).collect();
+            files.sort();
+            found.extend(files.iter().filter_map(|f| std::fs::read_to_string(f).ok()));
+        }
+        found
+    }
+
+    /// The stories on the shelf in `dir`.
+    fn shelf_count(dir: &std::path::Path) -> usize {
+        std::fs::read_dir(dir).unwrap().filter(|e| e.as_ref().unwrap().path().extension().is_some_and(|x| x == "caprice")).count()
+    }
+
     #[test]
-    fn a_story_changed_here_and_in_another_browser_is_kept_twice_and_loses_no_word() {
+    fn a_story_changed_here_and_in_another_browser_is_kept_once_as_the_newer_and_the_other_is_a_backup() {
         let mut h = Harness::new();
         let dir = with_shelf(&mut h, "online-both");
+        let server = online(&mut h, &dir, true);
+        let versions = dir.join("versions");
+        h.app.keep.dir = Some(versions.clone());
+        h.frames(12, vec![], Modifiers::NONE);
+        h.type_text("First words.");
+        h.save_on_shelf();
+        h.later(cloud::UP_AFTER + 1.0);
+
+        // Changed in another browser, then later here: what was written here is the story.
+        server.0.borrow_mut().clock = 1022.0;
+        changed_elsewhere(&server, "First words.", "First words, and more from the train.");
+        h.later(5.0);
+        h.type_text(" Written here.");
+        h.key(Key::S, Modifiers::COMMAND);
+        h.later(cloud::UP_AFTER + 1.0);
+        h.later(1.0);
+        assert_eq!(h.text(), "First words. Written here.", "the newer is kept");
+        assert_eq!(shelf_count(&dir), 1, "one story, no copy beside it");
+        let online = stories_online(&server);
+        assert_eq!(online.len(), 1, "and one online");
+        assert!(online[0].1.contains("Written here."), "the same as here");
+        assert!(backups(&versions).iter().any(|b| b.contains("more from the train")), "the other browser's words are a backup");
+        assert!(h.app.shown_status.contains("the other is a backup in Versions"), "{}", h.app.shown_status);
+        assert_eq!(h.app.cloud.mark(&dir.join("First words.caprice")).map(|m| m.0), Some(cloud::Mark::Online));
+
+        // Saved here, then changed later in another browser before this one looked: that is the story.
+        h.type_text(" Then here.");
+        h.key(Key::S, Modifiers::COMMAND);
+        let saved = h.app.cloud.now();
+        server.0.borrow_mut().clock = saved + 5.0;
+        changed_elsewhere(&server, "Written here.", "Written here, then on the train.");
+        h.later(cloud::UP_AFTER + 1.0);
+        h.later(1.0);
+        assert_eq!(h.text(), "First words. Written here, then on the train.", "the newer is shown");
+        assert!(!h.app.unsaved());
+        assert_eq!(shelf_count(&dir), 1);
+        assert_eq!(stories_online(&server).len(), 1);
+        assert!(backups(&versions).iter().any(|b| b.contains("Then here.")), "the words from here are a backup");
+
+        // The backups are out of the way in the Versions window, behind "⋯", to go back to.
+        h.app.open_versions();
+        h.frames(3, vec![], Modifiers::NONE);
+        assert!(!h.labels().contains("Backup, "), "not listed at first");
+        h.click_widget("\u{22ef}");
+        h.frames(2, vec![], Modifiers::NONE);
+        assert_eq!(h.labels().lines().filter(|l| l.starts_with("Backup, ")).count(), 2, "{}", h.labels());
+        assert!(h.labels().contains("kept for 7 days"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_story_opened_with_a_newer_copy_online_is_brought_up_to_date_before_it_can_be_written_in() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "online-opened-old");
         let server = online(&mut h, &dir, true);
         h.frames(12, vec![], Modifiers::NONE);
         h.type_text("First words.");
         h.save_on_shelf();
         h.later(cloud::UP_AFTER + 1.0);
         changed_elsewhere(&server, "First words.", "First words, and more from the train.");
-        h.type_text(" Written here.");
-        h.key(Key::S, Modifiers::COMMAND);
-        h.later(cloud::UP_AFTER + 1.0);
-        h.later(1.0);
-        assert_eq!(h.text(), "First words. Written here.", "the open story keeps what was written here");
-        let copy = std::fs::read_to_string(dir.join("First words (from another browser).caprice")).unwrap();
-        assert!(copy.contains("more from the train"), "the other browser's words are kept beside it");
-        let id = |json: &str| serde_json::from_str::<serde_json::Value>(json).unwrap()["id"].as_str().unwrap_or_default().to_owned();
-        let original = std::fs::read_to_string(dir.join("First words.caprice")).unwrap();
-        assert!(!id(&copy).is_empty() && id(&copy) != id(&original), "a story of its own, so another browser's copy is never the same story");
-        let mut online: Vec<String> = stories_online(&server).into_iter().map(|(name, _)| name).collect();
-        online.sort();
-        assert_eq!(online, ["First words", "First words (from another browser)"], "both are online");
-        assert!(stories_online(&server).iter().any(|(_, f)| f.contains("Written here.")));
-        h.app.cloud.open = true;
-        assert!(h.labels().contains("both are kept"), "and the writer is told");
+        drop(h);
 
-        // Both are marked on the welcome page, each naming the other, until they are sorted out.
-        let (story, copy) = (dir.join("First words.caprice"), dir.join("First words (from another browser).caprice"));
-        for (path, other) in [(&story, "First words (from another browser)"), (&copy, "First words")] {
-            let (mark, said) = h.app.cloud.mark(path).unwrap();
-            assert_eq!(mark, cloud::Mark::Twice);
-            assert!(said.contains(&format!("the other is \u{201c}{other}\u{201d}")), "{said}");
+        // The page opens again, and the story with it, before it has looked online.
+        let mut back = started_without_a_file(&dir);
+        back.app.shelf.dir = Some(dir.clone());
+        back.app.cloud = cloud::Cloud::with(Some(server.clone()), Some(dir.join("cloud.json")));
+        back.app.cloud.clock = Some(2000.0);
+        server.0.borrow_mut().slow = true;
+        let ctx = back.ctx.clone();
+        back.app.open_path(&ctx, dir.join("First words.caprice"));
+        back.frames(3, vec![], Modifiers::NONE);
+        assert_eq!(back.text(), "First words.");
+        assert!(!back.app.can_edit(), "it cannot be written in yet");
+        assert!(back.labels().contains("Looking for a newer copy online"), "and says why: {}", back.labels());
+        back.type_text(" Old.");
+        server.answer_held();
+        back.frames(12, vec![], Modifiers::NONE);
+        assert_eq!(back.text(), "First words, and more from the train.", "the newer copy came first");
+        assert!(back.app.can_edit() && !back.labels().contains("Looking for a newer copy"));
+        back.key(Key::End, Modifiers::COMMAND);
+        back.type_text(" Here.");
+        assert_eq!(back.text(), "First words, and more from the train. Here.");
+
+        // With no newer copy, or none to be had, it waits no longer than `CHECK_FOR`.
+        server.0.borrow_mut().refuse = Some((500, 0, "Broken".into()));
+        back.key(Key::S, Modifiers::COMMAND);
+        let ctx = back.ctx.clone();
+        back.app.open_path(&ctx, dir.join("First words.caprice"));
+        back.frames(1, vec![], Modifiers::NONE);
+        back.app.cloud.clock = back.app.cloud.clock.map(|t| t + cloud::CHECK_FOR);
+        back.frames(2, vec![], Modifiers::NONE);
+        assert!(back.app.can_edit());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_copy_an_older_caprice_kept_beside_a_story_becomes_a_backup_of_it() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "online-fold");
+        let server = online(&mut h, &dir, true);
+        let versions = dir.join("versions");
+        h.app.keep.dir = Some(versions.clone());
+        h.frames(12, vec![], Modifiers::NONE);
+        h.type_text("First words.");
+        h.save_on_shelf();
+        h.later(cloud::UP_AFTER + 1.0);
+        // Another browser, not yet with this Caprice, kept its words as a story of their own.
+        let name = "First words (from another browser)";
+        let copy = std::fs::read_to_string(dir.join("First words.caprice")).unwrap().replace("First words.", "Other words.");
+        let copy = copy.replacen("\"id\":", "\"id\":\"0000000000000abc\",\"was\":", 1);
+        server.put(&cloud::key("0000000000000abc", name), name, copy.as_bytes());
+        for _ in 0..3 {
+            h.later(cloud::LOOK_EVERY + 1.0);
         }
-        h.app.cloud.open = false;
-        h.app.start.open = true;
-        h.app.start.stories = None;
-        h.frames(30, vec![], Modifiers::NONE);
-        assert_eq!(h.labels().lines().filter(|l| *l == "two copies").count(), 2, "{}", h.labels());
-        h.click_widget("two copies");
-        assert_eq!(h.labels().lines().filter(|l| *l == "two copies").count(), 0, "sorted out, neither is marked");
-        assert!(story.exists() && copy.exists(), "and both are still there");
+        assert_eq!(shelf_count(&dir), 1, "one story on the shelf");
+        let online = stories_online(&server);
+        assert_eq!(online.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["First words"], "and online");
+        assert!(backups(&versions).iter().any(|b| b.contains("Other words.")), "the copy's words are a backup of the story");
+        assert!(!h.app.start.listed(None).iter().any(|l| l.path.to_string_lossy().contains("another browser")), "nor among the stories last opened");
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -8622,7 +8721,7 @@ mod tests {
         assert_eq!(stories, 1, "not kept twice");
         assert_eq!(stories_online(&server).len(), 1, "and one story online");
         assert_eq!(h.text(), "First words.");
-        assert!(h.app.cloud.mark(&path).is_none_or(|(m, _)| m != cloud::Mark::Twice), "nor marked so");
+        assert_eq!(h.app.cloud.mark(&path).map(|m| m.0), Some(cloud::Mark::Online), "but online as it is");
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -8661,6 +8760,8 @@ mod tests {
         let mut h = Harness::new();
         let dir = with_shelf(&mut h, "online-unsaved");
         let server = online(&mut h, &dir, true);
+        let versions = dir.join("versions");
+        h.app.keep.dir = Some(versions.clone());
         h.frames(12, vec![], Modifiers::NONE);
         h.type_text("First words.");
         h.save_on_shelf();
@@ -8668,10 +8769,11 @@ mod tests {
         changed_elsewhere(&server, "First words.", "First words, and more from the train.");
         h.type_text(" Not saved yet.");
         h.later(cloud::LOOK_EVERY + 1.0);
-        assert_eq!(h.text(), "First words. Not saved yet.", "the page keeps what was typed");
-        assert!(h.app.unsaved());
-        let copy = std::fs::read_to_string(dir.join("First words (from another browser).caprice")).unwrap();
-        assert!(copy.contains("more from the train"), "the words from online are kept beside it");
+        assert_eq!(h.text(), "First words. Not saved yet.", "the page keeps what was typed: it is the newest");
+        assert!(backups(&versions).iter().any(|b| b.contains("more from the train")), "the words from online are a backup");
+        h.later(1.0);
+        assert_eq!(shelf_count(&dir), 1);
+        assert!(stories_online(&server)[0].1.contains("Not saved yet."), "and what was typed went up");
         std::fs::remove_dir_all(dir).unwrap();
     }
 

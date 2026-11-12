@@ -866,6 +866,14 @@ must keep working: writers do it. A version (the whole `.caprice` file) is kept 
   (dropping changes, then opening the list, did).
   Of older versions, `kept` keeps the newest `KEEP_NEWEST`, then the last of each day for
   `KEEP_DAYS` days. A story with many pictures takes room: each version holds them all.
+- **Backups are words another browser's replaced, kept a week, out of the way** (`keep_backup`,
+  in the story's folder under `backups/`, R33). They are never versions (`versions_in` reads only
+  the folder itself) and never thinned by `kept`; `backups_in` deletes those older than
+  `BACKUP_DAYS` whenever it reads them. The Versions window lists them only behind "⋯"
+  (`Keeper::show_backups`), and going back to one is going back to a version. A story's folder
+  first named by a backup says its file (`About::path`), or the story would show among "Stories
+  never saved". Tests: `backups_are_kept_a_week_and_then_go`,
+  `a_story_changed_here_and_in_another_browser_is_kept_once_as_the_newer_and_the_other_is_a_backup`.
 - **The question says what is at stake, and keeps its word** (`leave.rs`): the story's words and
   chapters, how many words changed since it was saved by hand and when (`App::saved_at`, set with
   `as_saved`), or when it was begun; and that a version is kept whichever is chosen. So "Don't
@@ -1082,8 +1090,7 @@ file dialog, or a story that cannot be read, leaves the page up.
   deleted since is left out of what is shown, not out of the list. **With a shelf (in the browser)
   the page shows every story kept there** (`Start::listed`, "Your stories"): the ones last opened
   first, then the rest, last changed first, said to be opened only if they were on the list. A
-  browser has no other place to find a story, and a duplicate kept "from another browser" must
-  be in reach to delete.
+  browser has no other place to find a story.
 - **Coming back to it closes the story** (`close_story`, `Leaving::Home`): File › Close story
   with a shelf, and in the browser the back button (a phone's too). It asks about changes as
   opening another does, then keeps a version, puts a blank page under the welcome (`begin`, so
@@ -1829,8 +1836,15 @@ In the app (`cloud.rs`) **the shelf is where a story is; online is a copy, and n
   `UP_AFTER` later; going out of sight or coming back looks at once; otherwise every `LOOK_EVERY`.
 - **What to do is `decide`**, from the shelf's file (its fingerprint, and whether it is the open
   story with changes not saved), the record of when the two sides last agreed, and the version
-  online. Changed on both sides, or never agreed and different, the copy online is saved beside
-  the shelf's as "<name> (from another browser)"; the shelf's goes up over it. A story only on one
+  online. **There is one story, the same in every browser.** Changed on both sides, or never
+  agreed and different, it is settled (`settle`): the newer is the story, here and online, and the
+  other's words are kept among its backups for a week (R22), out of sight. Newer is by when each
+  was saved: online, the server's `modified` (in the list, `Online::modified`); here, when it was
+  last saved on the shelf (`Kept::changed`, by `Cloud::saved`), or now for words being typed (which
+  are saved at once when they win). If the backup cannot be written nothing changes, and the next
+  round tries again: no word is ever replaced unkept. The writer is told in the status line. It
+  once kept both, the online copy beside it as "<name> (from another browser)", a story of its own:
+  every clash left another story in every browser's list. A story only on one
   side goes to the other, even if it was deleted there, **unless it was deleted on purpose**: a
   story deleted here (`delete_story`) is named in `cloud.json` (`deleting`, with the version it
   agreed with) until `DELETE` has gone, and is neither sent up nor brought down meanwhile. The
@@ -1843,37 +1857,42 @@ In the app (`cloud.rs`) **the shelf is where a story is; online is a copy, and n
 - **Each story says how it stands online**, while signed in (`Cloud::mark_of`, `cloud::Mark`): a
   drawn mark and its word after its name on the welcome page, and the word in the shelf's Open
   window. Online (a cloud with a tick: the record's fingerprint is the file's), going online (a
-  cloud with an arrow: saved since, and it goes up by itself), only in this browser (a screen, in
+  cloud with an arrow: saved since, and it goes up by itself), or only in this browser (a screen, in
   the accent: online backup is off, or the story is too big; the hover says why and that it goes
-  up by itself), two copies (two sheets, in the accent: kept twice, `Kept::twice` in
-  `cloud.json`, both marked, each naming the other, until a click on the mark says they are sorted
-  out, or one is deleted). The mark is worked out from what the app knows, never by asking the
+  up by itself). The mark is worked out from what the app knows, never by asking the
   server, so it shows offline too; the welcome page takes the fingerprint from its list
   (`Story::hash`) rather than reading every file each frame. Going online stays automatic; the
   Stories online window offers "Try again now" while backup is off and "Back up now" while a save
   waits (`Cloud::try_now`). Anything new that changes whether a story is online (a new `Do`, a new
   refusal) must leave `mark_of` right. Tests:
   `each_story_on_the_welcome_page_says_whether_it_is_online_or_only_in_this_browser`,
-  `a_story_changed_here_and_in_another_browser_is_kept_twice_and_loses_no_word`.
+  `a_story_changed_here_and_in_another_browser_is_kept_once_as_the_newer_and_the_other_is_a_backup`.
+- **A story opened is brought up to date before it can be written in** (`Cloud::checking`, in
+  `App::can_edit`). Opened (any way `App::path` changes to a story with a record), it asks online
+  at once, and editing is off, with "Looking for a newer copy online…" (`live_bar`), until the list
+  is planned and a newer copy, if any, has come down, at most `CHECK_FOR` seconds, and not at all
+  while backup is off. Opened from a browser's older copy and written in at once, it was changed
+  in two places, and the newer, the few words typed, replaced the story written elsewhere. Test:
+  `a_story_opened_with_a_newer_copy_online_is_brought_up_to_date_before_it_can_be_written_in`.
+- **Copies an older Caprice kept beside a story are folded back** (`fold_copies`, each `plan`):
+  "<name> (from another browser)" or "(written here)", perhaps numbered, whose story is on the
+  shelf, becomes a backup of it and is deleted here and online (`Cloud::deleted`), so other
+  browsers drop it too. One open, or whose story is gone, stays. Test:
+  `a_copy_an_older_caprice_kept_beside_a_story_becomes_a_backup_of_it`.
 - **A save whose answer was lost is this browser's own.** A page frozen or gone in the background
   (a phone) may never hear the answer to a `PUT` that the server took: the record still names the
   version before, the version online is newer, and the shelf's file may have changed since, which
   `decide` reads as changed on both sides. So what goes up is written down first (`Kept::sending`,
   in `cloud.json`, its fingerprint by key), and a story compared (`Task::Compare`) whose copy online
-  is what this browser sent is agreed on, not kept twice; what was written since goes up over it.
+  is what this browser sent is agreed on, not settled; what was written since goes up over it.
   Test: `a_story_saved_online_whose_answer_was_lost_is_not_kept_twice`.
 - **Two copies are compared as stories, not as files** (`same_story`): what each browser keeps
   for itself in the file (the scene being described and whether pictures show, R34; the garden
   older files held, R30) is left out, and when only that differs, this browser's file is agreed on
   as it is (its own fingerprint recorded, so it is not sent up and fetched back by the other).
-  Compared byte for byte, a story open in two browsers was kept twice without a word differing.
-  **A copy kept "from another browser" is a story of its own** (`own_story`: a new id). With the
-  original's id its key online (`key`, from id and name) came out the same in two browsers that
-  had each kept one, so the two copies were kept twice again ("(from another browser)" twice
-  over), and its versions mixed with the original's. Anything new a file holds that is a
-  browser's own goes into `same_story` too. Tests:
-  `a_story_that_differs_in_another_browser_only_in_what_each_keeps_for_itself_is_kept_once`,
-  `a_story_changed_here_and_in_another_browser_is_kept_twice_and_loses_no_word`.
+  Compared byte for byte, a story open in two browsers was settled without a word differing.
+  Anything new a file holds that is a browser's own goes into `same_story` too. Test:
+  `a_story_that_differs_in_another_browser_only_in_what_each_keeps_for_itself_is_kept_once`.
 - **The open story is never written over** while it has changes not saved: the copy from online
   goes beside it. Without such changes it is written and shown again (`Cloud::reload`), the caret
   kept, its page shown with `go_to_page` (R5). **Its scenes stay on screen**: `adopt` takes the
@@ -1887,7 +1906,7 @@ In the app (`cloud.rs`) **the shelf is where a story is; online is a copy, and n
   brought down under another name (`free_name`) keeps its name online.
 - **A story that comes down new to this browser is among the stories last opened**
   (`Start::remember`, the welcome's list read again): a new browser is otherwise an empty welcome
-  page, and the writer thinks their stories are lost. So is a copy kept "from another browser".
+  page, and the writer thinks their stories are lost.
   The welcome greets whoever is signed in by their first name. Signed out, it offers Google's
   button under the greeting, which goes straight to Google (`App::sign_in`, saving first, as the
   window's does) and asks the server nothing on the way.
@@ -2021,7 +2040,7 @@ Plan and reasons: `LIVE_PLAN.md`.
 - **Transfer here** (`take`): the holder sends its last batch, then gives the pen (`given`), or
   loses it after `LIVE_HAND_OVER_MS`. A device that takes the pen of a story it followed clears
   its undo and first learns the version online (`take_claim`, `Cloud::agree`), so its saving
-  goes up over that version, not beside it as a story changed in two places (R33). It writes at
+  goes up over that version, not settled as a story changed in two places (R33). It writes at
   its own caret, where its reader was.
 - **A device gone** keeps the pen for `LIVE_FREE_AFTER_MS` (30 s), then the first device there
   has it. A device that comes in to follow asks for the whole story at once: its shelf's copy is
@@ -2032,7 +2051,8 @@ Plan and reasons: `LIVE_PLAN.md`.
   writes on, its edits waiting in the outbox for when it is back. It tries again at once, then
   every `AGAIN_AFTER`. Unlocked at once, as it first was, it was written in while it heard
   nothing, and coming back the holder's story replaced those words. **Words the room never had
-  are kept beside the story** (`keep_unsent`, "… (written here)") before a device follows again.
+  are kept among the story's backups** (`keep_unsent`, `keep_backup`, a week, R22, R33) before a
+  device follows again; they were once a story beside it, "… (written here)".
   Going out of sight, the holder sends what it typed in the last second (`live_hidden`, from
   `App::logic`), as no frame may come for a long time.
 - **The room costs requests, out of 100,000 a day for the whole site on the free plan** (stories
@@ -2079,7 +2099,7 @@ pen was gone". In the app:
 `a_change_that_is_no_edit_reaches_the_following_device_as_the_whole_story`,
 `a_following_device_changes_nothing_with_its_tools_notes_or_scratchpad`,
 `a_following_device_out_of_reach_for_a_moment_stays_locked_and_follows_again`,
-`words_written_where_the_pen_was_lost_are_kept_beside_the_story`,
+`words_written_where_the_pen_was_lost_are_kept_as_a_backup`,
 `transfer_here_moves_the_pen_and_the_other_device_follows_what_is_written_here`.
 
 ## 5. Checklists for common changes
@@ -2439,5 +2459,14 @@ result sent back, a stand-in answer in `api.test.mjs` and in `cloud::stand_in` (
   to rebuild its painter and every texture egui and the app hold. A reload gets a new one for
   nothing; what it would lose (the story shown, unsaved words, the caret, the device in the
   story's room) is written down first and read back (R31). Only undo is lost.
+- **2026-11-12 — One story in every browser; a clash keeps the newer, the other a week as a
+  backup.** A story changed in two browsers used to be kept twice, the other as "<name> (from
+  another browser)", a story of its own on every shelf. Nothing was lost, but the writer had to
+  sort out copies by hand, and they piled up. Most clashes came from a browser opening its older
+  copy and being written in before it looked online, so a story opened now waits for a newer copy
+  first. What still clashes (written in two places while out of reach) keeps the newer, by when
+  each was saved, and the other's words among the story's backups for a week, behind "⋯" in
+  Versions (R22, R33). Merging the two was not tried: the room already decided nothing is merged
+  (R34), and a backup is enough to take words back from.
 - **No `.docx` import.** Export only.
 - **Contents heading is "Contents"** (English), in the app and in Word.

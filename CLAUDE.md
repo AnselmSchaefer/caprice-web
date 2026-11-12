@@ -106,7 +106,8 @@ Full list with reasons and tests in `ARCHITECTURE.md` §4.
     starts another story sets `story_id` and calls `Keeper::opened`. Leaving still offers to drop
     the changes since saving by hand (`as_saved`). `Harness` turns autosave, versions, the
     word goal's file, the list of stories last opened, the theme's file and the page bar's off: tests write
-    nothing outside their own folders.
+    nothing outside their own folders. A story is one story in every browser: words a clash
+    replaces are kept a week as a backup (`keep_backup`), never as a story beside it (R33).
 13. **Colours around the page come from `theme::pal()`**, never literals; the page itself (`PAPER`, `INK`)
     is the same in every theme.
     Pictures (the emblem, the garden, houses, ships and sea, the forest and its lanterns, the reef, its fish and the octopus, the snowy hillside, its lake and igloos, the vineyard and its starlings, balloon and dragon) and Google's sign-in button keep their own colours.

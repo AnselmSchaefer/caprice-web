@@ -470,7 +470,9 @@ impl App {
                 self.saved_hash = self.content_hash();
                 self.as_saved = serde_json::to_string(&self.doc_file()).ok().map(|j| (self.saved_hash, j));
                 self.saved_at = Some(self.keep.now());
-                self.cloud.saved();
+                if let Some(path) = &self.path {
+                    self.cloud.saved(path);
+                }
                 "- saved".into()
             }
             Err(e) => format!("- save failed: {e}"),

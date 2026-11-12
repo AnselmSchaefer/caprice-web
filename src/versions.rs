@@ -6,6 +6,10 @@
 //! and a story never saved has them too. One is kept when a story is opened, every few minutes
 //! while it changes, before going back to another, and when Caprice closes: so even "Don't save"
 //! on a story never saved leaves it in the versions.
+//!
+//! Beside them, in the story's `backups` folder, are the words another browser's replaced (R33):
+//! a story changed in two browsers is kept once, as the newer, and the other is kept here for
+//! `BACKUP_DAYS`, out of the way behind "⋯" in the Versions window.
 
 use std::collections::BTreeSet;
 use std::hash::{Hash, Hasher};
@@ -28,6 +32,8 @@ pub const KEEP_EVERY: f64 = 300.0;
 const KEEP_NEWEST: usize = 20;
 const KEEP_DAYS: u64 = 30;
 const DAY: u64 = 86_400;
+/// Backups (the words another browser's replaced) are kept this long, then go.
+pub const BACKUP_DAYS: u64 = 7;
 
 /// Where the versions go: in the app's data folder.
 pub fn default_dir() -> Option<PathBuf> {
@@ -87,6 +93,9 @@ pub struct Keeper {
     /// This story's versions, newest first, and the newest of each story never saved.
     pub mine: Vec<Kept>,
     pub others: Vec<Kept>,
+    /// This story's backups, newest first, and whether the window shows them.
+    pub backups: Vec<Kept>,
+    pub show_backups: bool,
 }
 
 impl Keeper {
@@ -103,6 +112,8 @@ impl Keeper {
             hidden: false,
             mine: Vec::new(),
             others: Vec::new(),
+            backups: Vec::new(),
+            show_backups: false,
         }
     }
 
@@ -145,6 +156,15 @@ fn versions_in(dir: &Path) -> Vec<(u64, PathBuf)> {
         .collect();
     found.sort();
     found
+}
+
+/// The backups in a story's folder, oldest first, those older than `BACKUP_DAYS` at `now` gone.
+fn backups_in(dir: &Path, now: u64) -> Vec<(u64, PathBuf)> {
+    let (old, young): (Vec<_>, Vec<_>) = versions_in(&dir.join("backups")).into_iter().partition(|(at, _)| now.saturating_sub(*at) >= BACKUP_DAYS * DAY);
+    for (_, file) in old {
+        let _ = fs::remove_file(file);
+    }
+    young
 }
 
 /// Which of the versions made at `times` (oldest first) to keep at `now`: the newest
@@ -302,6 +322,32 @@ impl App {
         let _ = fs::write(dir.join("story.json"), serde_json::to_string(&About { name, path: None }).unwrap_or_default());
     }
 
+    /// Words another browser's replaced (R33), or never reached the others (R34): kept among the
+    /// backups of the story `id` at `path`, for `BACKUP_DAYS`. False if they could not be kept,
+    /// and then nothing may replace them.
+    pub fn keep_backup(&mut self, id: &str, path: &Path, json: &[u8]) -> bool {
+        let Some(dir) = self.keep.dir.as_ref().map(|d| d.join(id)) else { return false };
+        let now = self.keep.now();
+        let backups = backups_in(&dir, now);
+        if backups.last().and_then(|(_, f)| fs::read(f).ok()).as_deref() == Some(json) {
+            return true;
+        }
+        let mut at = now;
+        while fs::exists(dir.join("backups").join(format!("{at}.caprice"))) {
+            at += 1;
+        }
+        let written = fs::create_dir_all(dir.join("backups")).and_then(|()| fs::write(dir.join("backups").join(format!("{at}.caprice")), json));
+        // A story whose folder says nothing yet is named, with its file, so it is not taken for one never saved.
+        if written.is_ok() && !fs::exists(dir.join("story.json")) {
+            let name = path.file_stem().map_or(String::new(), |s| s.to_string_lossy().into_owned());
+            let _ = fs::write(dir.join("story.json"), serde_json::to_string(&About { name, path: Some(path.to_owned()) }).unwrap_or_default());
+        }
+        if id == self.story_id && self.keep.open {
+            self.read_versions();
+        }
+        written.is_ok()
+    }
+
     fn keep_version(&mut self, json: &str) {
         let Some(dir) = self.keep.dir.as_ref().map(|d| d.join(&self.story_id)) else { return };
         // Two in one second (going back, then opening the list) must not write over each other.
@@ -343,6 +389,8 @@ impl App {
             Some(Kept { file, at, words: story.words(), name: about.name, id: id.to_owned() })
         };
         self.keep.mine = versions_in(&dir.join(&self.story_id)).into_iter().rev().filter_map(|v| read(&self.story_id, v)).collect();
+        let backups = backups_in(&dir.join(&self.story_id), self.keep.now());
+        self.keep.backups = backups.into_iter().rev().filter_map(|v| read(&self.story_id, v)).collect();
         let mut others = Vec::new();
         let ids: BTreeSet<String> = fs::read_dir(&dir)
             .into_iter()
@@ -422,6 +470,25 @@ impl App {
                         });
                     }
                 });
+                // Backups are out of the way: words another browser's replaced, seldom wanted.
+                if !self.keep.backups.is_empty() {
+                    let more = ui.small_button("\u{22ef}").on_hover_text("Backups: words replaced by another browser's, kept a week");
+                    if more.clicked() {
+                        self.keep.show_backups = !self.keep.show_backups;
+                    }
+                    if self.keep.show_backups {
+                        ui.weak(format!("Replaced by what was written in another browser, kept for {BACKUP_DAYS} days:"));
+                        for k in &self.keep.backups {
+                            ui.horizontal(|ui| {
+                                let go = ui.button(format!("Backup, {}", ago(k.at, now)));
+                                if go.on_hover_text("Go back to this backup (the story as it is now is kept)").clicked() {
+                                    chosen = Some(k.clone());
+                                }
+                                ui.weak(format!("{} words", k.words));
+                            });
+                        }
+                    }
+                }
                 if !self.keep.others.is_empty() {
                     ui.add_space(6.0);
                     egui::CollapsingHeader::new("Stories never saved").id_salt("versions_others").show(ui, |ui| {
@@ -461,6 +528,22 @@ mod tests {
         assert!(kept_times.contains(&(99 * DAY + 30)) && !kept_times.contains(&(99 * DAY + 20)), "the last of a day");
         assert!(!kept_times.contains(&(60 * DAY + 30)), "not older than a month");
         assert!(kept_times.contains(&(71 * DAY + 30)));
+    }
+
+    #[test]
+    fn backups_are_kept_a_week_and_then_go() {
+        let dir = std::env::temp_dir().join(format!("caprice-backups-{}", new_id()));
+        let now = 100 * DAY;
+        for at in [now - BACKUP_DAYS * DAY - 1, now - BACKUP_DAYS * DAY + 60, now - 5] {
+            fs::create_dir_all(dir.join("backups")).and_then(|()| fs::write(dir.join("backups").join(format!("{at}.caprice")), "{}")).unwrap();
+        }
+        let times: Vec<u64> = backups_in(&dir, now).into_iter().map(|(t, _)| t).collect();
+        assert_eq!(times, [now - BACKUP_DAYS * DAY + 60, now - 5], "the ones from the last week");
+        assert_eq!(fs::read_dir(dir.join("backups")).unwrap().len(), 2, "the older one is gone");
+        assert!(versions_in(&dir).is_empty(), "and none is taken for a version");
+        for (_, file) in backups_in(&dir, now) {
+            let _ = fs::remove_file(file);
+        }
     }
 
     #[test]
