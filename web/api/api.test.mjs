@@ -841,6 +841,29 @@ test("a writer gone for a while frees the pen; back sooner, it keeps it", async 
   assert.equal((await phone.next("pen", 3000)).holder, "phone00001", "gone long enough, the pen is free");
 });
 
+test("a writer whose page or story closed frees the pen at once; one loading again keeps it", async t => {
+  const mf = await start(t);
+  const ada = await liveWriter(mf, "1", "Ada");
+  // A page loading again to come straight back (again.rs): the pen waits for it.
+  let laptop = await device(mf, ada, "story-1", "laptop0001");
+  const phone = await device(mf, ada, "story-1", "phone00001");
+  await laptop.next("hello");
+  await phone.next("hello");
+  laptop.ws.close(4003, "Left");
+  assert.equal(await phone.next("pen", 500), null, "kept for the page coming back");
+  laptop = await device(mf, ada, "story-1", "laptop0001");
+  assert.equal((await laptop.next("hello")).holder, "laptop0001", "and back, it writes on");
+  // Its tab closed (1001, as the browser closes the page's sockets): the phone writes at once,
+  // not half a minute later.
+  laptop.ws.close(1001, "Left");
+  assert.equal((await phone.next("pen", 2000)).holder, "phone00001", "the tab closed, the pen is free");
+  // The story closed there (1000): the same.
+  const tablet = await device(mf, ada, "story-1", "tablet0001");
+  await tablet.next("hello");
+  phone.ws.close(1000, "Left");
+  assert.equal((await tablet.next("pen", 2000)).holder, "tablet0001", "the story closed, the pen is free");
+});
+
 test("a room everyone left sleeps until a device comes back, however long the pen was gone", async t => {
   const mf = await start(t, { LIVE_FREE_AFTER_MS: "200" });
   const ada = await liveWriter(mf, "1", "Ada");

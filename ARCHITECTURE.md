@@ -2048,6 +2048,17 @@ Plan and reasons: `LIVE_PLAN.md`.
 - **A device gone** keeps the pen for `LIVE_FREE_AFTER_MS` (30 s), then the first device there
   has it. A device that comes in to follow asks for the whole story at once: its shelf's copy is
   older than the holder's. A follower that hears nothing back asks again after 30 s.
+  **A device that left frees it at once**: its socket closed by the page, 1000 when the story is
+  closed (`live_close`), 1001 or 1000 when the page goes (`pagehide`; browsers close a page's
+  sockets with 1001). Only out of reach (1006, no close at all) does the room wait. Every tab
+  is a new device, so a tab opened just after one was closed followed the closed one for half
+  a minute, "Open for writing on another device" with no other device. The page that loads
+  again to come straight back (`again.rs`, R31) keeps its device id and closes with 4003
+  (`live_back_soon`), so its pen waits for it. As the pen passes the moment a story is left,
+  the holder sends what it typed in the last second before leaving (`live_leaving`, from
+  `save_before_leaving`). Tests: "a writer whose page or story closed frees the pen at once;
+  one loading again keeps it",
+  `a_story_closed_where_it_was_written_goes_on_on_the_other_device_with_its_last_words`.
 - **Out of reach, a device stays as it was** (a tab in the background, a phone asleep, the
   network): its socket closing is not leaving the room. Following, it stays locked
   (`LOCKED_WHILE_LOST`, as long as the room keeps a pen) with "Connecting again…"; holding, it

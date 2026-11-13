@@ -8465,6 +8465,28 @@ mod tests {
     }
 
     #[test]
+    fn a_story_closed_where_it_was_written_goes_on_on_the_other_device_with_its_last_words() {
+        let (mut laptop, mut phone, _server, dirs) = laptop_and_phone("live-closed");
+        side_by_side(&mut laptop, &mut phone, 6);
+        assert!(laptop.app.can_edit() && !phone.app.can_edit());
+        laptop.type_text(" Then");
+        side_by_side(&mut laptop, &mut phone, 3);
+        assert_eq!(phone.text(), "Once upon a time. Then", "a batch went just now");
+        // Typed, and the story closed within the second, before the next batch was due.
+        laptop.type_text(" the end.");
+        let ctx = laptop.ctx.clone();
+        laptop.app.close_story(&ctx);
+        // Closed (as if the question about its changes had been answered).
+        laptop.app.leave(&ctx, fileio::Leaving::Home);
+        side_by_side(&mut laptop, &mut phone, 6);
+        assert!(phone.app.can_edit(), "the room gives the phone the pen as the laptop leaves");
+        assert_eq!(phone.text(), "Once upon a time. Then the end.", "with the words typed last");
+        for d in dirs {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+
+    #[test]
     fn transfer_here_moves_the_pen_and_the_other_device_follows_what_is_written_here() {
         let (mut laptop, mut phone, server, dirs) = laptop_and_phone("live-transfer");
         side_by_side(&mut laptop, &mut phone, 6);

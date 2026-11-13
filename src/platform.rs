@@ -187,6 +187,8 @@ pub fn reload() {
     #[cfg(target_arch = "wasm32")]
     {
         browser::warn_on_leaving(false);
+        // Back at once with the same device id (`again.rs`): its pen is not given away meanwhile.
+        browser::live_back_soon();
         wasm_bindgen_futures::spawn_local(async {
             let _ = wasm_bindgen_futures::JsFuture::from(fs::settled()).await;
             if let Some(window) = web_sys::window() {
@@ -562,6 +564,19 @@ mod browser {
         // then, which the room answers without waking.
         const sockets = new Map();
         let next_socket = 1;
+        // The page going (its tab closed, another page opened in it), each room hears that this
+        // device left, and frees its pen at once: a tab opened next would otherwise follow the one
+        // closed for half a minute. Loaded again to come straight back (`live_back_soon`), it keeps it.
+        let leaving = 1000;
+        addEventListener("pagehide", () => {
+            for (const s of sockets.values()) {
+                clearInterval(s.ping);
+                if (s.ws.readyState <= 1) s.ws.close(leaving, "Left");
+            }
+        });
+        export function live_back_soon() {
+            leaving = 4003;
+        }
         export function live_open(path, wake) {
             const id = next_socket++;
             const s = { ws: new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + path), heard: [] };
@@ -589,7 +604,7 @@ mod browser {
             if (!s) return;
             clearInterval(s.ping);
             s.ws.onclose = null;
-            s.ws.close();
+            s.ws.close(1000, "Left");
             sockets.delete(id);
         }
         export function device_name() {
@@ -628,6 +643,7 @@ mod browser {
         fn live_send(id: u32, text: &str);
         fn live_take(id: u32) -> js_sys::Array;
         fn live_close(id: u32);
+        pub fn live_back_soon();
         pub fn device_name() -> String;
         #[wasm_bindgen(js_name = api_send)]
         fn js_api_send(method: &str, path: &str, names: js_sys::Array, values: js_sys::Array, body: Option<Box<[u8]>>, reads: js_sys::Array) -> js_sys::Promise;

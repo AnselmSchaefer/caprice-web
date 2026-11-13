@@ -292,6 +292,7 @@ impl App {
 
     /// Before opening another story or closing, a story with a file is saved, rather than asked about.
     pub fn save_before_leaving(&mut self) {
+        self.live_leaving();
         if self.keep.autosave && self.path.is_some() && self.unsaved() && self.can_edit() {
             self.save_quietly();
         }

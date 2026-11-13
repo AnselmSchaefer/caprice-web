@@ -1,7 +1,8 @@
 // A story's room: one Durable Object for each story online of each writer, where the devices it
 // is open on meet (LIVE_PLAN.md, ARCHITECTURE.md R34). One device holds the pen and writes; its
 // edits come here in numbered batches and go on to every other device, which follows and cannot
-// edit. Transfer here moves the pen; a device gone for LIVE_FREE_AFTER_MS frees it.
+// edit. Transfer here moves the pen; a device gone for LIVE_FREE_AFTER_MS frees it, and one that
+// left (its page or the story closed) frees it at once.
 //
 // The room is named from the user and the story's key, both checked by the Worker (worker.js),
 // so only one writer's own devices ever meet in it. It keeps no story: the edits pass through.
@@ -199,10 +200,16 @@ export class StoryRoom extends DurableObject {
     return { at: await this.ctx.storage.getAlarm(), woken: this.woken ?? 0 };
   }
 
-  async webSocketClose(ws) {
+  async webSocketClose(ws, code) {
     // The holder going: the number of its last batch is written down first.
     const me = ws.deserializeAttachment();
-    if (me?.device === this.get("pen")?.device && me.seq !== undefined) this.set("seq", me.seq);
+    const holding = me?.device === this.get("pen")?.device;
+    if (holding && me.seq !== undefined) this.set("seq", me.seq);
+    // Closed by its page, the device left: the story closed (1000), or the page itself, its tab
+    // closed or another page opened in it (1001, as browsers close a page's sockets). Its pen
+    // is free at once, as if gone long ago. Only out of reach (1006), it keeps it a while; so
+    // does a page loading again to come straight back (4003, `again.rs`).
+    if (holding && (code === 1000 || code === 1001)) this.set("gone", 0);
     ws.close();
     await this.settle();
   }

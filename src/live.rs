@@ -387,7 +387,16 @@ impl App {
     /// The page goes out of sight (`App::logic`, which runs then too): what was typed in the last
     /// second goes now, as no frame may come to send it for a long time.
     pub fn live_hidden(&mut self) {
-        if self.live.holding() && crate::platform::page_hidden() {
+        if crate::platform::page_hidden() {
+            self.live_leaving();
+        }
+    }
+
+    /// The story is about to be put away (`save_before_leaving`): what was typed in the last
+    /// second goes now. Its room gives the pen to the next device as soon as it is left, and that
+    /// device writes on from what it has.
+    pub fn live_leaving(&mut self) {
+        if self.live.holding() {
             self.send_batch(f64::INFINITY);
         }
     }
