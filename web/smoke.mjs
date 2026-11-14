@@ -289,6 +289,45 @@ const backCorner = await corner();
 check("back closes the story and the welcome shows, and the page stays",
   !storyCorner.equals(welcomeCorner) && backCorner.equals(welcomeCorner) && await page.evaluate(() => window.stillHere === true));
 
+// A theme of one's own (own.rs), put on the shelf as importing one does: its picture covers the
+// desk once a worker has read and rendered it, and moves.
+const template = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../assets/theme-template.svg"));
+const colours = { accent: "#ffcf7a", button: "#262a38", button_hover: "#393d49", caret: "#a6874f", desk: "#1c2433", desk_top: "#151e3c", dock: "#101524", dock_edge: "#363a47", field: "#0c101b", light: "no", on_accent: "#080b0f", text: "#e3e4e8", text_dim: "#9da1ad", text_hot: "#ffffff", thumb: "#99825a" };
+const shelf = [{ id: "smoketheme", name: "Moonlit Bay", about: "", author: "", colours, grows: true, carries: true, added: 0 }];
+await page.evaluate(([files]) => new Promise((done, failed) => {
+  const r = indexedDB.open("caprice", 1);
+  r.onsuccess = () => {
+    const t = r.result.transaction("files", "readwrite");
+    for (const [p, text] of files) t.objectStore("files").put({ bytes: new TextEncoder().encode(text), modified: 0 }, p);
+    t.oncomplete = done;
+    t.onerror = () => failed(t.error);
+  };
+  r.onerror = () => failed(r.error);
+}), [[["/caprice/theme.json", '{"own":"smoketheme"}'], ["/caprice/themes/index.json", JSON.stringify(shelf)], ["/caprice/themes/smoketheme.svg", template.toString()]]]);
+await page.reload();
+await started();
+await click(280, 340);
+await page.waitForTimeout(6000);
+await page.screenshot({ path: `${out}/12-own-theme.png` });
+// Beside the page, low on the desk: the cottage and the pines, not the plain desk.
+const beside = () => page.screenshot({ clip: { x: 20, y: 560, width: 220, height: 200 } });
+const first = await beside();
+await page.waitForTimeout(700);
+const later = await beside();
+// The screen's pixel, from a screenshot of it: a WebGL canvas cannot be read back.
+const shot = (await page.screenshot({ clip: { x: 38, y: 258, width: 1, height: 1 } })).toString("base64");
+const pixel = await page.evaluate(async png => {
+  const img = new Image();
+  img.src = `data:image/png;base64,${png}`;
+  await img.decode();
+  const g = document.createElement("canvas").getContext("2d");
+  g.drawImage(img, 0, 0);
+  return Array.from(g.getImageData(0, 0, 1, 1).data);
+}, shot);
+// The sky left of the page is a deep blue (#1d2858 or so); Midnight's desk is all but grey.
+check("a theme of one's own covers the desk with its picture", pixel[2] > pixel[0] + 30, pixel.join(","));
+check("and its picture moves", !first.equals(later));
+
 check("no errors on the page", errors.length === 0, [...new Set(errors)].slice(0, 8).join("\n  "));
 
 // The page itself is never kept, so a new build is what opens; and a page kept from a build before,

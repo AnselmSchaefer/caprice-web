@@ -23,6 +23,7 @@ mod model;
 mod motion;
 mod notes;
 mod numbers;
+mod own;
 mod paginate;
 mod peek;
 mod platform;
@@ -314,6 +315,8 @@ pub struct App {
     pub peeks: peek::Peeks,
     /// The colours around the pages, and where the choice is kept.
     pub themes: theme::Themes,
+    /// Themes of the writer's own being imported, and the windows about them.
+    pub workshop: own::Workshop,
     /// Where the page bar is docked, and where that is kept.
     pub bar: ui::BarPlace,
     /// What grows and flies in the Magic Garden theme, and what builds in the Magic City.
@@ -418,6 +421,7 @@ impl App {
             start: start::Start::new(),
             peeks: peek::Peeks::default(),
             themes: theme::Themes::new(),
+            workshop: own::Workshop::default(),
             bar: ui::BarPlace::new(),
             eggs: eggs::Eggs::default(),
         };
@@ -654,6 +658,7 @@ impl App {
         }
         self.come_back(&ctx);
         self.poll_dialog(&ctx);
+        self.tend_workshop(&ctx);
         self.cloud_frame(&ctx);
         self.live_frame(&ctx);
         self.guard_close(&ctx);
@@ -735,6 +740,7 @@ impl App {
         self.draw_reef(ui, area, page_rect);
         self.draw_snow(ui, area, page_rect);
         self.draw_vineyard(ui, area, page_rect);
+        self.draw_own(ui, area, page_rect);
         let base = self.pos.floor() as usize;
         let t = self.pos - base as f32;
         self.animate_held(ui);
@@ -823,6 +829,7 @@ impl App {
         self.versions_window(&ctx);
         self.shelf_window(&ctx);
         self.cloud_window(&ctx);
+        self.workshop_windows(&ctx);
         self.info_window(&ctx);
         self.keep_safe(&ctx);
         self.track_words(&ctx);
@@ -6334,6 +6341,315 @@ mod tests {
             assert!(painted_contrast(&h, "Page") >= 4.5, "{t:?}: a tool's name");
             assert!(painted_contrast(&h, "Page 1 of 1") >= 3.0, "{t:?}: the page bar");
         }
+        // And a theme of one's own, whose colours come from its picture.
+        in_own_theme(&mut h, own::TEMPLATE, 0.0);
+        assert!(painted_contrast(&h, "Page") >= 4.5, "own: a tool's name");
+        assert!(painted_contrast(&h, "Page 1 of 1") >= 3.0, "own: the page bar");
+    }
+
+    /// A desk that does not move: a sky and nothing else.
+    const STILL_DESK: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900"><g id="desk"><rect width="1600" height="900" fill="#234"/></g></svg>"##;
+
+    /// The template, imported as a theme of one's own and chosen, its picture on the desk; what
+    /// brings a title comes at `odds`.
+    fn in_own_theme(h: &mut Harness, svg: &str, odds: f64) {
+        h.frames(3, vec![], Modifiers::NONE);
+        let ctx = h.ctx.clone();
+        h.app.import_theme_svg(&ctx, svg.to_owned(), "Mine".into());
+        h.frames_until("the theme", |a| a.themes.theme == theme::Theme::Own);
+        h.app.workshop.report = None;
+        h.app.eggs.odds = Some(odds);
+        h.frames_until("the theme read", |a| a.eggs.own.seen.is_some());
+        h.wait(1.0);
+    }
+
+    /// Frames until the theme of one's own's picture is rendered: in a debug build, with every test
+    /// rendering at once, that can take seconds.
+    fn until_own_picture(h: &mut Harness) {
+        let since = std::time::Instant::now();
+        while !h.app.eggs.own.seen.as_ref().is_some_and(|s| s.shown) {
+            assert!(since.elapsed().as_secs() < 60, "no picture");
+            h.frames(1, vec![], Modifiers::NONE);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    fn own_seen(h: &Harness) -> eggs::own::Seen {
+        h.app.eggs.own.seen.clone().expect("the theme of one's own is drawn")
+    }
+
+    #[test]
+    fn a_theme_of_one_s_own_is_imported_chosen_and_kept_for_next_time() {
+        let dir = std::env::temp_dir().join(format!("caprice-own-theme-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("Moonlit_bay.svg");
+        std::fs::write(&file, own::TEMPLATE).unwrap();
+        let mut h = Harness::new();
+        h.app.themes = theme::Themes::kept_in(Some(dir.join("theme.json")));
+        h.frames(3, vec![], Modifiers::NONE);
+        let ctx = h.ctx.clone();
+        h.app.import_theme(&ctx, &file);
+        h.frames_until("the theme", |a| a.themes.theme == theme::Theme::Own);
+        let report = h.app.workshop.report.as_ref().expect("a report");
+        assert!(report.added && report.problems.is_empty() && report.name == "Moonlit Bay", "named as its settings say");
+        assert!(report.found.iter().any(|f| f.contains("moving parts")) && report.found.iter().any(|f| f.contains("8 stages")), "{:?}", report.found);
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.painted_at("Theme added").is_some(), "a window says so");
+        h.click_widget("OK");
+        assert!(h.app.workshop.report.is_none());
+        until_own_picture(&mut h);
+        h.wait(1.0);
+        let palette = h.app.themes.palette();
+        assert_eq!(theme::pal(), palette, "its colours around the page");
+        assert_ne!(palette, theme::Theme::Midnight.palette());
+        assert!(own_seen(&h).moving >= 10, "its parts move: {}", own_seen(&h).moving);
+
+        let mut again = Harness::new();
+        again.app.themes = theme::Themes::kept_in(Some(dir.join("theme.json")));
+        again.frames(2, vec![], Modifiers::NONE);
+        assert_eq!((again.app.themes.theme, again.app.themes.name()), (theme::Theme::Own, "Moonlit Bay".to_owned()), "the next time Caprice opens");
+        assert_eq!(theme::pal(), palette);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_drawing_whose_desk_does_not_move_is_not_added_and_a_window_says_why() {
+        let mut h = Harness::new();
+        h.frames(3, vec![], Modifiers::NONE);
+        let ctx = h.ctx.clone();
+        h.app.import_theme_svg(&ctx, STILL_DESK.to_owned(), "Still".into());
+        h.frames_until("a report", |a| a.workshop.report.is_some());
+        let report = h.app.workshop.report.as_ref().unwrap();
+        assert!(!report.added && report.problems.iter().any(|p| p.contains("must move")), "{:?}", report.problems);
+        assert_eq!(h.app.themes.theme, theme::Theme::Midnight, "the theme in use stays");
+        assert!(h.app.themes.own.entries.is_empty(), "nothing on the shelf");
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.painted_at("Theme not added").is_some());
+        h.click_widget("How to make one");
+        assert!(h.app.workshop.guide && h.app.workshop.report.is_none(), "the guide, in place of the report");
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.painted_at("Make a theme of your own").is_some());
+    }
+
+    #[test]
+    fn a_theme_of_one_s_own_covers_the_whole_desk_whatever_the_window_s_shape() {
+        for (w, ht) in [(1240.0, 900.0), (1900.0, 640.0), (700.0, 1100.0)] {
+            let mut h = Harness::new();
+            (h.width, h.height) = (w, ht);
+            in_own_theme(&mut h, own::TEMPLATE, 0.0);
+            let desk = own_seen(&h).desk;
+            let window = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(w, ht));
+            assert!(desk.contains_rect(window), "{w}×{ht}: {desk:?}");
+            assert!((desk.bottom() - ht).abs() < 1.0, "{w}×{ht}: held at its foot: {desk:?}");
+            assert!((desk.width() / desk.height() - 1920.0 / 1080.0).abs() < 0.01, "{w}×{ht}: never stretched");
+        }
+    }
+
+    #[test]
+    fn in_a_theme_of_one_s_own_each_page_grows_a_stage_and_the_next_chapter_finishes_the_piece() {
+        let mut h = Harness::new();
+        in_own_theme(&mut h, own::TEMPLATE, 0.0);
+        assert_eq!(own_seen(&h).pieces.iter().map(|p| p.1).collect::<Vec<_>>(), [1], "a stage for the first page");
+        chapter_one(&mut h);
+        h.key(Key::Enter, Modifiers::NONE);
+        h.type_text(&SENTENCE.repeat(220));
+        let pages = h.app.doc.pages();
+        assert!((4..8).contains(&pages), "pages, fewer than the stages: {pages}");
+        h.frames(10, vec![], Modifiers::NONE);
+        assert!(own_seen(&h).pieces[0].1 < pages, "each stage comes in sight");
+        let mut lit = false;
+        for _ in 0..(eggs::own::STEP * 60.0) as usize * (pages + 1) {
+            h.frames(1, vec![], Modifiers::NONE);
+            lit |= own_seen(&h).coming.is_some();
+        }
+        assert!(lit, "out of a little light");
+        let built = own_seen(&h).pieces[0];
+        assert_eq!(built.1, pages.min(8), "a stage a page");
+        assert!(built.2 == 0.0 && beside_the_page(&h, built.0), "beside the page, not finished while its chapter is written: {built:?}");
+        h.key(Key::Enter, Modifiers::NONE);
+        h.type_text("Chapter Two");
+        h.click_widget("Chapter");
+        h.frames((eggs::own::FINISH * 60.0 * 0.4) as usize, vec![], Modifiers::NONE);
+        let seen = own_seen(&h);
+        assert!(seen.pieces.len() == 2 && seen.pieces[0].2 > 0.0 && seen.pieces[0].2 < 1.0, "finishing: {:?}", seen.pieces);
+        h.frames((eggs::own::FINISH * 60.0) as usize, vec![], Modifiers::NONE);
+        let seen = own_seen(&h);
+        assert_eq!((seen.pieces[0].1, seen.pieces[0].2), (8, 1.0), "finished whole, though its chapter had fewer pages than stages");
+        assert_eq!((seen.pieces[1].1, seen.pieces[1].2), (1, 0.0), "the new chapter's begun");
+        assert!(beside_the_page(&h, seen.pieces[1].0) && seen.pieces[1].0 != seen.pieces[0].0, "in a place of its own");
+
+        // Picked again, it shows the story as it stands at once.
+        let ctx = h.ctx.clone();
+        let id = h.app.themes.own_id.clone().unwrap();
+        h.app.themes.choose(&ctx, theme::Theme::Snow);
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.app.eggs.own.seen.is_none(), "nothing of it in another theme");
+        h.app.themes.choose_own(&ctx, &id);
+        h.frames_until("its pieces", |a| a.eggs.own.seen.as_ref().is_some_and(|s| s.pieces.len() == 2));
+        let seen = own_seen(&h);
+        assert!(seen.pieces[0].1 == 8 && seen.pieces[0].2 == 1.0 && seen.coming.is_none(), "{:?}", seen.pieces);
+    }
+
+    /// A beach where a coconut falls where it is drawn for every page of the story, three of them,
+    /// and a crab comes out once all three lie there.
+    const BEACH: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900">
+        <metadata id="caprice">{"growth": {"layout": "drawn", "arrive": "fall"}}</metadata>
+        <g id="desk"><rect width="1600" height="900" fill="#7cd"/><rect y="700" width="1600" height="200" fill="#ec9"/>
+            <g id="move-drift-1"><ellipse cx="200" cy="100" rx="80" ry="20" fill="#fff"/></g>
+            <g id="move-drift-2"><ellipse cx="1400" cy="150" rx="80" ry="20" fill="#fff"/></g></g>
+        <g id="piece">
+            <circle id="stage-1" cx="100" cy="800" r="15" fill="#753"/>
+            <circle id="stage-2" cx="140" cy="810" r="15" fill="#753"/>
+            <circle id="stage-3" cx="1450" cy="805" r="15" fill="#753"/>
+            <g id="done"><ellipse cx="1500" cy="830" rx="20" ry="10" fill="#e43"/></g>
+        </g></svg>"##;
+
+    #[test]
+    fn in_a_theme_drawn_in_place_a_stage_falls_where_it_is_drawn_for_every_page_of_the_story() {
+        let mut h = Harness::new();
+        in_own_theme(&mut h, BEACH, 0.0);
+        let seen = own_seen(&h);
+        assert_eq!(seen.pieces.len(), 1, "one for the whole story");
+        let (rect, shown, done) = seen.pieces[0];
+        // Where it is drawn: from the first coconut's left to the crab's right, on the picture.
+        let at = |x: f32, y: f32| seen.desk.lerp_inside(egui::vec2(x / 1600.0, y / 900.0));
+        assert!(rect.left() < at(85.0, 0.0).x + 2.0 && rect.left() > at(70.0, 0.0).x && rect.right() > at(1520.0, 0.0).x - 2.0, "{rect:?} {:?}", seen.desk);
+        assert!((rect.bottom() - at(0.0, 840.0).y).abs() < 6.0, "{rect:?}");
+        assert_eq!((shown, done), (1, 0.0), "a coconut for the first page");
+        h.type_text(&SENTENCE.repeat(90));
+        assert_eq!(h.app.doc.pages(), 2);
+        let mut highest = f32::MAX;
+        for _ in 0..(eggs::own::STEP * 60.0) as usize + 10 {
+            h.frames(1, vec![], Modifiers::NONE);
+            highest = highest.min(own_seen(&h).coming.map_or(f32::MAX, |p| p.y));
+        }
+        assert!(highest < at(0.0, 810.0).y - h.height * 0.2, "falling from above: {highest}");
+        assert_eq!(own_seen(&h).pieces[0].1, 2, "a coconut more for the next page");
+        // A new chapter is no new beach: its pages count on.
+        h.key(Key::Enter, Modifiers::NONE);
+        h.type_text("Chapter Two");
+        h.click_widget("Chapter");
+        h.key(Key::Enter, Modifiers::NONE);
+        h.type_text(&SENTENCE.repeat(90));
+        assert!(h.app.doc.pages() >= 3);
+        h.frames((eggs::own::STEP * 60.0) as usize * 3, vec![], Modifiers::NONE);
+        let seen = own_seen(&h);
+        assert_eq!(seen.pieces.len(), 1);
+        assert_eq!((seen.pieces[0].1, seen.pieces[0].2), (3, 1.0), "all three, and the crab out once they lie there");
+    }
+
+    /// Two palms swaying, each with three coconuts drawn on its crown; a chapter's coconuts grow on
+    /// a palm at random, and fall to the sand when the next chapter begins.
+    const PALMS: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900">
+        <metadata id="caprice">{"growth": {"layout": "drawn", "each": "chapter", "order": "random", "arrive": "grow", "finish": "fall", "ground": 860}}</metadata>
+        <g id="desk"><rect width="1600" height="900" fill="#7cd"/><rect y="760" width="1600" height="140" fill="#ec9"/>
+            <g id="move-sway-1-200-850"><rect x="190" y="450" width="20" height="400" fill="#853"/><ellipse cx="200" cy="440" rx="110" ry="40" fill="#3a5"/>
+                <g id="piece-1"><circle id="stage-1" cx="180" cy="480" r="14" fill="#642"/><circle id="stage-2" cx="200" cy="490" r="14" fill="#642"/><circle id="stage-3" cx="220" cy="480" r="14" fill="#642"/></g></g>
+            <g id="move-sway-2-1400-850"><rect x="1390" y="450" width="20" height="400" fill="#853"/><ellipse cx="1400" cy="440" rx="110" ry="40" fill="#3a5"/></g></g>
+        <g id="piece-2"><circle id="stage-1" cx="1380" cy="480" r="14" fill="#642"/><circle id="stage-2" cx="1400" cy="490" r="14" fill="#642"/><circle id="stage-3" cx="1420" cy="480" r="14" fill="#642"/></g>
+    </svg>"##;
+
+    #[test]
+    fn coconuts_grow_on_a_chapter_s_palm_sway_with_it_and_fall_to_the_sand_when_the_next_begins() {
+        let mut h = Harness::new();
+        in_own_theme(&mut h, PALMS, 0.0);
+        until_own_picture(&mut h);
+        let seen = own_seen(&h);
+        assert_eq!(seen.riding, 1, "drawn on the palm or over it, they sway with it");
+        let first = seen.pieces[0].0;
+        let on_a_palm = |r: egui::Rect| [200.0, 1400.0].iter().any(|&x| (r.center().x - seen.desk.lerp_inside(egui::vec2(x / 1600.0, 0.0)).x).abs() < 40.0);
+        assert!(on_a_palm(first), "where it is drawn: {first:?}");
+        chapter_one(&mut h);
+        h.key(Key::Enter, Modifiers::NONE);
+        h.type_text(&SENTENCE.repeat(90));
+        h.frames((eggs::own::STEP * 60.0) as usize * 3, vec![], Modifiers::NONE);
+        assert_eq!(own_seen(&h).pieces[0].1, 2, "a coconut a page");
+        h.key(Key::Enter, Modifiers::NONE);
+        h.type_text("Chapter Two");
+        h.click_widget("Chapter");
+        h.frames((eggs::own::FINISH * 60.0) as usize + 10, vec![], Modifiers::NONE);
+        let seen = own_seen(&h);
+        assert_eq!((seen.fallen, seen.pieces[0].1, seen.pieces[0].2), (2, 0, 1.0), "the first palm's coconuts on the sand, none left on it");
+        assert!(on_a_palm(seen.pieces[1].0) && seen.pieces[1].0 != first, "the next chapter has the other palm: {:?}", seen.pieces);
+        assert_eq!(seen.pieces[1].1, 1, "growing its first coconut");
+    }
+
+    #[test]
+    fn a_theme_of_one_s_own_brings_a_new_chapter_title_with_its_carrier() {
+        let mut h = Harness::new();
+        in_own_theme(&mut h, own::TEMPLATE, 1.0);
+        h.frames_until("the carrier", |a| a.eggs.own.carrier_ready());
+        chapter_one(&mut h);
+        let lift = h.app.eggs.lift.expect("the gull brings the title");
+        assert!(matches!(lift.by, eggs::Carrier::Own { .. }));
+        h.frames(30, vec![], Modifiers::NONE);
+        let page = h.app.last_page_rect;
+        let ctx = h.ctx.clone();
+        let (by, p, _) = h.app.lifting(&ctx, 0).expect("on its way");
+        let place = h.app.eggs.place.expect("where the title goes");
+        let shapes = h.app.eggs.own.carrier(by, p, place, page, h.app.eggs.desk, h.time);
+        assert!(!shapes.is_empty(), "drawn");
+        let ctx = h.ctx.clone();
+        let plain = h.app.pdf(&ctx, 0..=0).unwrap();
+        h.frames(400, vec![], Modifiers::NONE);
+        assert!(h.app.eggs.lift.is_none(), "gone again");
+        let ctx = h.ctx.clone();
+        assert!(h.app.pdf(&ctx, 0..=0).unwrap() == plain, "print shows nothing of it");
+    }
+
+    #[test]
+    fn print_shows_nothing_of_a_theme_of_one_s_own() {
+        let mut h = Harness::new();
+        chapter_one(&mut h);
+        let ctx = h.ctx.clone();
+        let plain = h.app.pdf(&ctx, 0..=0).unwrap();
+        let mut g = Harness::new();
+        in_own_theme(&mut g, own::TEMPLATE, 0.0);
+        chapter_one(&mut g);
+        g.frames(70, vec![], Modifiers::NONE);
+        assert!(!own_seen(&g).pieces.is_empty());
+        let ctx = g.ctx.clone();
+        assert!(g.app.pdf(&ctx, 0..=0).unwrap() == plain);
+    }
+
+    #[test]
+    fn the_theme_gallery_shows_one_s_own_themes_to_choose_export_and_delete() {
+        let mut h = Harness::new();
+        h.frames(3, vec![], Modifiers::NONE);
+        h.click_widget("Page");
+        h.click_widget("Midnight Ink ⏵");
+        h.click_widget("Yours");
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.painted_at("Get the template…").is_some() && h.painted_at("Import a theme…").is_some(), "with none yet, how to begin");
+        h.key(Key::Escape, Modifiers::NONE);
+        in_own_theme(&mut h, own::TEMPLATE, 0.0);
+        let id = h.app.themes.own_id.clone().unwrap();
+        let ctx = h.ctx.clone();
+        h.app.themes.choose(&ctx, theme::Theme::Lagoon);
+        h.wait(1.0);
+        h.click_widget("Page");
+        h.click_widget("Lagoon ⏵");
+        h.click_widget("Yours");
+        h.frames(3, vec![], Modifiers::NONE);
+        assert!(h.app.workshop.thumbs.contains_key(&id), "its little picture");
+        h.click_widget("Moonlit Bay");
+        h.wait(1.0);
+        assert_eq!((h.app.themes.theme, h.app.themes.own_id.as_deref()), (theme::Theme::Own, Some(id.as_str())));
+
+        // Exported, it can be imported again as it was.
+        let path = std::env::temp_dir().join(format!("caprice-own-export-{}.svg", std::process::id()));
+        h.app.export_theme_to(&id, &path);
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(written.contains("id=\"desk\"") && written.contains("Moonlit Bay"));
+        let _ = std::fs::remove_file(&path);
+
+        h.app.theme_asked(&ctx, own::Ask::Delete(id.clone()));
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.painted_at("Delete theme?").is_some(), "asked first");
+        h.click_widget("Delete");
+        assert!(h.app.themes.own.entries.is_empty());
+        assert_eq!(h.app.themes.theme, theme::Theme::Midnight, "the usual theme in its place");
     }
 
     fn painted_contrast(h: &Harness, words: &str) -> f32 {

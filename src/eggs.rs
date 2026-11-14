@@ -35,6 +35,7 @@ use crate::App;
 use crate::theme::Theme;
 
 pub mod forest;
+pub mod own;
 pub mod reef;
 pub mod snow;
 pub mod country;
@@ -49,6 +50,8 @@ pub enum Carrier {
     Balloon { right: bool },
     /// Down from above, not from the side (`reef::octopus_at`).
     Octopus { right: bool },
+    /// A theme of the writer's own's (`own::Shown::carrier`), flying the balloon's way.
+    Own { right: bool },
 }
 
 impl Carrier {
@@ -66,7 +69,7 @@ impl Carrier {
     pub fn pace(self) -> f32 {
         match self {
             Carrier::Dragon { .. } => 1.7,
-            Carrier::Balloon { .. } => 1.0,
+            Carrier::Balloon { .. } | Carrier::Own { .. } => 1.0,
             // It drifts down unhurried, as an octopus does.
             Carrier::Octopus { .. } => 1.5,
         }
@@ -287,6 +290,8 @@ pub struct Eggs {
     /// The Magic Vineyard's stretches as their grapes grow, and the vineyard drawn last frame, for tests.
     vines: Tended,
     pub vineyard: Option<vineyard::Seen>,
+    /// A theme of the writer's own, as it is shown (`own`).
+    pub own: own::Shown,
 }
 
 /// What the Magic Snow keeps while a story is shown, as the reef does: the story and the chapter
@@ -376,7 +381,7 @@ impl Default for Eggs {
             built_for: None, built: 0.0, built_at: 0.0, order: Vec::new(), scale: None, houses: Vec::new(), light: None, sailed_for: None, berths: Vec::new(), rigged: 0.0, rigged_at: 0.0,
             launch: None, ships: Vec::new(), forest_for: None, flowed: 0, born: Vec::new(), merge: None, forest: None,
             reef_for: None, beds: Vec::new(), branched: 0.0, branched_at: 0.0, spawn: None, reef: None,
-            ice: Tended::default(), snow: None, vines: Tended::default(), vineyard: None }
+            ice: Tended::default(), snow: None, vines: Tended::default(), vineyard: None, own: own::Shown::default() }
     }
 }
 
@@ -402,6 +407,7 @@ impl Eggs {
         (self.sailed_for, self.launch, self.reef_for, self.spawn) = (None, None, None, None);
         self.ice.forget();
         self.vines.forget();
+        self.own.regrown();
     }
 
     /// A number from 0 to 1, at random.
@@ -529,7 +535,7 @@ pub fn pose_of(by: Carrier, t: f32, duck: Option<f32>) -> Pose {
     let k = by.pace();
     let along = |t: f32| match by {
         Carrier::Dragon { .. } => (t + 0.8 * surge(t)) / k,
-        Carrier::Balloon { .. } | Carrier::Octopus { .. } => t / k,
+        Carrier::Balloon { .. } | Carrier::Octopus { .. } | Carrier::Own { .. } => t / k,
     };
     Pose { t, ..pose(along(t), duck.map(along)) }
 }
@@ -598,7 +604,7 @@ fn rig(by: Carrier, p: Pose, place: Rect, page: Rect, desk: Rect) -> Rig {
     // the title it carries.
     let (right, tall, rope, sizes, reach) = match by {
         // The octopus has a way of its own (`offset`), and is never rigged.
-        Carrier::Balloon { right } | Carrier::Octopus { right } => (right, TALL, page.height() * 0.02, (0.035, 0.06), 1.5),
+        Carrier::Balloon { right } | Carrier::Octopus { right } | Carrier::Own { right } => (right, TALL, page.height() * 0.02, (0.035, 0.06), 1.5),
         Carrier::Dragon { right } => (right, DRAGON_TALL, 0.0, (0.045, 0.1), 5.0),
     };
     let side = if right { 1.0 } else { -1.0 };
@@ -609,7 +615,7 @@ fn rig(by: Carrier, p: Pose, place: Rect, page: Rect, desk: Rect) -> Rig {
     // The balloon bobs as it floats over; the dragon rises and sinks with its wings, the title
     // with it, less and less as it lowers the title into place.
     let heave = match by {
-        Carrier::Balloon { .. } | Carrier::Octopus { .. } => 0.0,
+        Carrier::Balloon { .. } | Carrier::Octopus { .. } | Carrier::Own { .. } => 0.0,
         Carrier::Dragon { .. } => heave(p.t) * size,
     };
     // How far beyond the title's middle the desk's edge is on the side it comes from, and on the
@@ -621,7 +627,7 @@ fn rig(by: Carrier, p: Pose, place: Rect, page: Rect, desk: Rect) -> Rig {
     let (hook, offset) = if p.hooked {
         let x = place.center().x + side * ((1.0 - p.run) * page.width() * 0.35 + away * come);
         let bob = match by {
-            Carrier::Balloon { .. } | Carrier::Octopus { .. } => (p.run * PI).sin() * page.height() * 0.015,
+            Carrier::Balloon { .. } | Carrier::Octopus { .. } | Carrier::Own { .. } => (p.run * PI).sin() * page.height() * 0.015,
             Carrier::Dragon { .. } => heave * (1.0 - p.lower),
         };
         let load = pos2(x, place.center().y - hang * (1.0 - p.lower) - bob);
@@ -2348,13 +2354,15 @@ impl App {
     /// The paragraph at the caret was just made a chapter title: in the Magic City the dragon comes
     /// to bring it into place, in the Magic Garden the balloon.
     pub fn maybe_lift_title(&mut self, ctx: &egui::Context) {
-        let Some(mut by) = Carrier::of(self.themes.theme) else { return };
+        // A theme of one's own brings it if it has a carrier, once that is drawn.
+        let own = (self.themes.theme == Theme::Own && self.eggs.own.carrier_ready()).then_some(Carrier::Own { right: true });
+        let Some(mut by) = Carrier::of(self.themes.theme).or(own) else { return };
         let (at, _) = self.doc.para_start(self.selection().0);
         // Only a title with words in it: an empty one is no load.
         if !self.doc.chapters(false).iter().any(|e| e.at == at) || self.eggs.roll() >= self.eggs.odds.unwrap_or(1.0) {
             return;
         }
-        let (Carrier::Balloon { right } | Carrier::Dragon { right } | Carrier::Octopus { right }) = &mut by;
+        let (Carrier::Balloon { right } | Carrier::Dragon { right } | Carrier::Octopus { right } | Carrier::Own { right }) = &mut by;
         self.eggs.from_right = !self.eggs.from_right;
         *right = self.eggs.from_right;
         let started = ctx.input(|i| i.time);
@@ -2409,6 +2417,7 @@ impl App {
             Carrier::Dragon { .. } => dragon(by, p, place, page, self.eggs.desk),
             Carrier::Balloon { .. } => balloon(by, p, place, page, self.eggs.desk),
             Carrier::Octopus { right } => reef::octopus_at(right, p, place, page, self.eggs.desk).draw(),
+            Carrier::Own { .. } => self.eggs.own.carrier(by, p, place, page, self.eggs.desk, ui.ctx().input(|i| i.time)),
         });
     }
 }

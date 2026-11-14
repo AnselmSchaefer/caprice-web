@@ -2,6 +2,9 @@
 //! themes, picked in the Page menu and remembered in the data folder (`theme.json`). The page
 //! itself (`PAPER`, `INK`) is the same in every theme: it is the story, and print draws it as shown.
 //!
+//! The writer's own themes (`own.rs`) are kept beside it, on a shelf of their own (`themes/`); their
+//! palettes come from their pictures.
+//!
 //! The palette in use is kept per thread, for the code that draws to ask with `pal()`: egui draws
 //! on one thread, and each test runs on its own, so a test choosing a theme changes no other.
 
@@ -76,6 +79,8 @@ pub enum Theme {
     Reef,
     Snow,
     Vineyard,
+    /// One of the writer's own, which `Themes::own_id` names (`own.rs`); never in `ALL`.
+    Own,
 }
 
 impl Theme {
@@ -118,6 +123,7 @@ impl Theme {
             Theme::Reef => "Magic Reef",
             Theme::Snow => "Magic Snow",
             Theme::Vineyard => "Magic Vineyard",
+            Theme::Own => "Your own",
         }
     }
 
@@ -138,12 +144,14 @@ impl Theme {
             Theme::Reef => "Warm water, sunlight, and something that grows",
             Theme::Snow => "Hush, falling flakes, and a warm light",
             Theme::Vineyard => "Turning leaves, ripe grapes, and the year's last light",
+            Theme::Own => "A theme of your own",
         }
     }
 
+    /// Its palette; for one of the writer's own, the usual one (`Themes::palette` has its own).
     pub const fn palette(self) -> Palette {
         match self {
-            Theme::Midnight => Palette {
+            Theme::Midnight | Theme::Own => Palette {
                 desk: rgb(30, 32, 38),
                 desk_top: rgb(40, 43, 53),
                 dock: rgb(42, 45, 54),
@@ -437,6 +445,17 @@ pub struct Themes {
     pub file: Option<PathBuf>,
     /// The palette shown when the theme was changed, and when.
     fade: Option<(Palette, f64)>,
+    /// The writer's own themes, and the one chosen when `theme` is `Theme::Own`.
+    pub own: crate::own::Shelf,
+    pub own_id: Option<String>,
+}
+
+/// The choice as `theme.json` keeps it: a theme's name (as it always was), or one of the writer's own.
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum Kept {
+    Own { own: String },
+    Named(Theme),
 }
 
 impl Themes {
@@ -445,27 +464,68 @@ impl Themes {
         Self::kept_in(crate::versions::default_dir().and_then(|d| d.parent().map(|p| p.join("theme.json"))))
     }
 
+    /// The theme kept in `file`, and the writer's own in the `themes` folder beside it.
     pub fn kept_in(file: Option<PathBuf>) -> Self {
-        let theme = file.as_ref().and_then(|f| fs::read_to_string(f).ok()).and_then(|j| serde_json::from_str(&j).ok());
-        Self { theme: theme.unwrap_or_default(), file, fade: None }
+        let own = crate::own::Shelf::kept_in(file.as_ref().and_then(|f| f.parent()).map(|d| d.join("themes")));
+        let kept = file.as_ref().and_then(|f| fs::read_to_string(f).ok()).and_then(|j| serde_json::from_str(&j).ok());
+        let (theme, own_id) = match kept {
+            // A theme of one's own that is no longer on the shelf leaves the usual one.
+            Some(Kept::Own { own: id }) if own.get(&id).is_some() => (Theme::Own, Some(id)),
+            Some(Kept::Named(t)) if t != Theme::Own => (t, None),
+            _ => (Theme::default(), None),
+        };
+        Self { theme, file, fade: None, own, own_id }
     }
 
     /// Change to `theme`: it fades in over the one shown, and is kept for next time.
     pub fn choose(&mut self, ctx: &egui::Context, theme: Theme) {
-        if theme == self.theme {
+        if theme == self.theme || theme == Theme::Own {
             return;
         }
+        self.change(ctx, theme, None);
+    }
+
+    /// Change to the writer's own theme `id`, as `choose` does.
+    pub fn choose_own(&mut self, ctx: &egui::Context, id: &str) {
+        if self.own.get(id).is_none() || (self.theme == Theme::Own && self.own_id.as_deref() == Some(id)) {
+            return;
+        }
+        self.change(ctx, Theme::Own, Some(id.to_owned()));
+    }
+
+    fn change(&mut self, ctx: &egui::Context, theme: Theme, own: Option<String>) {
         self.theme = theme;
+        self.own_id = own.clone();
         self.fade = Some((pal(), ctx.input(|i| i.time)));
-        if let (Some(file), Ok(json)) = (&self.file, serde_json::to_string(&theme)) {
+        let kept = match own {
+            Some(own) => Kept::Own { own },
+            None => Kept::Named(theme),
+        };
+        if let (Some(file), Ok(json)) = (&self.file, serde_json::to_string(&kept)) {
             let _ = file.parent().map(fs::create_dir_all);
             let _ = fs::write(file, json);
         }
     }
 
+    /// The palette of the theme chosen; one of the writer's own has its picture's.
+    pub fn palette(&self) -> Palette {
+        match (self.theme, &self.own_id) {
+            (Theme::Own, Some(id)) => self.own.get(id).map_or(Theme::default().palette(), crate::own::Entry::palette),
+            (t, _) => t.palette(),
+        }
+    }
+
+    /// The name of the theme chosen, as the Page menu shows it.
+    pub fn name(&self) -> String {
+        match (self.theme, &self.own_id) {
+            (Theme::Own, Some(id)) => self.own.get(id).map_or(Theme::Own.name().to_owned(), |e| e.name.clone()),
+            (t, _) => t.name().to_owned(),
+        }
+    }
+
     /// Show the theme, partway through its fade if it is fading. Called at the start of each frame.
     pub fn show(&mut self, ctx: &egui::Context) {
-        let to = self.theme.palette();
+        let to = self.palette();
         let shown = match self.fade {
             Some((from, since)) => {
                 let t = ((ctx.input(|i| i.time) - since) / FADE).clamp(0.0, 1.0) as f32;

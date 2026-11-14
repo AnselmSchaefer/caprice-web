@@ -5,10 +5,15 @@
 //! is Caprice's own: Claude only marks the chimney tops. The world moves, never the people: a part
 //! that does not fit one of the few kinds of movement stays in the still picture, as does one
 //! marked wrongly (a wing whose shoulder is nowhere near it).
+//!
+//! A theme of the writer's own (`own.rs`) moves its desk the same way, with a few more kinds a
+//! picture that stays on the screen for hours wants: things that float, twinkle, glow, wander or
+//! turn round, and areas Caprice fills with what falls or rises there (snow, rain, fireflies,
+//! leaves, bubbles, embers), as it makes the smoke.
 
 use std::f64::consts::TAU;
 
-use eframe::egui::{self, Color32, ColorImage, Pos2, Rect, Shape, TextureHandle, TextureOptions, Vec2, epaint::Mesh, pos2, vec2};
+use eframe::egui::{self, Color32, ColorImage, Pos2, Rect, Shape, Stroke, TextureHandle, TextureOptions, Vec2, epaint::Mesh, pos2, vec2};
 
 /// What Claude is told about the parts that move, in the scene's prompt.
 pub const PROMPT: &str = "- The picture will move a little. Put each part that moves in its own top-level <g>, after \
@@ -53,15 +58,66 @@ pub enum Motion {
     Smoke,
     Flicker,
     Shimmer,
+    /// Bobbing gently up and down: a boat, a lantern, a balloon.
+    Float,
+    /// A star coming and going, slowly and unevenly.
+    Twinkle,
+    /// A glow growing brighter and dimmer.
+    Pulse,
+    /// Going round a small loop of its own: a fish, a butterfly.
+    Wander,
+    /// Turning round and round about `pivot`: a windmill's sails, a water wheel.
+    Spin { pivot: Pos2 },
+    /// Caprice's own, like smoke: what falls or rises in the area marked, in the marker's colour.
+    Particles { kind: Particle, color: Color32 },
+}
+
+/// What fills an area marked for particles.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Particle {
+    Snow,
+    Rain,
+    Fireflies,
+    Leaves,
+    Bubbles,
+    Embers,
+}
+
+impl Particle {
+    fn named(kind: &str) -> Option<Particle> {
+        Some(match kind {
+            "snow" => Particle::Snow,
+            "rain" => Particle::Rain,
+            "fireflies" => Particle::Fireflies,
+            "leaves" => Particle::Leaves,
+            "bubbles" => Particle::Bubbles,
+            "embers" => Particle::Embers,
+            _ => return None,
+        })
+    }
+
+    /// Their colour when the marker has none to give.
+    fn colour(self) -> Color32 {
+        match self {
+            Particle::Snow => Color32::from_rgb(248, 250, 255),
+            Particle::Rain => Color32::from_rgb(200, 214, 232),
+            Particle::Fireflies => Color32::from_rgb(222, 255, 140),
+            Particle::Leaves => Color32::from_rgb(214, 128, 52),
+            Particle::Bubbles => Color32::from_rgb(220, 244, 255),
+            Particle::Embers => Color32::from_rgb(255, 170, 70),
+        }
+    }
 }
 
 /// A part that moves: how, a number to set it apart from the others, where it is in the picture
-/// (shares of its size; for smoke, the chimney top), and the part rendered (none for smoke).
+/// (shares of its size; for smoke, the chimney top), the part rendered (none for smoke and
+/// particles), and its id, for a theme's checks to name it.
 pub struct Layer {
     pub motion: Motion,
     pub seed: f32,
     pub at: Rect,
     pub image: Option<ColorImage>,
+    pub id: String,
 }
 
 /// A picture rendered: what stays still, and the parts that move.
@@ -87,7 +143,7 @@ fn parse_id(id: &str) -> Option<(&str, f32, Option<Point>)> {
         (Some(x), Some(y)) => Some((x.parse().ok()?, y.parse().ok()?)),
         _ => None,
     };
-    let needs_point = matches!(kind, "wing" | "sway" | "smoke");
+    let needs_point = matches!(kind, "wing" | "sway" | "smoke" | "spin");
     (bits.next().is_none() && needs_point == point.is_some()).then_some((kind, n, point))
 }
 
@@ -96,7 +152,8 @@ fn parse_id(id: &str) -> Option<(&str, f32, Option<Point>)> {
 pub fn layered(svg: &str, width: f32) -> Result<Layered, String> {
     use resvg::{tiny_skia, usvg};
     let tree = usvg::Tree::from_str(svg, &usvg::Options::default()).map_err(|e| format!("the picture could not be read: {e}"))?;
-    let Ok(xml) = roxmltree::Document::parse(svg) else { return crate::backdrop::rasterize(svg, width).map(Layered::still) };
+    // Illustrator writes a DTD of entities, which usvg reads.
+    let Ok(xml) = roxmltree::Document::parse_with_options(svg, roxmltree::ParsingOptions { allow_dtd: true, ..Default::default() }) else { return crate::backdrop::rasterize(svg, width).map(Layered::still) };
     let size = tree.size();
     let scale = width / size.width();
     let (w, h) = (width.round() as u32, (size.height() * scale).round().max(1.0) as u32);
@@ -118,11 +175,11 @@ pub fn layered(svg: &str, width: f32) -> Result<Layered, String> {
             continue;
         }
         let id = node.attribute("id").unwrap_or_default();
-        let Some((kind, seed, point)) = parse_id(id) else { continue };
-        let point = point.map(|(x, y)| share(x, y));
+        let Some((kind, seed, given)) = parse_id(id) else { continue };
+        let point = given.map(|(x, y)| share(x, y));
         if kind == "smoke" {
             if let Some(p) = point.filter(|p| (0.0..=1.0).contains(&p.x) && (0.0..=1.0).contains(&p.y)) {
-                layers.push(Layer { motion: Motion::Smoke, seed, at: Rect::from_min_max(p, p), image: None });
+                layers.push(Layer { motion: Motion::Smoke, seed, at: Rect::from_min_max(p, p), image: None, id: id.to_owned() });
                 cut.push(node.range());
             }
             continue;
@@ -130,15 +187,46 @@ pub fn layered(svg: &str, width: f32) -> Result<Layered, String> {
         let Some(part) = tree.node_by_id(id) else { continue };
         let Some(bb) = part.abs_layer_bounding_box() else { continue };
         let at = Rect::from_min_max(pos2(bb.x() / size.width(), bb.y() / size.height()), pos2(bb.right() / size.width(), bb.bottom() / size.height()));
+        // An area for particles is only a marker: Caprice draws what fills it, in its colour.
+        if let Some(particle) = Particle::named(kind) {
+            let color = fill_of(part).unwrap_or(particle.colour());
+            layers.push(Layer { motion: Motion::Particles { kind: particle, color }, seed, at, image: None, id: id.to_owned() });
+            cut.push(node.range());
+            continue;
+        }
         // A shoulder or foot is on its part's edge, or near it.
         let margin = vec2(NEAR_PART, NEAR_PART * size.width() / size.height());
         let near = |p: Pos2| at.expand2(margin).contains(p);
+        let parent = match part {
+            usvg::Node::Group(g) => g.transform().invert().map(|own| g.abs_transform().pre_concat(own)),
+            _ => Some(part.abs_transform()),
+        };
+        let Some(parent) = parent else { continue };
+        // The point in the drawing's units, as Claude writes it; or, if that is nowhere near the part,
+        // in the units of the group it is drawn in, or its own (a hand-made theme's wing written
+        // as 0,0 inside its bird's `translate`): whichever lies on the part.
+        let point = given.and_then(|(x, y)| {
+            let on = |t: tiny_skia::Transform| {
+                let mut p = tiny_skia::Point::from_xy(x, y);
+                t.map_point(&mut p);
+                pos2(p.x / size.width(), p.y / size.height())
+            };
+            let fits = |p: &Pos2| if kind == "spin" { at.contains(*p) } else { near(*p) };
+            let candidates = [point, Some(on(parent)), Some(on(part.abs_transform()))];
+            candidates.into_iter().flatten().find(fits).or(point)
+        });
         let mut wing = None;
         let motion = match (kind, point) {
             ("drift", _) => Motion::Drift,
             ("flicker", _) => Motion::Flicker,
             ("shimmer", _) => Motion::Shimmer,
+            ("float", _) => Motion::Float,
+            ("twinkle", _) => Motion::Twinkle,
+            ("pulse", _) => Motion::Pulse,
+            ("wander", _) => Motion::Wander,
             ("sway", Some(foot)) if near(foot) => Motion::Sway { foot },
+            // A wheel turns about a point inside it.
+            ("spin", Some(pivot)) if at.contains(pivot) => Motion::Spin { pivot },
             ("wing", Some(pivot)) if near(pivot) => {
                 let side = if at.center().x < pivot.x { 1.0 } else { -1.0 };
                 let close = |&&(s, _): &&(Pos2, usize)| (s.x - pivot.x).hypot((s.y - pivot.y) * size.height() / size.width()) < ONE_CREATURE;
@@ -153,18 +241,13 @@ pub fn layered(svg: &str, width: f32) -> Result<Layered, String> {
         let (x0, y0) = ((bb.x() * scale).floor().max(0.0), (bb.y() * scale).floor().max(0.0));
         let (x1, y1) = ((bb.right() * scale).ceil().min(w as f32), (bb.bottom() * scale).ceil().min(h as f32));
         let Some(mut pixmap) = tiny_skia::Pixmap::new((x1 - x0) as u32, (y1 - y0) as u32) else { continue };
-        let parent = match part {
-            usvg::Node::Group(g) => g.transform().invert().map(|own| g.abs_transform().pre_concat(own)),
-            _ => Some(part.abs_transform()),
-        };
-        let Some(parent) = parent else { continue };
         let place = tiny_skia::Transform::from_translate(-x0, -y0).pre_scale(scale, scale).pre_concat(parent).pre_translate(bb.x(), bb.y());
         if resvg::render_node(part, place, &mut pixmap.as_mut()).is_none() {
             continue;
         }
         let image = ColorImage::from_rgba_premultiplied([pixmap.width() as usize, pixmap.height() as usize], pixmap.data());
         let at = Rect::from_min_max(pos2(x0 / w as f32, y0 / h as f32), pos2(x1 / w as f32, y1 / h as f32));
-        layers.push(Layer { motion, seed, at, image: Some(image) });
+        layers.push(Layer { motion, seed, at, image: Some(image), id: id.to_owned() });
         if let Some((creature, span)) = wing {
             wings.push((layers.len() - 1, creature, span));
         }
@@ -187,6 +270,19 @@ pub fn layered(svg: &str, width: f32) -> Result<Layered, String> {
     match crate::backdrop::rasterize(&still, width) {
         Ok(image) => Ok(Layered { still: image, layers }),
         Err(_) => crate::backdrop::rasterize(svg, width).map(Layered::still),
+    }
+}
+
+/// The colour a marker is filled with: its own, or its first shape's.
+fn fill_of(node: &resvg::usvg::Node) -> Option<Color32> {
+    use resvg::usvg::{Node, Paint};
+    match node {
+        Node::Path(p) => match p.fill()?.paint() {
+            Paint::Color(c) => Some(Color32::from_rgb(c.red, c.green, c.blue)),
+            _ => None,
+        },
+        Node::Group(g) => g.children().iter().find_map(fill_of),
+        _ => None,
     }
 }
 
@@ -264,7 +360,17 @@ fn pose(motion: Motion, seed: f32, t: f64, page: Rect) -> Pose {
         Motion::Sway { foot } => Pose { pivot: at(foot), angle: 1.2f32.to_radians() * wave(5.0 + seed % 3.0, seed), ..Pose::STILL },
         Motion::Flicker => Pose { alpha: 0.75 + 0.25 * ((t * 7.0 + seed * 1.7).sin() * (t * 3.1 + seed).sin()) as f32, ..Pose::STILL },
         Motion::Shimmer => Pose { shift: vec2(0.004 * w * wave(3.2, seed), 0.0), alpha: 0.7 + 0.3 * wave(2.3, seed * 1.3), ..Pose::STILL },
-        Motion::Smoke => Pose::STILL,
+        Motion::Float => Pose { shift: vec2(0.0015 * w * wave(9.0 + seed % 3.0, seed * 0.7), 0.005 * w * wave(5.0 + seed % 2.0, seed)), ..Pose::STILL },
+        // Two slow waves at odd periods, so no two stars keep time.
+        Motion::Twinkle => {
+            let a = 0.5 + 0.5 * wave(2.9 + seed % 1.7, seed) * wave(4.3 + seed % 2.3, seed * 2.1);
+            Pose { alpha: 0.35 + 0.65 * a, ..Pose::STILL }
+        }
+        Motion::Pulse => Pose { alpha: 0.72 + 0.28 * wave(4.5 + seed % 2.0, seed), ..Pose::STILL },
+        Motion::Wander => Pose { shift: vec2(0.012 * w * wave(13.0 + seed % 5.0, seed), 0.006 * w * wave(8.0 + seed % 3.0, seed * 1.7)), ..Pose::STILL },
+        // Once round in half a minute or so, the same way for every wheel.
+        Motion::Spin { pivot } => Pose { pivot: at(pivot), angle: (TAU * t / (24.0 + 6.0 * (seed % 3.0))) as f32, ..Pose::STILL },
+        Motion::Smoke | Motion::Particles { .. } => Pose::STILL,
     }
 }
 
@@ -314,6 +420,24 @@ impl Drawn {
         !self.parts.is_empty()
     }
 
+    /// How many of its parts move.
+    pub fn parts(&self) -> usize {
+        self.parts.len()
+    }
+
+    /// The part moving as a whole whose place holds `at` (shares of the picture), the smallest if
+    /// several do: what is drawn on it (a coconut on a palm) should move with it.
+    pub fn holding(&self, at: Pos2) -> Option<usize> {
+        let size = |r: Rect| r.width() * r.height();
+        self.parts.iter().enumerate().filter(|(_, p)| p.texture.is_some() && p.at.contains(at)).min_by(|a, b| size(a.1.at).total_cmp(&size(b.1.at))).map(|(i, _)| i)
+    }
+
+    /// Where part `i` of the picture lying over `rect` takes a point at `time`.
+    pub fn moved(&self, i: usize, rect: Rect, time: f64) -> impl Fn(Pos2) -> Pos2 + use<> {
+        let pose = self.parts.get(i).map_or(Pose::STILL, |p| pose(p.motion, p.seed, time, rect));
+        move |q| pose.apply(q)
+    }
+
     /// The textures of the parts that move, for the tests to find them among the shapes painted.
     #[cfg(test)]
     pub fn part_textures(&self) -> Vec<(Motion, egui::TextureId)> {
@@ -335,6 +459,12 @@ impl Drawn {
                 (None, Some(t)) if part.motion == Motion::Smoke => {
                     if let Some(puff) = &self.puff {
                         shapes.push(Shape::mesh(smoke(puff.id(), page(part.at.min), rect.width(), part.seed, t, tint, map)));
+                    }
+                }
+                (None, Some(t)) => {
+                    if let Motion::Particles { kind, color } = part.motion {
+                        let area = Rect::from_min_max(page(part.at.min), page(part.at.max));
+                        shapes.extend(particles(kind, color * tint, area, rect.width(), part.seed, t, map));
                     }
                 }
                 _ => {}
@@ -359,6 +489,73 @@ fn smoke(puff: egui::TextureId, top: Pos2, w: f32, seed: f32, t: f64, tint: Colo
         mesh.append(one);
     }
     mesh
+}
+
+/// What fills an `area` marked for particles at `t` seconds, in a picture `w` wide. Each is
+/// placed by a share of the way across and down the area, never the time multiplied by a size,
+/// so a window made larger moves none of them at a stroke.
+fn particles(kind: Particle, color: Color32, area: Rect, w: f32, seed: f32, t: f64, map: &dyn Fn(Pos2) -> Pos2) -> Vec<Shape> {
+    let u = (w / 1600.0).max(0.4);
+    // As many as fit the area without crowding it, and never so many a frame grows slow.
+    let room = (area.width() * area.height()) / (u * u);
+    let (spacing, most) = match kind {
+        Particle::Snow => (60.0, 160.0),
+        Particle::Rain => (50.0, 160.0),
+        Particle::Fireflies => (140.0, 40.0),
+        Particle::Leaves => (150.0, 28.0),
+        Particle::Bubbles => (110.0, 40.0),
+        Particle::Embers => (100.0, 50.0),
+    };
+    let n = (room.sqrt() / spacing * room.sqrt() / spacing).clamp(4.0, most) as usize;
+    let t = t as f32;
+    let rand = |i: usize, k: u32| ((i as f32 * 12.9898 + k as f32 * 78.233 + seed * 37.719).sin() * 43_758.547).rem_euclid(1.0);
+    let at = |x: f32, y: f32| map(pos2(area.left() + area.width() * x.rem_euclid(1.0), area.top() + area.height() * y.rem_euclid(1.0)));
+    let mut out = Vec::with_capacity(n * 2);
+    for i in 0..n {
+        let (r0, r1, r2, near) = (rand(i, 0), rand(i, 1), rand(i, 2), rand(i, 3));
+        match kind {
+            Particle::Snow => {
+                let p = at(r0 + 0.012 * (t * (0.3 + 0.5 * r2) + i as f32).sin(), r1 + t * (0.03 + 0.05 * near));
+                out.push(Shape::circle_filled(p, (0.9 + 1.9 * near) * u, color.gamma_multiply(0.5 + 0.4 * near)));
+            }
+            Particle::Rain => {
+                let p = at(r0 - t * 0.04, r1 + t * (0.7 + 0.5 * near));
+                let len = (10.0 + 16.0 * near) * u;
+                out.push(Shape::line_segment([p, p + vec2(-0.18 * len, len)], Stroke::new((0.7 + 0.6 * near) * u, color.gamma_multiply(0.25 + 0.3 * near))));
+            }
+            Particle::Fireflies => {
+                let p = at(r0 + 0.05 * (t * (0.15 + 0.2 * r2) + i as f32).sin(), r1 + 0.06 * (t * (0.11 + 0.15 * near) + i as f32 * 1.3).cos());
+                let blink = (t * (0.4 + 0.5 * r2) + i as f32 * 2.3).sin().max(0.0).powi(2);
+                out.push(Shape::circle_filled(p, 10.0 * u, color.gamma_multiply(0.12 * blink)));
+                out.push(Shape::circle_filled(p, 5.0 * u, color.gamma_multiply(0.22 * blink)));
+                out.push(Shape::circle_filled(p, 2.2 * u, color.gamma_multiply(0.3 + 0.7 * blink)));
+            }
+            Particle::Leaves => {
+                let p = at(r0 + 0.05 * (t * (0.4 + 0.3 * r2) + i as f32).sin(), r1 + t * (0.035 + 0.035 * near));
+                let (len, turn) = ((5.0 + 4.0 * near) * u, t * (0.8 + 1.2 * r2) + i as f32);
+                let dir = Vec2::angled(turn);
+                let side = vec2(-dir.y, dir.x) * len * 0.45 * (turn * 0.7).sin().abs().max(0.2);
+                let points = (0..10).map(|k| {
+                    let a = k as f32 / 10.0 * TAU as f32;
+                    p + dir * len * a.cos() + side * a.sin()
+                }).collect();
+                out.push(Shape::convex_polygon(points, color.lerp_to_gamma(Color32::from_rgb(150, 60, 30), r2 * 0.5), Stroke::NONE));
+            }
+            Particle::Bubbles => {
+                let life = (r1 - t * (0.05 + 0.07 * near)).rem_euclid(1.0);
+                let p = at(r0 + 0.01 * (t * 1.3 + i as f32).sin(), life);
+                let fade = (life * 5.0).min(1.0);
+                out.push(Shape::circle_stroke(p, (1.5 + 3.5 * near) * u, Stroke::new(0.9 * u, color.gamma_multiply(0.6 * fade))));
+            }
+            Particle::Embers => {
+                let life = (r1 - t * (0.06 + 0.08 * near)).rem_euclid(1.0);
+                let p = at(r0 + 0.03 * (t * (0.6 + r2) + i as f32).sin(), life);
+                let glow = life * (0.6 + 0.4 * (t * 9.0 + i as f32).sin().abs());
+                out.push(Shape::circle_filled(p, (0.8 + 1.4 * near) * u, color.gamma_multiply(glow)));
+            }
+        }
+    }
+    out
 }
 
 /// A night with a cloud, a bird whose wings beat, a chimney and a window, and a wing marked
@@ -444,6 +641,60 @@ mod tests {
         let picture = layered(svg, 600.0).unwrap();
         assert!(picture.layers.is_empty());
         assert_eq!(picture.still.pixels, crate::backdrop::rasterize(svg, 600.0).unwrap().pixels);
+    }
+
+    #[test]
+    fn a_theme_s_kinds_of_motion_are_read_and_its_particles_take_their_marker_s_colour() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 800">
+            <rect width="600" height="800" fill="#123"/>
+            <g id="move-spin-1-100-100"><rect x="60" y="95" width="80" height="10" fill="#ddd"/></g>
+            <g id="move-spin-2-500-500"><rect x="60" y="195" width="80" height="10" fill="#ddd"/></g>
+            <circle id="move-float-1" cx="300" cy="600" r="20" fill="#963"/>
+            <circle id="move-twinkle-1" cx="50" cy="50" r="2" fill="#fff"/>
+            <rect id="move-snow-1" x="0" y="0" width="300" height="400" fill="#ff0000"/>
+            <rect id="move-rain-1" x="300" y="0" width="300" height="400" fill="none" stroke="none"/>
+        </svg>"##;
+        let picture = layered(svg, 600.0).unwrap();
+        let ids: Vec<&str> = picture.layers.iter().map(|l| l.id.as_str()).collect();
+        assert_eq!(ids, ["move-spin-1-100-100", "move-float-1", "move-twinkle-1", "move-snow-1", "move-rain-1"], "a wheel turns about a point inside it");
+        assert!(matches!(picture.layers[3].motion, Motion::Particles { kind: Particle::Snow, color } if color == Color32::RED), "in the marker's colour");
+        assert!(matches!(picture.layers[4].motion, Motion::Particles { kind: Particle::Rain, color } if color == Particle::Rain.colour()), "or their own");
+        let px = |x: usize, y: usize| picture.still.pixels[y * 600 + x];
+        assert_eq!(px(200, 300), Color32::from_rgb(0x11, 0x22, 0x33), "the marker is not drawn");
+        // Turning round: a quarter of the way after a quarter of its time (half a minute for this one).
+        let page = Rect::from_min_size(Pos2::ZERO, vec2(600.0, 800.0));
+        let spin = pose(picture.layers[0].motion, 1.0, 7.5, page);
+        assert!((spin.angle - std::f32::consts::FRAC_PI_2).abs() < 0.01 && spin.pivot == pos2(100.0, 100.0), "{}", spin.angle);
+        let drawn = particles(Particle::Snow, Color32::WHITE, Rect::from_min_size(Pos2::ZERO, vec2(300.0, 400.0)), 600.0, 1.0, 3.0, &|p| p);
+        let later = particles(Particle::Snow, Color32::WHITE, Rect::from_min_size(Pos2::ZERO, vec2(300.0, 400.0)), 600.0, 1.0, 4.0, &|p| p);
+        assert!(drawn.len() >= 4 && drawn.iter().all(|s| Rect::from_min_size(Pos2::ZERO, vec2(300.0, 400.0)).expand(10.0).contains(s.visual_bounding_rect().center())), "in their area");
+        assert!(drawn.iter().zip(&later).any(|(a, b)| a.visual_bounding_rect().center().y != b.visual_bounding_rect().center().y), "falling");
+    }
+
+    #[test]
+    fn a_point_may_be_written_in_the_units_of_the_group_its_part_is_drawn_in() {
+        // A bird moved into place as a whole, its wing's shoulder written as where it is in the bird.
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 800">
+            <g transform="translate(300 200)"><ellipse rx="40" ry="15" fill="#f80"/>
+                <path id="move-wing-1-0-0" d="M-10,5 Q-40,-40 0,-50 Q0,-20 8,4Z" fill="#088"/></g>
+            <g id="move-sway-1-0-0" transform="translate(100 700)"><rect x="-5" y="-80" width="10" height="80" fill="#630"/></g>
+        </svg>"##;
+        let picture = layered(svg, 600.0).unwrap();
+        let motions: Vec<Motion> = picture.layers.iter().map(|l| l.motion).collect();
+        assert!(matches!(motions[0], Motion::Wing { pivot, .. } if (pivot.x - 0.5).abs() < 0.01 && (pivot.y - 0.25).abs() < 0.01), "{motions:?}");
+        assert!(matches!(motions[1], Motion::Sway { foot } if (foot.x - 100.0 / 600.0).abs() < 0.01 && (foot.y - 700.0 / 800.0).abs() < 0.01), "in its own units: {motions:?}");
+    }
+
+    #[test]
+    fn what_lies_on_a_moving_part_finds_it_and_moves_with_it() {
+        let picture = layered(NIGHT, 600.0).unwrap();
+        let ctx = egui::Context::default();
+        let drawn = Drawn::load(&ctx, picture);
+        let cloud = drawn.holding(pos2(0.25, 0.125)).expect("on the cloud");
+        assert_eq!(drawn.holding(pos2(0.5, 0.9)), None, "nothing moves there");
+        let page = Rect::from_min_size(Pos2::ZERO, vec2(600.0, 800.0));
+        let (a, b) = (drawn.moved(cloud, page, 0.0)(pos2(150.0, 100.0)), drawn.moved(cloud, page, 20.0)(pos2(150.0, 100.0)));
+        assert!((a.x - b.x).abs() > 1.0 && a.y == b.y, "drifting with the cloud: {a:?} {b:?}");
     }
 
     #[test]
