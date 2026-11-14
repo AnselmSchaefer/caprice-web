@@ -398,6 +398,11 @@ pub enum DialogFor {
     PrintPdf,
     Picture,
     ScenePicture,
+    /// A drawing to import as a theme of one's own (`own.rs`).
+    ImportTheme,
+    /// Where to write a theme of one's own, by its id; and the template to start one from.
+    ExportTheme(String),
+    ThemeTemplate,
 }
 
 /// Something that would throw away unsaved changes, waiting for the user to say what to do.
@@ -542,7 +547,7 @@ impl App {
             return;
         }
         let (tx, rx) = channel();
-        let pick = matches!(purpose, DialogFor::Open | DialogFor::Picture);
+        let pick = matches!(purpose, DialogFor::Open | DialogFor::Picture | DialogFor::ImportTheme);
         match purpose {
             DialogFor::Save if self.shelf.dir.is_some() => self.shelf.ask_name(dialog.name, tx),
             DialogFor::Open if self.shelf.dir.is_some() => self.shelf.ask_open(tx, &|p| self.cloud.mark(p).map(|(m, _)| m.label())),
@@ -609,6 +614,9 @@ impl App {
                 };
             }
             DialogFor::ScenePicture => self.save_scene_picture_to(path),
+            DialogFor::ImportTheme => self.import_theme(ctx, &path),
+            DialogFor::ExportTheme(id) => self.export_theme_to(&id, &path),
+            DialogFor::ThemeTemplate => self.save_theme_template_to(&path),
         }
     }
 

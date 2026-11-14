@@ -87,7 +87,8 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `print.rs` | The Print window; pages drawn into a PDF (krilla) from `PageLayout::ink`; printers and jobs through CUPS (`Spooler`) |
 | `claude.rs` | Pen loop or cursor selection → passage → `claude -p` → streamed answer panel, a conversation; story notes |
 | `backdrop.rs` | Scenes Claude paints (SVG), pinned to the story, faintly behind the pages; the Scene menu and list |
-| `motion.rs` | Scenes that move a little: the parts Claude marks by id (drift, wing, sway, smoke, flicker, shimmer), rendered apart from the still picture and moved every frame |
+| `motion.rs` | Scenes that move a little: the parts Claude marks by id (drift, wing, sway, smoke, flicker, shimmer), rendered apart from the still picture and moved every frame; and the kinds a theme of one's own may use besides (float, twinkle, pulse, wander, spin, and areas of snow, rain, fireflies, leaves, bubbles or embers that Caprice fills) |
+| `own.rs` | Themes of the writer's own (R35): one SVG drawing read into its desk, pieces and carrier (`Pack`), checked on import with the reasons in plain words (`check`), its palette taken from its picture (`palette_of`); the shelf of them in the data folder (`Shelf`); importing, exporting, deleting, the template, the guide and the import's report (`Workshop`) |
 | `cast.rs` | The cast: people found by name in what is painted, their looks and model sheets in the scene's prompt; the Cast window and its example |
 | `start.rs` | The welcome page when Caprice opens without a file: kinds of new story (`Kind`), the stories last opened with what they hold, the sheet flying to the desk; the list of stories last opened, kept in the data folder |
 | `peek.rs` | The cast peeking out from behind the page: the puppet asked of Claude, cut into parts, who peeks when, where they look, the peek drawn |
@@ -95,8 +96,8 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `review.rs` | The Review window (upper left): a chapter or the selection read for mistakes, style, detail, wordiness; findings found again by their quote |
 | `ideas.rs` | The What next window (lower left): ways the story could go on from the caret, kept in the scratchpad |
 | `fonts.rs` | Installed fonts loaded on demand, a missing one drawn with a twin of the same widths |
-| `theme.rs` | The themes (`Theme`, `Palette`): colours and egui visuals around the page, the palette in use (`pal`), fading from one to the next, the choice kept in the data folder; the page's own `PAPER` and `INK` |
-| `eggs.rs` | What is hidden in the magic themes: in the Magic Garden a plant a chapter growing on the desk and a balloon flying in each new chapter title; in the Magic City a street of houses a chapter, a floor a page, and a dragon flying a new title in held in its feet; in the Magic Sea a ship a chapter, built in a yard a part a page and launched into the bay when the next chapter begins; in the Magic Forest (`eggs/forest.rs`) an old forest at night with a swarm of lanterns, a lantern a page, each chapter's swarm becoming a big lantern on a branch near the page; in the Magic Reef (`eggs/reef.rs`) a sunlit sea with a coral a chapter, a branch a page, spawning and taking in a shoal of fish when the next chapter begins, and an octopus swimming down from above with each new title; in the Magic Snow (`eggs/snow.rs`) a frozen lake at the foot of a snowy hillside and an igloo a chapter spread about the hillside, a brick a page cut out of the lake and floated onto it, the igloo finished and lit inside when the next chapter begins; in the Magic Vineyard (`eggs/vineyard.rs`) a vineyard on rolling hills on a golden afternoon, a stretch of vines a chapter, a bunch of grapes a page, the stretch before turning gold and red and dropping its leaves when the next chapter begins, and now and then a murmuration of starlings; the country it lies in is `eggs/country.rs` |
+| `theme.rs` | The themes (`Theme`, `Palette`): colours and egui visuals around the page, the palette in use (`pal`), fading from one to the next, the choice kept in the data folder (a theme's name, or one of the writer's own by its id); the page's own `PAPER` and `INK` |
+| `eggs.rs` | What is hidden in the magic themes: in the Magic Garden a plant a chapter growing on the desk and a balloon flying in each new chapter title; in the Magic City a street of houses a chapter, a floor a page, and a dragon flying a new title in held in its feet; in the Magic Sea a ship a chapter, built in a yard a part a page and launched into the bay when the next chapter begins; in the Magic Forest (`eggs/forest.rs`) an old forest at night with a swarm of lanterns, a lantern a page, each chapter's swarm becoming a big lantern on a branch near the page; in the Magic Reef (`eggs/reef.rs`) a sunlit sea with a coral a chapter, a branch a page, spawning and taking in a shoal of fish when the next chapter begins, and an octopus swimming down from above with each new title; in the Magic Snow (`eggs/snow.rs`) a frozen lake at the foot of a snowy hillside and an igloo a chapter spread about the hillside, a brick a page cut out of the lake and floated onto it, the igloo finished and lit inside when the next chapter begins; in the Magic Vineyard (`eggs/vineyard.rs`) a vineyard on rolling hills on a golden afternoon, a stretch of vines a chapter, a bunch of grapes a page, the stretch before turning gold and red and dropping its leaves when the next chapter begins, and now and then a murmuration of starlings; the country it lies in is `eggs/country.rs`; and a theme of the writer's own (`eggs/own.rs`, R35): its picture covering the desk and moving, a piece a chapter, a stage a page, finished when the next chapter begins, its carrier bringing new titles |
 | `platform.rs` | What the desktop and the browser do differently: background work (`spawn`, `Waker`, `keep_awake`), the time and time zone, the run's id, the data folder, file dialogs (`Dialog`), uploads and downloads, requests to Caprice's server (`send`, `go_to`) (R31, R33) |
 | `platform/fs.rs` | Files: the system's on the desktop; in the browser, kept in memory by path and mirrored to IndexedDB (R31) |
 | `platform/worker.rs` | In the browser, a Web Worker for each piece of background work, started from `web/worker.js` with nothing evaluated (R31) |
@@ -1178,10 +1179,18 @@ same in every theme, so what is printed (R20) and exported (R10) never depends o
 - **Light themes must stay readable**: `text` on `dock` at 4.5:1, `text_dim` at 3:1. A new theme
   goes into `Theme::ALL`, so the gallery and the test cover it; a magic one (hiding things to
   find, R30) also into `Theme::magic`, as the Page menu's Theme gallery shows the classic themes
-  or the magic ones as a switch at its top says, first those of the theme in use
-  (`the_theme_menu_shows_the_classic_themes_or_the_magic_ones_as_its_switch_says`).
+  or the magic ones or the writer's own as a switch at its top says, first those of the theme in use
+  (`the_theme_menu_shows_the_classic_themes_or_the_magic_ones_as_its_switch_says`,
+  `the_theme_gallery_shows_one_s_own_themes_to_choose_export_and_delete`).
 - The choice is kept in the data folder (`theme.json`), not in the story; `Harness` keeps it
-  nowhere (`Themes::kept_in(None)`).
+  nowhere (`Themes::kept_in(None)`). It is a theme's name, as it always was, or `{"own": id}` for
+  one of the writer's own (R35), read either way (`theme::Kept`, untagged); one no longer on the
+  shelf leaves the usual theme.
+- **A theme of one's own is `Theme::Own`, never in `ALL`**: which one is `Themes::own_id`, and its
+  palette, name and gallery are the shelf's (`Themes::palette`, `Themes::name`, the gallery's
+  "Yours"). Anything that asks a theme its palette asks `Themes::palette`, not `Theme::palette`,
+  which gives `Own` the usual one. Its palette is made readable by `own::palette_of` whatever its
+  picture, so `the_docks_stay_readable_in_every_theme` covers one too.
 - Tests: `a_theme_picked_in_the_page_menu_washes_over_the_desk_and_is_kept_for_next_time`,
   `the_docks_stay_readable_in_every_theme`.
 
@@ -1190,7 +1199,7 @@ same in every theme, so what is printed (R20) and exported (R10) never depends o
 The magic themes hide things for the writer to find (`eggs.rs`): the Magic Garden (`Theme::Garden`)
 a garden and a hot-air balloon, the Magic City (`Theme::City`) houses and a dragon, the Magic Sea
 (`Theme::Sea`) ships, the Magic Forest (`Theme::Forest`) lanterns, the Magic Reef (`Theme::Reef`) corals, the Magic
-Snow (`Theme::Snow`) the frozen lake and its igloos, the Magic Vineyard (`Theme::Vineyard`) vines, grapes and starlings. Their blurbs give nothing away. What a theme hides is its own: picking another theme is how to stop it.
+Snow (`Theme::Snow`) the frozen lake and its igloos, the Magic Vineyard (`Theme::Vineyard`) vines, grapes and starlings. Their blurbs give nothing away. What a theme hides is its own: picking another theme is how to stop it. A theme of the writer's own (R35) lies on the desk the same way, and everything here holds for it too.
 
 - **The garden lies on the desk, behind every page**, in the Magic Garden only. `draw_garden` is
   called in `frame` right after `page_rect` and before any page is drawn, so the pages hide what is
@@ -2116,6 +2125,105 @@ pen was gone". In the app:
 `words_written_where_the_pen_was_lost_are_kept_as_a_backup`,
 `transfer_here_moves_the_pen_and_the_other_device_follows_what_is_written_here`.
 
+### R35 — A theme of one's own is one drawing, checked when it comes in, played like a magic theme
+
+A writer can make a theme (`own.rs`): one SVG with a group `desk` (the picture the pages lie on,
+which must move), optionally `piece` (or `piece-1`, `piece-2`, …: what grows a stage a page beside
+the pages, a piece a chapter, with its `done`) and `carrier` (what brings a new chapter title, at its
+`hook`), and its settings as JSON in `<metadata id="caprice">` (`Meta`). Caprice plays it; nothing
+in it is code. The guide in the app (`own::guide`, `MOTIONS`) and the comment at the top of
+`assets/theme-template.svg` say all of it to the people (and AI chats) who make one.
+
+- **A drawing is made readable once, when it comes in** (`normalize`): a role named by an id, by
+  Illustrator's escaped id (`move_x2D_drift_x2D_1`), by Figma's `data-name` or by Inkscape's layer
+  name (`inkscape:label`) becomes that id (`plain_name`, `role`); a moving part's name used twice
+  gets a number of its own (or one part would move twice); every `href` leading out of the file is
+  taken away, so nothing of a theme reaches outside it (a path on this machine, a server). What is
+  kept on the shelf is that drawing, so everything after reads ids only. Tests:
+  `names_from_inkscape_illustrator_and_figma_are_read_alike`,
+  `links_out_of_the_file_are_taken_away_and_text_is_noted`.
+- **The desk must move, and a refusal says why** (`check`): fewer than `LEAST_MOVING` parts that
+  move is refused, as is a drawing without a desk, one usvg cannot read, or one too large
+  (`MOST_BYTES`, `MOST_ELEMENTS`). What would spoil it without refusing it (text, which has no fonts
+  here; parts marked to move that stay still; all the movement behind the page; a tall drawing) is
+  noted. Both go in the import's window in plain words (`Report`). Tests:
+  `a_drawing_whose_desk_does_not_move_is_refused_saying_why`,
+  `a_drawing_whose_desk_does_not_move_is_not_added_and_a_window_says_why`,
+  `the_template_is_a_theme_with_everything_in_it` (no notes at all: the template must stay clean).
+- **Parts are cut out by hiding the rest, never by taking it away or `display="none"`** (`cut`,
+  `hide`): a group becomes `<defs>`, so the gradients, filters and clips inside it that other parts
+  use stay there; Inkscape's layers carry `style="display:inline"`, which beats a `display`
+  attribute. Each stage of a piece is rendered alone in the frame of the whole piece (so stages lie
+  where drawn on each other), the carrier without its hook. Test:
+  `a_drawing_with_a_desk_that_moves_a_piece_and_a_carrier_is_read_into_its_parts`.
+- **Its palette comes from its picture, once, and is kept with it** (`palette_of`, on import; the
+  shelf's `Entry::colours`): the desk's own colours at its foot and top, docks of its light or dark,
+  the accent its most vivid hue; the colours its maker chose first (and what is made from them,
+  such as buttons from a dock), then all of it made readable as R29 asks. Test:
+  `the_palette_comes_from_the_picture_and_stays_readable_whatever_it_is`.
+- **The shelf is the `themes` folder beside `theme.json`** (`Shelf`: `index.json`, each drawing as
+  `<id>.svg` and the gallery's picture as `<id>.png`; in the browser, IndexedDB like any file, R31).
+  `Themes::kept_in(None)` keeps it in memory, so `Harness` writes nothing. Deleting asks first, and a
+  theme deleted while in use leaves the usual one. Tests:
+  `a_theme_put_on_the_shelf_is_there_the_next_time`,
+  `a_theme_of_one_s_own_is_imported_chosen_and_kept_for_next_time`.
+- **Its picture covers the whole desk, never stretched** (`eggs::own::cover`): as large as needed to
+  cover it, cut to fit, held at the edge `Meta::anchor` names (its foot unless said otherwise), and
+  a little nearer as the writer zooms in (`NEARER`), about the foot of the desk under the page, so
+  it still covers. The pieces stand on its ground (`Growth::ground`, in its units) and scale with
+  it, and never below the page bar along the bottom (as R30's plants). Test:
+  `a_theme_of_one_s_own_covers_the_whole_desk_whatever_the_window_s_shape`.
+- **Nothing of it is read or rendered on the frame** (R31): the drawing is read into its parts
+  (`Pack::read`) and each part rendered (`layered`) with `platform::spawn`, at the size it shows
+  but no more than `MOST_PIXELS` either way (a browser's GPU takes no larger texture), and again
+  only when that size changes by a quarter or halves, at most every 0.4 s while a window is
+  resized. Until the desk's picture comes it is the palette's desk, and it comes in over `COME_IN`.
+  The browser's check: `smoke.mjs`, "a theme of one's own covers the desk with its picture".
+- **The pieces are tended as the Magic Snow's igloos** (a `Tended`, R30): a stage a page of
+  `Doc::garden`, each coming as `Growth::arrive` says (out of a little light, falling from above
+  and bouncing, or rising from its foot; `piece_shapes`); when the next chapter begins the piece is
+  finished at once, the stages it had no pages for coming in with its `done` (as a ship is), so no
+  finished piece is half built. Their places come from `Growth::layout` (in rows out from the page,
+  or scattered), given once and kept. Test:
+  `in_a_theme_of_one_s_own_each_page_grows_a_stage_and_the_next_chapter_finishes_the_piece`.
+- **Or a piece stays where it is drawn** (`Layout::Drawn`): one for the whole story, on the
+  picture where its maker drew it (`Piece::at`, through the same cover as the desk), a stage for
+  every page of the story whatever its chapters (the sum of `Doc::garden`, or the story's pages if
+  more: the text before the first title is in no chapter; tended as one, so it never shrinks), its
+  `done` with its last stage. This is what a maker means by a coconut on the beach for every page;
+  drawn spread out with the beside-the-page layouts it was a strip far wider than tall, scaled to a
+  quarter of the desk and off it, so `check` notes a piece far from square there, and a stage
+  repeating the one before (`repeated_stage`). Tests:
+  `in_a_theme_drawn_in_place_a_stage_falls_where_it_is_drawn_for_every_page_of_the_story`,
+  `a_piece_drawn_spread_out_or_with_stages_repeating_the_ones_before_is_noted`.
+- **Or each chapter's piece stays where it is drawn** (`Each::Chapter`): the chapter's piece
+  (in turn, or at random with `Order::Random`, never the one before's, the same for the same
+  story: `piece_for`) is tended as the beside-the-page ones are; when the next chapter begins it
+  shows its `done`, or with `Finish::Fall` its stages fall one after another to `ground` and lie
+  there for good, about its foot (`fallen`, seeded by chapter and stage). A piece a later chapter
+  grows on again is that chapter's: an older one finished with its `done` is not drawn under it.
+  What is drawn in place on a moving part of the desk moves with it (`Drawn::holding`,
+  `Drawn::moved`): the smallest moving part holding the piece's middle, whether the piece is drawn
+  inside that part's group (a piece may lie in the desk) or over it; asked for: coconuts on a
+  swaying palm stood still while its crown swayed. Tests:
+  `coconuts_grow_on_a_chapter_s_palm_sway_with_it_and_fall_to_the_sand_when_the_next_begins`,
+  `what_lies_on_a_moving_part_finds_it_and_moves_with_it`.
+- **A point in an id may be in the drawing's units or the part's group's** (`motion::layered`):
+  whichever of them lies on the part (in it, for a spin), the drawing's first, so what Claude
+  writes for a scene reads as before. A hand-made bird moved into place by a `translate` had its
+  wing's shoulder written as 0,0 in it, and the wing stayed still; parts of the piece and the
+  carrier that stay still are noted as the desk's are. Test:
+  `a_point_may_be_written_in_the_units_of_the_group_its_part_is_drawn_in`.
+- **Its carrier flies the balloon's way** (`Carrier::Own`, `rig`), mirrored to face the way it flies
+  (`CarrierLook::faces`), and is called only once its picture is rendered
+  (`Shown::carrier_ready`). Test: `a_theme_of_one_s_own_brings_a_new_chapter_title_with_its_carrier`.
+- **None of it is printed or saved with a story** (R20, R30): it is drawn in none of `App::underlay`,
+  `PageLayout::ink` or `App::furniture`, and its pictures keep their own colours (R29). Test:
+  `print_shows_nothing_of_a_theme_of_one_s_own`.
+- **To add a setting**: a field in `Meta` (or `Growth`, `CarrierLook`) with a default, the guide's
+  line, the template's comment. **A new kind of motion**: as in §5, and its line in `own::MOTIONS`
+  and the template's comment.
+
 ## 5. Checklists for common changes
 
 **Something new in the background** (a rendering, a request): `platform::spawn` with owned data in,
@@ -2128,7 +2236,13 @@ a channel out, a `platform::Waker` to ask for a frame; nothing behind a lock sha
 
 **A new way for a scene's parts to move**: its line in `motion::PROMPT`, its id in `parse_id`
 (and the check of its point, if it has one, in `layered`), a `Motion`, its movement in `pose`
-(or drawn by Caprice, like `smoke`), and a part of it in `NIGHT` for the tests (R14).
+(or drawn by Caprice, like `smoke` and the `particles`), and a part of it in `NIGHT` for the tests
+(R14). If themes of one's own may use it: its line in `own::MOTIONS` and in the template's comment
+(R35).
+
+**A new setting for themes of one's own**: a field in `own::Meta` (or `Growth`, `CarrierLook`) with
+`#[serde(default)]`, read where the theme is drawn (`eggs/own.rs`), its line in `own::guide` and in
+the comment of `assets/theme-template.svg` (R35).
 
 **A new paragraph attribute** (like line spacing or chapter title): `ParaAttrs` → `run_format` /
 `paragraph_job` → the toolbar (`ui.rs`) → file format default (R9) → Word mapping (R10) → whether
@@ -2482,5 +2596,16 @@ result sent back, a stand-in answer in `api.test.mjs` and in `cloud::stand_in` (
   each was saved, and the other's words among the story's backups for a week, behind "⋯" in
   Versions (R22, R33). Merging the two was not tried: the room already decided nothing is merged
   (R34), and a backup is enough to take words back from.
+- **2026-11-14 — Themes of one's own are one drawing that Caprice plays, not code.** Asked for:
+  writers making magic themes themselves, by upload or with Claude or other tools, later shared
+  in a gallery to vote on. The built-in themes are Rust drawing shapes; a writer's cannot be code
+  (the browser's CSP forbids evaluating any, R31), so a theme is data: one SVG, which every drawing
+  program opens and saves, any AI chat can write from the guide, and one check can judge. All seven
+  magic themes have the same shape (a thing a chapter, a part a page, a change when the next
+  chapter begins, something bringing the title), so that is the shape a theme of one's own takes:
+  a desk that must move (a still picture was not wanted), and optionally a piece and a carrier.
+  Its motion is `motion.rs`'s, with more kinds for a picture looked at for hours. The theme
+  workshop (clicking parts to set their motion) and the online gallery come later; the format
+  stays as it is for them (R35).
 - **No `.docx` import.** Export only.
 - **Contents heading is "Contents"** (English), in the app and in Word.

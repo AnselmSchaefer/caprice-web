@@ -101,7 +101,8 @@ Full list with reasons and tests in `ARCHITECTURE.md` §4.
     the text; the text and pictures; header, footer, boxes in front). Anything new
     drawn on a page goes into one of them, or it is not printed. None of them moves a page break.
     Tests never reach the system's printers: they set `App::print.spooler`.
-    The magic themes' garden, houses, ships, forest, reef, the lake and its igloos, vines and starlings, balloon, dragon and octopus (`eggs.rs`) are deliberately in none of them, and move no text.
+    The magic themes' garden, houses, ships, forest, reef, the lake and its igloos, vines and starlings, balloon, dragon and octopus (`eggs.rs`),
+    and a theme of one's own's picture, pieces and carrier (`eggs/own.rs`), are deliberately in none of them, and move no text.
 12. **A story with a file saves itself; every story keeps versions by its id.** Anything that
     starts another story sets `story_id` and calls `Keeper::opened`. Leaving still offers to drop
     the changes since saving by hand (`as_saved`). `Harness` turns autosave, versions, the
@@ -110,7 +111,8 @@ Full list with reasons and tests in `ARCHITECTURE.md` §4.
     replaces are kept a week as a backup (`keep_backup`), never as a story beside it (R33).
 13. **Colours around the page come from `theme::pal()`**, never literals; the page itself (`PAPER`, `INK`)
     is the same in every theme.
-    Pictures (the emblem, the garden, houses, ships and sea, the forest and its lanterns, the reef, its fish and the octopus, the snowy hillside, its lake and igloos, the vineyard and its starlings, balloon and dragon) and Google's sign-in button keep their own colours.
+    Pictures (the emblem, the garden, houses, ships and sea, the forest and its lanterns, the reef, its fish and the octopus, the snowy hillside, its lake and igloos, the vineyard and its starlings, balloon and dragon, a theme of one's own's drawing) and Google's sign-in button keep their own colours.
+    A theme of one's own (`Theme::Own`) has its palette from `Themes::palette`, never `Theme::palette`.
 
 14. **The desktop and the browser differ only in `platform.rs`.** Background work is
     `platform::spawn` with a `platform::Waker`, never a `Context` or a lock shared with the frame;
@@ -121,8 +123,15 @@ Full list with reasons and tests in `ARCHITECTURE.md` §4.
     `clippy.toml` flags the `std` calls that panic or fail in the browser. The browser's
     Content-Security-Policy forbids evaluating code: no library may (`web/csp.mjs`).
 
+15. **A theme of one's own is one SVG that Caprice plays** (`own.rs`, R35): made readable once on
+    import (layer names to ids, links out of the file taken away), refused with reasons if its desk
+    does not move, read and rendered off the frame. Its parts are cut out by turning the groups
+    around them into `<defs>` (what they define stays), never with `display`. A new setting or kind
+    of motion goes into the guide and the template too.
+
 ## Files
 
 - Tracked: `README.md`, `ARCHITECTURE.md`, `CLAUDE.md`.
 - Local, untracked planning notes: `TECHNICAL_DESCRIPTION.md` (older, superseded by
-  `ARCHITECTURE.md`), `FORK_REQUIREMENTS.md` (when to fork egui), `CHAPTERS_PLAN.md`, `WEB_PLAN.md`.
+  `ARCHITECTURE.md`), `FORK_REQUIREMENTS.md` (when to fork egui), `CHAPTERS_PLAN.md`, `WEB_PLAN.md`,
+  `THEME_PROGRAMS_PLAN.md` (themes Claude writes as sandboxed WebAssembly programs, for the gallery).

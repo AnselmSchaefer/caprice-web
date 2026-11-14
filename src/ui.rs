@@ -251,56 +251,116 @@ fn color_dropdown(ui: &mut egui::Ui, color: Option<[u8; 3]>) -> Option<Option<[u
     pick
 }
 
-/// The themes, each drawn as a little desk with its dock, a page and the accent: the classic ones,
-/// of colours alone, or the magic ones, as the switch at the top says (first those of the theme in
-/// use, then as last switched); the one clicked becomes `theme`.
-fn theme_gallery(ui: &mut egui::Ui, theme: &mut Theme) {
-    let id = egui::Id::new("theme_gallery_magic");
-    let mut magic = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(theme.magic());
+/// The writer's own themes as the gallery shows them: what is on the shelf, the little pictures of
+/// them, the one in use, and whether one is being imported.
+struct Yours<'a> {
+    entries: &'a [crate::own::Entry],
+    thumbs: &'a std::collections::HashMap<String, egui::TextureHandle>,
+    chosen: Option<&'a str>,
+    importing: bool,
+}
+
+/// A theme drawn as a little desk with its dock, a page and the accent, over its picture if it has
+/// one; clicked, or not.
+fn theme_tile(ui: &mut egui::Ui, name: &str, about: &str, c: crate::theme::Palette, picture: Option<egui::TextureId>, chosen: bool) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(vec2(150.0, 84.0), Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
+    let p = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+    p.rect_filled(rect, 6.0, c.desk);
+    if let Some(picture) = picture {
+        // The picture's middle, as the desk shows it, cut to the tile.
+        p.image(picture, rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+    } else {
+        let glow = Rect::from_min_max(rect.min, pos2(rect.right(), rect.center().y));
+        p.rect_filled(glow, egui::CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 }, c.desk_top.gamma_multiply(0.7));
+    }
+    let dock = Rect::from_min_size(rect.min + vec2(14.0, 7.0), vec2(rect.width() - 28.0, 14.0));
+    p.rect_filled(dock, 5.0, c.dock);
+    p.rect_stroke(dock, 5.0, Stroke::new(1.0, c.dock_edge), egui::StrokeKind::Inside);
+    for (j, fill) in [c.btn, c.btn, c.accent, c.btn].into_iter().enumerate() {
+        let b = Rect::from_min_size(dock.min + vec2(4.0 + j as f32 * 13.0, 3.0), vec2(10.0, 8.0));
+        p.rect_filled(b, 2.0, fill);
+    }
+    let line = Rect::from_min_size(pos2(dock.right() - 34.0, dock.center().y - 1.0), vec2(28.0, 2.0));
+    p.rect_filled(line, 1.0, c.text_dim);
+    let page = Rect::from_min_size(pos2(rect.center().x - 22.0, dock.bottom() + 7.0), vec2(44.0, 52.0));
+    p.rect_filled(page, 1.0, crate::theme::PAPER);
+    for j in 0..6 {
+        let w = if j == 5 { 18.0 } else { 34.0 };
+        let y = page.top() + 7.0 + j as f32 * 6.0;
+        p.rect_filled(Rect::from_min_size(pos2(page.left() + 5.0, y), vec2(w, 1.5)), 0.0, Color32::from_gray(190));
+    }
+    if picture.is_none() {
+        p.circle_filled(pos2(page.right() + 12.0, page.bottom() - 6.0), 4.0, c.accent);
+        p.circle_filled(pos2(page.left() - 12.0, page.top() + 10.0), 2.5, c.caret);
+    }
+    if chosen {
+        ui.painter().rect_stroke(rect.expand(1.5), 7.0, Stroke::new(2.0, pal().accent), egui::StrokeKind::Outside);
+    } else if resp.hovered() {
+        ui.painter().rect_stroke(rect, 6.0, Stroke::new(1.0, pal().text_dim), egui::StrokeKind::Outside);
+    }
+    let resp = if about.is_empty() { resp } else { resp.on_hover_text(about) };
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+}
+
+/// The themes: the classic ones, of colours alone, the magic ones, or the writer's own, as the
+/// switch at the top says (first those of the theme in use, then as last switched); the one clicked
+/// becomes `theme`, and what is asked for among the writer's own is given back.
+fn theme_gallery(ui: &mut egui::Ui, theme: &mut Theme, yours: &Yours) -> Option<crate::own::Ask> {
+    use crate::own::Ask;
+    let id = egui::Id::new("theme_gallery_shown");
+    let first = if *theme == Theme::Own { 2u8 } else { u8::from(theme.magic()) };
+    let mut shown = ui.data(|d| d.get_temp::<u8>(id)).unwrap_or(first);
     ui.horizontal(|ui| {
-        ui.selectable_value(&mut magic, false, "Classic").on_hover_text("Colours around the page");
-        ui.selectable_value(&mut magic, true, "Magic").on_hover_text("Themes that hide things to find");
+        ui.selectable_value(&mut shown, 0, "Classic").on_hover_text("Colours around the page");
+        ui.selectable_value(&mut shown, 1, "Magic").on_hover_text("Themes that hide things to find");
+        ui.selectable_value(&mut shown, 2, "Yours").on_hover_text("Themes you make yourself, or are given");
     });
-    ui.data_mut(|d| d.insert_temp(id, magic));
+    ui.data_mut(|d| d.insert_temp(id, shown));
     ui.separator();
-    {
-        let themes = Theme::ALL.into_iter().filter(|t| t.magic() == magic);
-        egui::Grid::new(("theme_gallery", magic)).num_columns(2).spacing(vec2(12.0, 6.0)).show(ui, |ui| {
-            for (k, t) in themes.enumerate() {
+    let mut ask = None;
+    if shown == 2 {
+        ui.horizontal(|ui| {
+            if yours.importing {
+                ui.spinner();
+                ui.label("Reading the theme\u{2026}");
+            } else if ui.button("Import a theme\u{2026}").on_hover_text("A drawing (SVG) made for Caprice: from a file").clicked() {
+                ask = Some(Ask::Import);
+            }
+            if ui.button("How to make one").clicked() {
+                ask = Some(Ask::Guide);
+            }
+        });
+        if yours.entries.is_empty() {
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new("Draw your own desk, with things that move and grow as you write, in any drawing program, or have an AI chat draw it. The template has everything to start from.").color(pal().text_dim).size(12.0));
+            if ui.button("Get the template\u{2026}").clicked() {
+                ask = Some(Ask::Template);
+            }
+            return ask;
+        }
+        ui.add_space(4.0);
+        egui::Grid::new("theme_gallery_yours").num_columns(2).spacing(vec2(12.0, 6.0)).show(ui, |ui| {
+            for (k, e) in yours.entries.iter().enumerate() {
                 ui.vertical(|ui| {
-                    ui.label(egui::RichText::new(t.name()).size(12.0).color(pal().text_dim));
-                    let (rect, resp) = ui.allocate_exact_size(vec2(150.0, 84.0), Sense::click());
-                    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, t.name()));
-                    let c = t.palette();
-                    let p = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
-                    p.rect_filled(rect, 6.0, c.desk);
-                    let glow = Rect::from_min_max(rect.min, pos2(rect.right(), rect.center().y));
-                    p.rect_filled(glow, egui::CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 }, c.desk_top.gamma_multiply(0.7));
-                    let dock = Rect::from_min_size(rect.min + vec2(14.0, 7.0), vec2(rect.width() - 28.0, 14.0));
-                    p.rect_filled(dock, 5.0, c.dock);
-                    p.rect_stroke(dock, 5.0, Stroke::new(1.0, c.dock_edge), egui::StrokeKind::Inside);
-                    for (j, fill) in [c.btn, c.btn, c.accent, c.btn].into_iter().enumerate() {
-                        let b = Rect::from_min_size(dock.min + vec2(4.0 + j as f32 * 13.0, 3.0), vec2(10.0, 8.0));
-                        p.rect_filled(b, 2.0, fill);
-                    }
-                    let line = Rect::from_min_size(pos2(dock.right() - 34.0, dock.center().y - 1.0), vec2(28.0, 2.0));
-                    p.rect_filled(line, 1.0, c.text_dim);
-                    let page = Rect::from_min_size(pos2(rect.center().x - 22.0, dock.bottom() + 7.0), vec2(44.0, 52.0));
-                    p.rect_filled(page, 1.0, crate::theme::PAPER);
-                    for j in 0..6 {
-                        let w = if j == 5 { 18.0 } else { 34.0 };
-                        let y = page.top() + 7.0 + j as f32 * 6.0;
-                        p.rect_filled(Rect::from_min_size(pos2(page.left() + 5.0, y), vec2(w, 1.5)), 0.0, Color32::from_gray(190));
-                    }
-                    p.circle_filled(pos2(page.right() + 12.0, page.bottom() - 6.0), 4.0, c.accent);
-                    p.circle_filled(pos2(page.left() - 12.0, page.top() + 10.0), 2.5, c.caret);
-                    if *theme == t {
-                        ui.painter().rect_stroke(rect.expand(1.5), 7.0, Stroke::new(2.0, pal().accent), egui::StrokeKind::Outside);
-                    } else if resp.hovered() {
-                        ui.painter().rect_stroke(rect, 6.0, Stroke::new(1.0, pal().text_dim), egui::StrokeKind::Outside);
-                    }
-                    if resp.on_hover_text(t.about()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                        *theme = t;
+                    ui.horizontal(|ui| {
+                        ui.set_width(150.0);
+                        ui.label(egui::RichText::new(&e.name).size(12.0).color(pal().text_dim));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.menu_button(egui::RichText::new("\u{22ef}").size(12.0), |ui| {
+                                if ui.button("Export\u{2026}").on_hover_text("Save its drawing, to change it or give it to someone").clicked() {
+                                    ask = Some(Ask::Export(e.id.clone()));
+                                }
+                                if ui.button("Delete\u{2026}").clicked() {
+                                    ask = Some(Ask::Delete(e.id.clone()));
+                                }
+                            });
+                        });
+                    });
+                    let about = if e.author.is_empty() { e.about.clone() } else { format!("{} \u{2014} by {}", e.about, e.author) };
+                    let chosen = *theme == Theme::Own && yours.chosen == Some(e.id.as_str());
+                    if theme_tile(ui, &e.name, about.trim_start_matches(" \u{2014} "), e.palette(), yours.thumbs.get(&e.id).map(|t| t.id()), chosen) {
+                        ask = Some(Ask::Use(e.id.clone()));
                     }
                 });
                 if k % 2 == 1 {
@@ -308,7 +368,24 @@ fn theme_gallery(ui: &mut egui::Ui, theme: &mut Theme) {
                 }
             }
         });
+        return ask;
     }
+    let magic = shown == 1;
+    let themes = Theme::ALL.into_iter().filter(|t| t.magic() == magic);
+    egui::Grid::new(("theme_gallery", magic)).num_columns(2).spacing(vec2(12.0, 6.0)).show(ui, |ui| {
+        for (k, t) in themes.enumerate() {
+            ui.vertical(|ui| {
+                ui.label(egui::RichText::new(t.name()).size(12.0).color(pal().text_dim));
+                if theme_tile(ui, t.name(), t.about(), t.palette(), None, *theme == t) {
+                    *theme = t;
+                }
+            });
+            if k % 2 == 1 {
+                ui.end_row();
+            }
+        }
+    });
+    ask
 }
 
 /// Something picked in the Insert menu.
@@ -1046,6 +1123,7 @@ impl App {
         let mut setup = self.doc.setup.clone();
         let mut look = self.appearance;
         let mut theme = self.themes.theme;
+        let mut asked = None;
         egui::containers::menu::MenuButton::new("Page")
             .config(
                 egui::containers::menu::MenuConfig::new()
@@ -1060,7 +1138,16 @@ impl App {
                 });
                 ui.horizontal(|ui| {
                     ui.label("Theme");
-                    ui.menu_button(theme.name(), |ui| theme_gallery(ui, &mut theme));
+                    let yours = Yours {
+                        entries: &self.themes.own.entries,
+                        thumbs: &self.workshop.thumbs,
+                        chosen: self.themes.own_id.as_deref(),
+                        importing: self.workshop.importing(),
+                    };
+                    let name = if theme == Theme::Own { self.themes.name() } else { theme.name().to_owned() };
+                    if let Some(Some(a)) = ui.menu_button(name, |ui| theme_gallery(ui, &mut theme, &yours)).inner {
+                        asked = Some(a);
+                    }
                 });
                 ui.separator();
                 ui.horizontal(|ui| {
@@ -1109,6 +1196,9 @@ impl App {
                 ui.menu_button("Page numbers", |ui| self.numbers_menu(ui, out));
             });
         self.themes.choose(ui.ctx(), theme);
+        if let Some(asked) = asked {
+            self.theme_asked(ui.ctx(), asked);
+        }
         if look != self.appearance {
             self.appearance = look;
             // Whatever was moving finishes the new way.
