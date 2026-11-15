@@ -1,0 +1,80 @@
+/// The interface between Caprice and a theme program (ARCHITECTURE.md R36): what Caprice tells a
+/// theme, what a theme may ask of Caprice, and what it draws. A theme only draws; Caprice decides
+/// everything else (R30). The package's version is the interface's version: one published is
+/// kept working for good.
+package caprice:theme@1.0.0;
+
+interface types {
+    record point { x: f32, y: f32 }
+    record rect { min: point, max: point }
+    /// sRGB, premultiplied as egui wants: red in the lowest byte, alpha in the highest.
+    type color = u32;
+
+    record circle { at: point, r: f32, color: color }
+    /// Convex: egui fills only convex shapes.
+    record polygon { points: list<point>, color: color }
+    record line { a: point, b: point, width: f32, color: color }
+    record vertex { at: point, color: color }
+    /// Coloured triangles, three indices each: gradients.
+    record mesh { vertices: list<vertex>, indices: list<u32> }
+    variant shape { circle(circle), polygon(polygon), line(line), mesh(mesh) }
+
+    /// The desk and the page as they lie at the fitting zoom, and the page bar if it shows. The
+    /// theme lays out for these; Caprice zooms all it draws by `zoom` at once, about the foot of
+    /// the desk under the page's middle. `unit` is the size of things (1 on a desk 900 high).
+    record desk { area: rect, page: rect, bar: option<rect>, zoom: f32, unit: f32 }
+
+    /// Where the carrier is in its course, as Caprice flies it: 0 to 1 coming in beside the page,
+    /// over the title's place, lowering it; whether the title is still held; 0 to 1 rising clear
+    /// once it is let go; where it looks (0 back, 1 at the writer, 2 at the page, 3 ahead); and
+    /// the seconds since it was called.
+    record pose { enter: f32, run: f32, lower: f32, hooked: bool, hook: f32, look: f32, t: f32 }
+    /// The carrier at work: its pose, from which side it came, and the title's place.
+    record carrier { pose: pose, from-left: bool, title: rect }
+
+    record frame-input { time: f64, desk: desk, carrier: option<carrier> }
+    record frame-output {
+        /// Behind every page.
+        desk: list<shape>,
+        /// Over the settled page, on the screen only: for the carrier.
+        over: list<shape>,
+        /// Milliseconds until the next frame is wanted: 0 while something moves.
+        next: u32,
+        /// How far the carried title is from its place, so Caprice moves it with the carrier.
+        title-offset: point,
+    }
+
+    record pages { chapter: u32, pages: u32 }
+    variant event {
+        /// The theme was just picked, a story opened, or the garden counted afresh: show everything
+        /// as it stands, grow nothing (R30).
+        fresh,
+        /// A chapter has had more pages than ever before (`Doc::garden` only grows).
+        grown(pages),
+        /// A new chapter has begun: the one before is finished.
+        begun(u32),
+        /// The writer clicked the desk where Caprice itself does nothing with a click.
+        clicked(point),
+    }
+}
+
+/// (a) What a theme may ask of Caprice. Each import is a capability given on purpose.
+interface host {
+    /// A number of the story's own (a hash of its id, never the id), the same in every browser.
+    story-seed: func() -> u64;
+    /// The most pages each chapter has had, a chapter in order (`Doc::garden`).
+    garden: func() -> list<u32>;
+    /// The story's pages now.
+    page-count: func() -> u32;
+    /// Says that this theme brings new chapter titles, drawing the carrier over the page; Caprice
+    /// decides whether and when one is brought, and answers whether it will bring them.
+    ask-lift: func() -> bool;
+}
+
+world theme {
+    use types.{event, frame-input, frame-output};
+    import host;
+    /// (b) What happened since the last frame, in order, before the frame is asked for.
+    export events: func(events: list<event>);
+    export frame: func(input: frame-input) -> frame-output;
+}

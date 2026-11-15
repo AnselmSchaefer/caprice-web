@@ -518,7 +518,7 @@ impl Themes {
     /// The name of the theme chosen, as the Page menu shows it.
     pub fn name(&self) -> String {
         match (self.theme, &self.own_id) {
-            (Theme::Own, Some(id)) => self.own.get(id).map_or(Theme::Own.name().to_owned(), |e| e.name.clone()),
+            (Theme::Own, Some(id)) => self.own.get(id).map_or(Theme::Own.name().to_owned(), |e| e.shown_name().to_owned()),
             (t, _) => t.name().to_owned(),
         }
     }

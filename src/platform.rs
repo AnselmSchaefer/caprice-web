@@ -12,6 +12,7 @@ use std::time::Duration;
 use eframe::egui;
 
 pub mod fs;
+pub mod program;
 #[cfg(target_arch = "wasm32")]
 mod worker;
 

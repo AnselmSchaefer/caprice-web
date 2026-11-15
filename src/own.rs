@@ -916,11 +916,63 @@ pub struct Entry {
     pub carries: bool,
     #[serde(default)]
     pub added: u64,
+    /// A program (R36), kept as `<id>.wasm`, rather than a drawing.
+    #[serde(default)]
+    pub program: bool,
+    /// What the gallery signed, for a theme taken from it.
+    #[serde(default)]
+    pub gallery: Option<Signed>,
+    /// Whether that signature was found to be the gallery's, each time the shelf was read: only
+    /// then is it shown under the gallery's name.
+    #[serde(skip)]
+    pub from_gallery: bool,
 }
 
 impl Entry {
     pub fn palette(&self) -> Palette {
         with_colours(Theme::Midnight.palette(), &self.colours).0
+    }
+
+    /// The name it is shown by: the gallery's, if the gallery signed it; else its own.
+    pub fn shown_name(&self) -> &str {
+        match &self.gallery {
+            Some(s) if self.from_gallery => &s.name,
+            _ => &self.name,
+        }
+    }
+}
+
+/// The gallery's signature over a theme it published (step 6 of the plan): over the module's
+/// hash, its source's, the toolchain that built it and the name it is published under.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Signed {
+    pub name: String,
+    /// The SHA-256 of its source, in hex.
+    pub source: String,
+    pub toolchain: String,
+    /// Ed25519, in base64.
+    pub signature: String,
+}
+
+/// The gallery's public key. Until the gallery has its key (step 6) it is none of any key's, so
+/// nothing is taken for the gallery's.
+pub const GALLERY_KEY: [u8; 32] = [0; 32];
+
+impl Signed {
+    /// What the gallery signs for `module`.
+    pub fn message(&self, module: &[u8]) -> String {
+        use sha2::Digest;
+        let hash: String = sha2::Sha256::digest(module).iter().map(|b| format!("{b:02x}")).collect();
+        format!("caprice:theme@1.0.0\nmodule {hash}\nsource {}\ntoolchain {}\nname {}\n", self.source, self.toolchain, self.name)
+    }
+
+    /// Whether `key` signed this for `module`: checked every time the shelf is read, never trusted
+    /// from before.
+    pub fn by(&self, key: &[u8; 32], module: &[u8]) -> bool {
+        use base64::Engine;
+        let Ok(signature) = base64::engine::general_purpose::STANDARD.decode(&self.signature) else { return false };
+        let (Ok(key), Ok(signature)) = (ed25519_compact::PublicKey::from_slice(key), ed25519_compact::Signature::from_slice(&signature)) else { return false };
+        key.verify(self.message(module), &signature).is_ok()
     }
 }
 
@@ -930,8 +982,11 @@ impl Entry {
 pub struct Shelf {
     pub dir: Option<PathBuf>,
     pub entries: Vec<Entry>,
-    /// Without a folder: the drawings, and the pictures of them.
+    /// Without a folder: the drawings, and the pictures of them; and the programs.
     held: HashMap<String, (String, ColorImage)>,
+    held_modules: HashMap<String, Vec<u8>>,
+    /// The key the gallery's signatures are checked with (`GALLERY_KEY`; another in tests).
+    pub gallery_key: [u8; 32],
     /// Changed since the gallery last loaded its pictures.
     pub version: u64,
 }
@@ -939,7 +994,52 @@ pub struct Shelf {
 impl Shelf {
     pub fn kept_in(dir: Option<PathBuf>) -> Self {
         let entries = dir.as_ref().and_then(|d| fs::read_to_string(d.join("index.json")).ok()).and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
-        Self { dir, entries, held: HashMap::new(), version: 0 }
+        let mut shelf = Self { dir, entries, held: HashMap::new(), held_modules: HashMap::new(), gallery_key: GALLERY_KEY, version: 0 };
+        shelf.check_signatures();
+        shelf
+    }
+
+    /// Each theme's signature checked against its module as it is now: one changed by a byte, or
+    /// signed by another key, is the writer's own, unsigned (R36).
+    pub fn check_signatures(&mut self) {
+        for i in 0..self.entries.len() {
+            let e = &self.entries[i];
+            let from = match (&e.gallery, e.program) {
+                (Some(s), true) => self.module(&e.id).is_some_and(|m| s.by(&self.gallery_key, &m)),
+                _ => false,
+            };
+            self.entries[i].from_gallery = from;
+        }
+    }
+
+    /// The module of a theme on the shelf that is a program.
+    pub fn module(&self, id: &str) -> Option<Vec<u8>> {
+        match &self.dir {
+            Some(d) => fs::read(d.join(format!("{id}.wasm"))).ok(),
+            None => self.held_modules.get(id).cloned(),
+        }
+    }
+
+    /// Put a program theme on the shelf, checked (`eggs::program::check`), with the palette's
+    /// colours and what the gallery signed, if it came from there; its id.
+    pub fn add_program(&mut self, name: &str, about: &str, colours: BTreeMap<String, String>, module: &[u8], gallery: Option<Signed>) -> Result<String, String> {
+        crate::eggs::program::check(module).map_err(|why| why.join("; "))?;
+        let id = crate::versions::new_id();
+        match &self.dir {
+            Some(d) => {
+                fs::create_dir_all(d).map_err(|e| e.to_string())?;
+                fs::write(d.join(format!("{id}.wasm")), module).map_err(|e| e.to_string())?;
+            }
+            None => {
+                self.held_modules.insert(id.clone(), module.to_vec());
+            }
+        }
+        let entry = Entry { id: id.clone(), name: name.to_owned(), about: about.to_owned(), author: String::new(), colours, grows: true, carries: true,
+            added: crate::platform::since_epoch().as_secs(), program: true, gallery, from_gallery: false };
+        self.entries.push(entry);
+        self.check_signatures();
+        self.save()?;
+        Ok(id)
     }
 
     pub fn get(&self, id: &str) -> Option<&Entry> {
@@ -979,6 +1079,9 @@ impl Shelf {
             grows: !pack.pieces.is_empty(),
             carries: pack.carrier.is_some(),
             added: crate::platform::since_epoch().as_secs(),
+            program: false,
+            gallery: None,
+            from_gallery: false,
         };
         match &self.dir {
             Some(d) => {
@@ -1006,8 +1109,9 @@ impl Shelf {
     pub fn remove(&mut self, id: &str) {
         self.entries.retain(|e| e.id != id);
         self.held.remove(id);
+        self.held_modules.remove(id);
         if let Some(d) = &self.dir {
-            for ext in ["svg", "png"] {
+            for ext in ["svg", "png", "wasm"] {
                 let _ = fs::remove_file(d.join(format!("{id}.{ext}")));
             }
         }

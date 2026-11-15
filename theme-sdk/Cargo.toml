@@ -1,0 +1,16 @@
+# What a theme program is written against (ARCHITECTURE.md R36): the bindings of the WIT world
+# `caprice:theme@1.0.0` made ahead of time (no proc macro in a theme's build), a little runtime in
+# their place of wit-bindgen's, and helpers that mirror Caprice's own themes. No dependencies.
+[package]
+name = "theme-sdk"
+version = "1.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "theme_sdk"
+
+[dev-dependencies]
+# Only for the test that making the bindings again from wit/theme.wit changes nothing.
+wit-bindgen-rust = "=0.63.0"
+wit-bindgen-core = "=0.63.0"
