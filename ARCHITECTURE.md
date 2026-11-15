@@ -89,6 +89,7 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `backdrop.rs` | Scenes Claude paints (SVG), pinned to the story, faintly behind the pages; the Scene menu and list |
 | `motion.rs` | Scenes that move a little: the parts Claude marks by id (drift, wing, sway, smoke, flicker, shimmer), rendered apart from the still picture and moved every frame; and the kinds a theme of one's own may use besides (float, twinkle, pulse, wander, spin, and areas of snow, rain, fireflies, leaves, bubbles or embers that Caprice fills) |
 | `own.rs` | Themes of the writer's own (R35): one SVG drawing read into its desk, pieces and carrier (`Pack`), checked on import with the reasons in plain words (`check`), its palette taken from its picture (`palette_of`); the shelf of them in the data folder (`Shelf`); importing, exporting, deleting, the template, the guide and the import's report (`Workshop`) |
+| `bundle.rs` | A theme that is a program as one file (R36): a `.caprice-theme`, a zip of `manifest.json` (name, words, author, palette, the world, the toolchain), `theme.wasm`, `theme.rs` and `preview.png`; read and checked on import with the reasons in words (`open`), written again by Export (`write`), the same bytes for the same parts |
 | `cast.rs` | The cast: people found by name in what is painted, their looks and model sheets in the scene's prompt; the Cast window and its example |
 | `start.rs` | The welcome page when Caprice opens without a file: kinds of new story (`Kind`), the stories last opened with what they hold, the sheet flying to the desk; the list of stories last opened, kept in the data folder |
 | `peek.rs` | The cast peeking out from behind the page: the puppet asked of Claude, cut into parts, who peeks when, where they look, the peek drawn |
@@ -2300,7 +2301,14 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   **a program's shapes are a frame behind its input**: what must stay in step travels in one output
   (the shapes and the carried title's offset), and the zoom is Caprice's, so zooming is never late.
   A worker that does not load in `LOAD_SECONDS` or answer a frame in `ANSWER_SECONDS` is ended
-  (`terminate`), as is one whose program traps; on the desktop it is never run, and the usual desk
+  (`terminate`), as is one whose program traps. **Only time Caprice was there to hear counts**
+  (`platform::program::Waiting`): of a gap between two looks (a frame of Caprice's own that took
+  long, the page hidden) at most `BUSY` (a quarter second) is the program's. Counting all of it, a
+  frame that held the page for over a second (the Vineyard's 156 000 vertices in headless
+  Chromium's software drawing) left a worker's answer, made in 12 ms, unread, and the theme was
+  stopped for not answering; a worker that truly never answers is still stopped, on the slowest
+  device too (`a_program_is_given_its_time_only_while_caprice_is_there_to_hear_it`,
+  `a_program_that_never_answers_is_stopped_on_the_slowest_device_too`); on the desktop it is never run, and the usual desk
   shows with a word why; in the tests a stand-in that fails or never answers is stopped the same
   way (`Stand::Fails`, `Stand::Silent`, after `ANSWER_SECONDS`). Leaving the theme ends its worker
   (`program::Shown::forget`). Tests: `a_frame_that_never_comes_or_fails_stops_the_theme_saying_why`,
@@ -2392,6 +2400,32 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
 - **None of it is printed or saved with a story** (R20, R30): it is drawn in none of `underlay`,
   `ink` or `furniture`, and moves no text. Its colours are its own (R29), its palette the entry's.
   Test: `print_shows_nothing_of_a_program_theme`.
+- **A program comes and goes as a theme file** (`bundle.rs`, the plan's step 3): a `.caprice-theme`,
+  a zip of `manifest.json` (`bundle::Manifest`: the world it is built for, which must be
+  `caprice:theme@1.0.0`; its name, a few words, its author; its palette by `own::NAMES`; the
+  toolchain), `theme.wasm`, and if they come with it `theme.rs` (kept beside the module as
+  `<id>.rs`) and `preview.png` (the gallery's picture, made 320 wide). "Import a theme…" in Yours
+  takes it or a drawing, told apart by the file's first bytes (`bundle::is_bundle`), read off the
+  frame like a drawing (`own::Prepared`) and reported in the same window: refused with reasons in
+  words when it is not a zip, has no manifest or module, names another world, or its module fails
+  `eggs::program::check`; and what it lacks or holds besides (no palette, colours not read, no
+  picture, other files) is worth knowing, never a refusal. Every part is read to at most its size,
+  whatever the zip says (`MOST_FILE`, the module's `MOST_BYTES`). Unsigned modules are welcome on
+  one's own shelf (the sandbox keeps them harmless); a file never carries the gallery's signature.
+  **Its palette is the theme's**: the toolbar, the buttons, the page bar and the desk under the
+  program's shapes (shown before its first frame and when it is stopped) take its colours, so a
+  program that draws its own sky should carry a palette that agrees with it. Export writes a
+  program back as the file it came as (`Shelf::bundle`, `bundle::write`: no time in the zip, so the
+  same parts give the same bytes). `tests/fixtures/snow.caprice-theme` and `vineyard.caprice-theme`
+  are the ports, with their sources and the built-in themes' palettes (`themes/<theme>/manifest.json`),
+  to try by hand; a change to a port, its manifest or its module means making them again
+  (`CAPRICE_FIXTURES=1 cargo test`). Tests:
+  `the_snow_s_and_the_vineyard_s_theme_files_are_their_manifests_modules_and_sources`,
+  `a_file_that_is_not_a_theme_or_whose_program_cannot_be_played_is_refused_saying_why`,
+  `what_a_theme_file_lacks_or_holds_besides_is_worth_knowing_not_a_refusal`,
+  `a_theme_file_is_imported_chosen_and_played_in_its_own_colours_and_exported_as_it_came`,
+  `a_theme_file_whose_program_cannot_be_played_is_not_added_and_a_window_says_why`; in the browser
+  `smoke.mjs`, "a theme file imported goes on the shelf, its source with it, and plays at once".
 - **A gallery theme is the gallery's only while its signature holds** (`own::Signed`): the gallery
   signs (ed25519) its module's SHA-256, its source's, the toolchain and the name it is published
   under (`Signed::message`); the shelf checks it against `GALLERY_KEY` every time it is read or a
@@ -2439,7 +2473,8 @@ bindings made again (`theme-sdk/tests/bindings.rs` says how), the browser's host
 (`web/theme-worker.js`), the tests' player (`platform::program::played`, and the SDK's `native`) and
 `eggs::program` (`input_bytes`, `event_bytes`, `read`, `check`) taught it, `themes/echo` echoing it,
 `themes/build.sh` run, and `CAPRICE_FIXTURES=1 cargo test` to keep the words for
-`web/theme-worker.test.mjs`. A change to the Magic Snow (`eggs/snow.rs`) or the Magic Vineyard
+`web/theme-worker.test.mjs` and the theme files. A new part of a theme file goes into
+`bundle::Manifest` with `#[serde(default)]`, read in `bundle::open` and written in `bundle::write`. A change to the Magic Snow (`eggs/snow.rs`) or the Magic Vineyard
 (`eggs/vineyard.rs`, `eggs/country.rs`) is made in its port (`themes/snow`, `themes/vineyard`) too,
 and the fixtures built again.
 

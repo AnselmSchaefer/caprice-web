@@ -1,6 +1,7 @@
 mod again;
 mod backdrop;
 mod bands;
+mod bundle;
 mod book;
 mod cast;
 mod claude;
@@ -7009,6 +7010,62 @@ mod tests {
         s.windows(3);
         assert!(s.seen.iter().all(|(v, _)| v.plots.len() == 2), "both stretches drawn");
         s.said("the Vineyard zoomed");
+    }
+
+    const SNOW_FILE: &[u8] = include_bytes!("../tests/fixtures/snow.caprice-theme");
+
+    #[test]
+    fn a_theme_file_is_imported_chosen_and_played_in_its_own_colours_and_exported_as_it_came() {
+        let dir = std::env::temp_dir().join(format!("caprice-theme-file-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("Magic_Snow.caprice-theme");
+        std::fs::write(&file, SNOW_FILE).unwrap();
+        let mut h = Harness::new();
+        h.app.themes = theme::Themes::kept_in(Some(dir.join("theme.json")));
+        h.frames(3, vec![], Modifiers::NONE);
+        let ctx = h.ctx.clone();
+        h.app.import_theme(&ctx, &file);
+        h.frames_until("the theme", |a| a.themes.theme == theme::Theme::Own);
+        let report = h.app.workshop.report.as_ref().expect("a report");
+        assert!(report.added && report.problems.is_empty() && report.name == "Magic Snow", "named as its manifest says");
+        assert!(report.found.iter().any(|f| f.contains("A program")) && report.found.iter().any(|f| f.contains("Its source")), "{:?}", report.found);
+        assert!(report.notes.iter().any(|n| n.contains("no picture for the gallery")), "{:?}", report.notes);
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.painted_at("Theme added").is_some(), "a window says so");
+        h.click_widget("OK");
+        h.frames_until("the program's first frame", |a| a.eggs.program.seen.as_ref().is_some_and(|s| s.frames > 0));
+        h.wait(1.0);
+        // Its own colours around the page: the built-in Snow's, as its file carries them.
+        assert_eq!(theme::pal(), theme::Theme::Snow.palette());
+        let seen = program_seen(&h);
+        assert!(seen.stopped.is_none() && seen.desk > 100 && seen.window == 140, "the hillside and the snow: {seen:?}");
+        // Kept as it came, and given back the same.
+        let id = h.app.themes.own_id.clone().unwrap();
+        let entry = h.app.themes.own.get(&id).unwrap();
+        assert!(entry.program && entry.author == "Caprice" && entry.toolchain == "rustc 1.99.1", "{entry:?}");
+        assert!(h.app.themes.own.source(&id).is_some_and(|s| s.contains("The Magic Snow, as a theme program")), "its source kept");
+        let out = dir.join("given.caprice-theme");
+        h.app.export_theme_to(&id, &out);
+        assert!(std::fs::read(&out).unwrap() == SNOW_FILE, "the same file: {}", h.app.status);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_theme_file_whose_program_cannot_be_played_is_not_added_and_a_window_says_why() {
+        let asks = wat::parse_str(r#"(module (import "env" "fetch" (func)) (memory (export "memory") 1 512))"#).unwrap();
+        let manifest = bundle::Manifest { world: bundle::WORLD.into(), name: "Greedy".into(), ..Default::default() };
+        let file = bundle::write(&bundle::Bundle { manifest, module: asks, ..Default::default() }).unwrap();
+        let mut h = Harness::new();
+        h.frames(3, vec![], Modifiers::NONE);
+        let ctx = h.ctx.clone();
+        h.app.import_theme_file(&ctx, file, "Greedy".into());
+        h.frames_until("a report", |a| a.workshop.report.is_some());
+        let report = h.app.workshop.report.as_ref().unwrap();
+        assert!(!report.added && report.problems.iter().any(|p| p.contains("Its program cannot be played") && p.contains("env")), "{:?}", report.problems);
+        assert!(h.app.themes.own.entries.is_empty() && h.app.themes.theme == theme::Theme::Midnight, "nothing on the shelf, the theme as it was");
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.painted_at("Theme not added").is_some());
     }
 
     #[test]

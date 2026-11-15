@@ -1,0 +1,24 @@
+{
+  "world": "caprice:theme@1.0.0",
+  "name": "Magic Snow",
+  "about": "Hush, falling flakes, and a warm light",
+  "author": "Caprice",
+  "colours": {
+    "accent": "#ffc46e",
+    "button": "#242e58",
+    "button_hover": "#323e6e",
+    "caret": "#ffbe64",
+    "desk": "#7a80b2",
+    "desk_top": "#1a224c",
+    "dock": "#182040",
+    "dock_edge": "#405082",
+    "field": "#121834",
+    "light": "no",
+    "on_accent": "#281800",
+    "text": "#ecf2ff",
+    "text_dim": "#a6b4d8",
+    "text_hot": "#ffffff",
+    "thumb": "#6e7eb4"
+  },
+  "toolchain": "rustc 1.99.1"
+}

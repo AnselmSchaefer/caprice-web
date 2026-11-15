@@ -729,15 +729,18 @@ mod tests {
 
     #[test]
     fn a_frame_that_never_comes_or_fails_stops_the_theme_saying_why() {
-        use crate::platform::program::{ANSWER_SECONDS, Stand, stand_in};
+        use crate::platform::program::{Stand, stand_in};
         let ask = echo_ask();
         let (silent, failing) = (module("", "1 512", "(loop br 0)"), module("", "1 512", "unreachable"));
         stand_in(&silent, || Stand::Silent);
         stand_in(&failing, || Stand::Fails("unreachable"));
         let mut spin = Program::load(&silent, crate::platform::Waker::new(&egui::Context::default()), 0.0);
-        assert!(spin.ask(&ask, 0.0) && !spin.ask(&ask, 0.5), "asked once, never queued");
-        assert_eq!(spin.stopped(ANSWER_SECONDS), None, "given its time");
-        assert_eq!(spin.stopped(ANSWER_SECONDS + 0.1).as_deref(), Some("it did not answer in time"));
+        assert!(spin.ask(&ask, 0.0) && !spin.ask(&ask, 0.1), "asked once, never queued");
+        // Looked at a frame at a time, as Caprice does.
+        let frames = |from: usize, to: usize| (from..to).map(|f| f as f64 / 60.0);
+        let mut spin_stopped = |t: f64| spin.stopped(t);
+        assert!(frames(1, 60).all(|t| spin_stopped(t).is_none()), "given its time");
+        assert_eq!(frames(60, 70).find_map(&mut spin_stopped).as_deref(), Some("it did not answer in time"));
         assert!(!spin.ask(&ask, 2.0) && spin.take().is_none(), "never asked again");
         let mut trap = Program::load(&failing, crate::platform::Waker::new(&egui::Context::default()), 0.0);
         trap.ask(&ask, 0.0);

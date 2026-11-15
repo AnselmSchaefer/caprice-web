@@ -327,6 +327,22 @@ const pixelAt = async (x, y) => {
     return Array.from(g.getImageData(0, 0, 1, 1).data);
   }, shot);
 };
+// A theme file (bundle.rs, the plan's step 3), imported from the gallery's Yours through the page's
+// picker, as a writer would: the Magic Snow as a program, its module, source and palette. It goes on
+// the shelf, kept in the browser, and plays at once in a worker of its own, in the Snow's colours.
+// (Page → Theme → Yours → Import a theme…, where they are while Midnight Ink is in use.)
+await click(280, 340);
+await page.waitForTimeout(1500);
+const snowFile = path.join(path.dirname(fileURLToPath(import.meta.url)), "../tests/fixtures/snow.caprice-theme");
+await upload(snowFile, [737, 38], [810, 113], [992, 113], [930, 165]);
+await page.waitForTimeout(3000);
+await page.screenshot({ path: `${out}/12-theme-file.png` });
+const imported = (await kept()).filter(k => k.startsWith("/caprice/themes/"));
+const snowy = await pixelAt(38, 700);
+check("a theme file imported goes on the shelf, its source with it, and plays at once",
+  imported.some(k => k.endsWith(".wasm")) && imported.some(k => k.endsWith(".rs")) && page.workers().some(w => w.url().endsWith("/theme-worker.js"))
+    && snowy[2] > 200 && snowy[2] >= snowy[0], `${imported.join(" ")}; ${snowy.join(",")}`);
+
 await keptAndOpened([["/caprice/theme.json", '{"own":"smoketheme"}'], ["/caprice/themes/index.json", JSON.stringify(shelf)], ["/caprice/themes/smoketheme.svg", template]], 6000);
 await page.screenshot({ path: `${out}/12-own-theme.png` });
 // The cottage and the pines, not the plain desk.
