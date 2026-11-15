@@ -11,7 +11,7 @@ default-members = [".", "theme-sdk"]
 
 [dependencies]
 base64 = "0.23.1"
-eframe = "0.36.2"
+eframe = "0.37.0"
 fontdb = "0.24.0"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 krilla = "0.8"
