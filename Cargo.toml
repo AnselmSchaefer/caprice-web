@@ -6,8 +6,8 @@ publish = false
 
 # theme-sdk/: what theme programs are written against (R36), tested with Caprice.
 [workspace]
-members = ["theme-sdk"]
-default-members = [".", "theme-sdk"]
+members = ["theme-sdk", "themes/played"]
+default-members = [".", "theme-sdk", "themes/played"]
 
 [dependencies]
 base64 = "0.23.1"
@@ -21,17 +21,18 @@ serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_json = "1.0.151"
 ttf-parser = "0.25"
 zip = { version = "9.2.0", default-features = false, features = ["deflate"] }
-# Checking a theme program (R36): reading its sections, validating it against the fixed features;
-# the version wasmi (the tests' runtime) reads with. And the gallery's signatures over modules.
+# Checking a theme program (R36): reading its sections, validating it against the fixed features,
+# a version fixed so the check is the same in every build. And the gallery's signatures over modules.
 wasmparser = { version = "=0.228.0", default-features = false, features = ["std", "validate", "features"] }
 ed25519-compact = { version = "2.6.0", default-features = false }
 sha2 = { version = "0.11.1", default-features = false }
 
 [dev-dependencies]
-# Theme programs run under `cargo test` (R36): with fuel, as the browser's own engine runs them.
-wasmi = { version = "=2.0.0", default-features = false, features = ["stable", "std", "validate", "portable-dispatch"] }
+# Modules written by hand for the check's tests; and the themes of `themes/` built for the machine
+# against the SDK, to stand for their modules under `cargo test` (R36: no WebAssembly is run there).
 wat = "1.263.0"
 theme-sdk = { path = "theme-sdk", version = "1.0.0" }
+themes-played = { path = "themes/played", version = "0.0.0" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rfd = "0.18.0"
@@ -42,20 +43,9 @@ wasm-bindgen = "0.2.130"
 wasm-bindgen-futures = "0.4.80"
 web-sys = { version = "0.3.107", features = ["Window", "Document", "Element", "HtmlElement", "Node", "EventTarget", "HtmlCanvasElement", "Worker", "WorkerOptions", "WorkerType", "console", "PointerEvent", "MessageEvent", "ErrorEvent"] }
 
-
-# Theme programs run under wasmi in the tests (R36): unoptimized it takes 20 s to run a frame that
-# never ends out of its fuel; optimized, its `portable-dispatch` (not the default, whose optimized
-# dispatch overflows the test threads' stacks).
-[profile.dev.package.wasmi]
+# The themes played in the tests in place of their modules (R36) are optimized, as their modules
+# are: unoptimized, a frame of the Magic Vineyard took 32 ms, nearly the built-in one's own.
+[profile.dev.package.themes-played]
 opt-level = 3
-[profile.dev.package.wasmi_core]
+[profile.dev.package.theme-sdk]
 opt-level = 3
-[profile.dev.package.wasmi_ir]
-opt-level = 3
-[profile.dev.package.wasmi_collections]
-opt-level = 3
-
-# Used by cargo-mutants (see .cargo/mutants.toml): no debug info keeps each build small and quick.
-[profile.mutants]
-inherits = "test"
-debug = "none"

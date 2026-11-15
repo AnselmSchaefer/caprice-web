@@ -661,10 +661,11 @@ impl App {
                 seen.plots[k] = (zoom.mul_rect(place.bounds(&rows)), hanging.iter().filter(|b| b.1 >= 1.0).count(), turned[k]);
             }
         }
-        ui.painter().extend(shapes.into_iter().map(|mut s| {
+        let shapes = shapes.into_iter().map(|mut s| {
             s.transform(zoom);
             s
-        }));
+        }).collect();
+        self.eggs.paint(ui.painter(), shapes);
         self.eggs.vineyard = Some(seen);
     }
 }

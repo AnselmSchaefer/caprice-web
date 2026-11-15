@@ -24,9 +24,13 @@ use crate::theme::Theme;
 pub const MOST_BYTES: usize = 1 << 20;
 pub const MOST_PAGES: u64 = 512;
 /// The most points a frame may draw (a polygon's points and a mesh's vertices; a circle or a line
-/// is one): twice the Magic Snow's, which Caprice's own frame tessellates in about 7 ms at a
-/// quarter of this machine's speed. A frame over it is not drawn; `OVER_FRAMES` running stop it.
-pub const MOST_POINTS: usize = 40_000;
+/// is one): a little more than the most a built-in theme draws, the Magic Vineyard zoomed out in
+/// an ultrawide window (about 420 000), so a program may cost Caprice's frame what its own themes
+/// do. Its 309 000 in a large window take Caprice's frame 26 ms to read and tessellate at a quarter
+/// of this machine's speed (the built-in pays the tessellating and its own drawing besides). It
+/// stops a theme that runs away; keeping a theme light is for where it is made (the plan's step 5).
+/// A frame over it is not drawn; `OVER_FRAMES` running stop it.
+pub const MOST_POINTS: usize = 450_000;
 pub const OVER_FRAMES: usize = 3;
 
 /// What a theme may import (from `HOST`) and export, as the canonical ABI flattens the world's
@@ -659,7 +663,7 @@ mod tests {
         }
     }
 
-    /// `module` asked once, under wasmi, and its words.
+    /// `module` asked once, and its words (under the tests, its theme played natively).
     fn run_once(module: &[u8], ask: &Ask) -> Words {
         let mut program = Program::load(module, crate::platform::Waker::new(&egui::Context::default()), 0.0);
         assert!(program.ask(ask, 0.0));
@@ -724,13 +728,18 @@ mod tests {
     }
 
     #[test]
-    fn a_frame_that_never_ends_or_traps_stops_the_theme_saying_why() {
+    fn a_frame_that_never_comes_or_fails_stops_the_theme_saying_why() {
+        use crate::platform::program::{ANSWER_SECONDS, Stand, stand_in};
         let ask = echo_ask();
-        let mut spin = Program::load(&module("", "1 512", "(loop br 0)"), crate::platform::Waker::new(&egui::Context::default()), 0.0);
-        spin.ask(&ask, 0.0);
-        assert_eq!(spin.stopped(0.0).as_deref(), Some("it ran too long"));
-        assert!(!spin.ask(&ask, 0.0) && spin.take().is_none(), "never asked again");
-        let mut trap = Program::load(&module("", "1 512", "unreachable"), crate::platform::Waker::new(&egui::Context::default()), 0.0);
+        let (silent, failing) = (module("", "1 512", "(loop br 0)"), module("", "1 512", "unreachable"));
+        stand_in(&silent, || Stand::Silent);
+        stand_in(&failing, || Stand::Fails("unreachable"));
+        let mut spin = Program::load(&silent, crate::platform::Waker::new(&egui::Context::default()), 0.0);
+        assert!(spin.ask(&ask, 0.0) && !spin.ask(&ask, 0.5), "asked once, never queued");
+        assert_eq!(spin.stopped(ANSWER_SECONDS), None, "given its time");
+        assert_eq!(spin.stopped(ANSWER_SECONDS + 0.1).as_deref(), Some("it did not answer in time"));
+        assert!(!spin.ask(&ask, 2.0) && spin.take().is_none(), "never asked again");
+        let mut trap = Program::load(&failing, crate::platform::Waker::new(&egui::Context::default()), 0.0);
         trap.ask(&ask, 0.0);
         assert!(trap.stopped(0.0).is_some_and(|w| w.starts_with("it failed")), "{:?}", trap.stopped(0.0));
     }

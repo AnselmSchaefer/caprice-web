@@ -5,7 +5,9 @@
 // for the one world caprice:theme@1.0.0, puts them into the program's memory, calls it, and lifts
 // its `frame-output` into flat words, sent back in a buffer that Caprice gives back with the next
 // frame. Never JavaScript objects: copying those cost more than the whole frame (step 0c of the
-// plan). The words are the same as `platform::program::lift` makes (web/theme-worker.test.mjs).
+// plan). The words are those the tests' player makes of a theme played natively in Caprice's
+// `cargo test` (src/platform/program.rs, `played`), where no WebAssembly is run: through the echo
+// theme, web/theme-worker.test.mjs holds the two to the same words.
 
 const HOST = "caprice:theme/host@1.0.0";
 // The head of the words: desk shapes, window shapes, over shapes, next, the title's offset (x, y),

@@ -348,6 +348,7 @@ const programs = [
   { id: "smokeprogram", name: "Fireflies", about: "", author: "", colours: grey, grows: true, carries: true, added: 0, program: true },
   { id: "smokespin", name: "Spin", about: "", author: "", colours: grey, grows: true, carries: true, added: 0, program: true },
   { id: "smokesnow", name: "Snow", about: "", author: "", colours: grey, grows: true, carries: false, added: 0, program: true },
+  { id: "smokevineyard", name: "Vineyard", about: "", author: "", colours: grey, grows: true, carries: false, added: 0, program: true },
 ];
 // The desk left of the page, where fireflies drift.
 const leftOfPage = () => page.screenshot({ clip: { x: 20, y: 100, width: 360, height: 640 } });
@@ -355,7 +356,8 @@ const themeWorkers = () => page.workers().filter(w => w.url().endsWith("/theme-w
 await keptAndOpened([["/caprice/theme.json", '{"own":"smokeprogram"}'], ["/caprice/themes/index.json", JSON.stringify(programs)],
   ["/caprice/themes/smokeprogram.wasm", fs.readFileSync(path.join(fixtures, "fireflies.wasm"))],
   ["/caprice/themes/smokespin.wasm", fs.readFileSync(path.join(fixtures, "spin.wasm"))],
-  ["/caprice/themes/smokesnow.wasm", fs.readFileSync(path.join(fixtures, "snow.wasm"))]], 3000);
+  ["/caprice/themes/smokesnow.wasm", fs.readFileSync(path.join(fixtures, "snow.wasm"))],
+  ["/caprice/themes/smokevineyard.wasm", fs.readFileSync(path.join(fixtures, "vineyard.wasm"))]], 3000);
 await page.screenshot({ path: `${out}/13-program-theme.png` });
 const night = await pixelAt(38, 258);
 const flying = await leftOfPage();
@@ -373,6 +375,15 @@ const falling = await leftOfPage();
 await page.waitForTimeout(500);
 check("the Magic Snow as a program draws its hillside", themeWorkers() === 1 && hillside[2] > 200 && hillside[2] >= hillside[0], `${themeWorkers()} workers, ${hillside.join(",")}`);
 check("and its snow falls", !falling.equals(await leftOfPage()));
+// The Magic Vineyard ported (themes/vineyard), its module run here as it is nowhere in the tests:
+// its own blue sky over the grey desk, and the golden slope with its vines at the foot. More than
+// a hundred thousand points a frame.
+await keptInBrowser([["/caprice/theme.json", '{"own":"smokevineyard"}']]);
+await keptAndOpened([], 3000);
+await page.screenshot({ path: `${out}/13-program-vineyard.png` });
+// The sky high on the right (the low sun lights the left).
+const [sky, slope] = [await pixelAt(1250, 110), await pixelAt(38, 790)];
+check("the Magic Vineyard as a program draws its own sky and its slope", themeWorkers() === 1 && sky[2] > sky[0] + 30 && slope[0] > slope[2] + 30, `${themeWorkers()} workers, sky ${sky.join(",")}, slope ${slope.join(",")}`);
 await keptInBrowser([["/caprice/theme.json", '{"own":"smokespin"}']]);
 await keptAndOpened([], 4000);
 await page.screenshot({ path: `${out}/14-program-stopped.png` });

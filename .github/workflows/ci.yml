@@ -43,6 +43,13 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-liberation
       - name: Tests
         run: cargo test --locked
+      # The tests play each theme of themes/ from its source, never its module (R36): so the
+      # modules checked in must be what those sources build to, byte for byte.
+      - name: Theme programs' modules are their sources built (R36)
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal --target wasm32-unknown-unknown
+          themes/build.sh
+          git diff --exit-code --stat -- tests/fixtures
       - name: Clippy, with no warnings beyond those already there
         run: |
           set +e
@@ -97,7 +104,7 @@ jobs:
       - name: Stories API, in the Workers runtime (Miniflare)
         working-directory: web
         run: node --test api/api.test.mjs
-      - name: Theme programs' host in the browser makes the words the tests' host makes (R36)
+      - name: Theme programs' host in the browser makes the words the tests' player makes (R36)
         working-directory: web
         run: node --test theme-worker.test.mjs
       - name: Chromium for the smoke test

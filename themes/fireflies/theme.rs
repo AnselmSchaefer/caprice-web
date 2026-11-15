@@ -4,6 +4,8 @@
 //! newest coming in one after another; a jar whose chapter is finished glows warmer. Fireflies
 //! drift about the desk, and one big firefly carries each new chapter title down into its place.
 
+use std::f32::consts::TAU;
+
 use theme_sdk::{Color, Event, Input, Mesh, Out, Seeds, Tended, Theme, between, ease, host, pt, theme};
 
 /// The most lights a jar holds, seconds for one to come, and for a finished jar to warm.
@@ -78,7 +80,7 @@ impl Theme for Fireflies {
             let mut s = Seeds::of(seed, k);
             for i in 0..grown.ceil() as usize {
                 let came = (grown - i as f32).clamp(0.0, 1.0);
-                let (x, y, phase) = (s.next(-0.35, 0.35) * w, s.next(0.1, 0.9) * h, s.next(0.0, 6.28));
+                let (x, y, phase) = (s.next(-0.35, 0.35) * w, s.next(0.1, 0.9) * h, s.next(0.0, TAU));
                 let blink = 0.7 + 0.3 * (t as f32 * 2.0 + phase).sin();
                 let color = LIGHT.lerp(WARM_LIGHT, warm).gamma_multiply(came * blink);
                 out.desk.circle(foot + pt(x, -y), (2.5 + 1.5 * warm) * u, color);
@@ -88,7 +90,7 @@ impl Theme for Fireflies {
         // Fireflies drifting about the desk, slowly round where each began.
         let mut s = Seeds::of(seed, 1000);
         for _ in 0..30 {
-            let (x, y, r, phase) = (s.next(area.left(), area.right()), s.next(area.top(), ground), s.next(10.0, 40.0) * u, s.next(0.0, 6.28));
+            let (x, y, r, phase) = (s.next(area.left(), area.right()), s.next(area.top(), ground), s.next(10.0, 40.0) * u, s.next(0.0, TAU));
             let a = t as f32 * 0.4 + phase;
             out.desk.circle(pt(x + r * a.cos(), y + r * (a * 1.3).sin()), 1.6 * u, LIGHT.gamma_multiply(0.4 + 0.4 * (a * 3.0).sin().abs()));
         }

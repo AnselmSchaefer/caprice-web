@@ -98,10 +98,10 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `fonts.rs` | Installed fonts loaded on demand, a missing one drawn with a twin of the same widths |
 | `theme.rs` | The themes (`Theme`, `Palette`): colours and egui visuals around the page, the palette in use (`pal`), fading from one to the next, the choice kept in the data folder (a theme's name, or one of the writer's own by its id); the page's own `PAPER` and `INK` |
 | `eggs.rs` | What is hidden in the magic themes: in the Magic Garden a plant a chapter growing on the desk and a balloon flying in each new chapter title; in the Magic City a street of houses a chapter, a floor a page, and a dragon flying a new title in held in its feet; in the Magic Sea a ship a chapter, built in a yard a part a page and launched into the bay when the next chapter begins; in the Magic Forest (`eggs/forest.rs`) an old forest at night with a swarm of lanterns, a lantern a page, each chapter's swarm becoming a big lantern on a branch near the page; in the Magic Reef (`eggs/reef.rs`) a sunlit sea with a coral a chapter, a branch a page, spawning and taking in a shoal of fish when the next chapter begins, and an octopus swimming down from above with each new title; in the Magic Snow (`eggs/snow.rs`) a frozen lake at the foot of a snowy hillside and an igloo a chapter spread about the hillside, a brick a page cut out of the lake and floated onto it, the igloo finished and lit inside when the next chapter begins; in the Magic Vineyard (`eggs/vineyard.rs`) a vineyard on rolling hills on a golden afternoon, a stretch of vines a chapter, a bunch of grapes a page, the stretch before turning gold and red and dropping its leaves when the next chapter begins, and now and then a murmuration of starlings; the country it lies in is `eggs/country.rs`; and a theme of the writer's own (`eggs/own.rs`, R35): its picture covering the desk and moving, a piece a chapter, a stage a page, finished when the next chapter begins, its carrier bringing new titles; or one that is a program (`eggs/program.rs`, R36) |
-| `eggs/program.rs` | Themes that are programs (R36): the check on every load, the input and events written as the canonical ABI lays them out, the frame's words read into egui's shapes (at most 40 000 points), drawn on the desk zoomed about the theme's ground and in the window unzoomed; what the program is told; its carrier |
-| `platform/program.rs` | Where a theme program runs (R36): in the browser a worker of its own (`web/theme-worker.js`), ended when it does not answer; under `cargo test` wasmi with fuel; on the desktop not at all; the words its output becomes (`lift`) |
+| `eggs/program.rs` | Themes that are programs (R36): the check on every load, the input and events written as the canonical ABI lays them out, the frame's words read into egui's shapes (at most 450 000 points), drawn on the desk zoomed about the theme's ground and in the window unzoomed; what the program is told; its carrier |
+| `platform/program.rs` | Where a theme program runs (R36): in the browser a worker of its own (`web/theme-worker.js`), ended when it does not answer; on the desktop not at all; under `cargo test` none, each module standing for its theme's source played natively (`played`: the input read out of Caprice's bytes, the output made into the same words) or for what a test says (`stand_in`) |
 | `theme-sdk/` | What theme programs are written against (R36): the WIT world `caprice:theme@1.0.0`, its bindings made ahead of time with a runtime of its own, shapes (and Caprice's own soft lights, ovals and clean fills), colours, `Seeds`, `Tended`, easing, the `theme!` macro; no dependencies |
-| `themes/` | Theme programs Caprice carries: `fireflies` (an example, and the tests' theme), `echo` (draws back what it is told, for the layouts' tests), `snow` (the Magic Snow ported, shape for shape, R36); `build.sh` builds them into `tests/fixtures/` as the writer's tab will |
+| `themes/` | Theme programs Caprice carries: `fireflies` (an example, and the tests' theme), `echo` (draws back what it is told, for the layouts' tests), `snow` and `vineyard` (the Magic Snow and the Magic Vineyard ported, shape for shape, R36); `build.sh` builds them into `tests/fixtures/` as the writer's tab will; `played` builds them for the machine, for the tests to play in place of their modules |
 | `platform.rs` | What the desktop and the browser do differently: background work (`spawn`, `Waker`, `keep_awake`), the time and time zone, the run's id, the data folder, file dialogs (`Dialog`), uploads and downloads, requests to Caprice's server (`send`, `go_to`) (R31, R33) |
 | `platform/fs.rs` | Files: the system's on the desktop; in the browser, kept in memory by path and mirrored to IndexedDB (R31) |
 | `platform/worker.rs` | In the browser, a Web Worker for each piece of background work, started from `web/worker.js` with nothing evaluated (R31) |
@@ -1449,7 +1449,13 @@ Snow (`Theme::Snow`) the frozen lake and its igloos, the Magic Vineyard (`Theme:
   seconds in every `FLOCK_EVERY`, its shape and course functions of the time since it came, so no
   bird jumps; it gathers as it comes and thins as it goes. It flew above the hills first, where a
   desk with the pages fitted shows little sky, under the toolbar. People picking were tried and not
-  liked (§7). Nothing brings a chapter title in this theme.
+  liked (§7). Nothing brings a chapter title in this theme. **It has a twin**, as the Snow has: its
+  port to a theme program (`themes/vineyard/theme.rs`, R36, the country with it) draws the same
+  shapes, so a change to anything it or the country draws is made in both
+  (`the_magic_vineyard_as_a_program_grows_and_turns_as_the_built_in_one_frame_by_frame` and its
+  sibling for zooms and windows). It draws
+  more than any other theme (136 000 points at the fitting zoom on a computer's desk, mostly
+  leaves), which is what program themes may draw at most was set by.
 - **It grows in sight.** How far each plant is drawn grown (`Eggs::grown`, by `story_id`) only goes
   up, a tenth of a second's growth a frame at most; a story opened comes with its garden grown.
   So does a theme picked: each forgets how far it had shown things (`grown_for`, `built_for`,
@@ -2252,17 +2258,29 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   its own little runtime in `rt.rs` in place of wit-bindgen's: a theme's build is the SDK and one
   file, no proc macro, no other crate). Test: `the_bindings_carried_are_made_again_the_same_from_the_wit`
   (in `theme-sdk/tests/`).
-- **Caprice writes and reads the canonical ABI itself, in two hosts that must agree.** It writes the
-  frame's input (`input_bytes`, 144 bytes) and the events (`event_bytes`, 12 bytes each) in
-  `eggs/program.rs`; the program's `frame-output` (40 bytes: the desk's, the window's and the
-  carrier's shapes, 28 bytes each; `next`, the title's offset, the ground) is read out of its
-  memory into flat words (`HEAD`, 8 of them, then the shapes) by the host it runs under: `web/theme-worker.js` in the browser, `platform::program::lift` under the
-  tests' wasmi. Both write the same words (`platform::program::Words`), read into egui's shapes by
-  `eggs::program::read`. Touching a layout means touching both hosts and the reader. Tests:
+- **Caprice writes and reads the canonical ABI itself; in the tests no module is run.** It writes
+  the frame's input (`input_bytes`, 144 bytes) and the events (`event_bytes`, 12 bytes each) in
+  `eggs/program.rs`; in the browser `web/theme-worker.js` reads the program's `frame-output` (40
+  bytes: the desk's, the window's and the carrier's shapes, 28 bytes each; `next`, the title's
+  offset, the ground) out of its memory into flat words (`HEAD`, 8 of them, then the shapes), read
+  into egui's shapes by `eggs::program::read`. Under `cargo test` nothing runs WebAssembly (wasmi
+  ran the modules until 2026-11-15: thirty times slower than the theme natively, it made the
+  Vineyard's comparison take minutes and tested a host that never ships): each fixture module
+  stands for its theme's source built for the machine (`themes/played`, a crate optimized in the
+  test profile; `theme!` gives each a `played()` there, and the SDK's `host` answers from
+  `theme_sdk::native::answering`), and the tests' player (`platform::program::played`) reads the
+  input and the events out of Caprice's bytes as the world lays them out and makes the theme's
+  output into the same words; a module a test writes by hand stands for what the test says
+  (`stand_in`: words, a frame that fails, one that never comes). So the browser's host, the player
+  and the reader must agree on every layout. Tests:
   `a_theme_is_told_every_field_of_its_input_and_each_event_as_written` (through `themes/echo`,
   which draws back what it is told), `the_browser_s_host_is_given_the_same_words_to_make_as_the_tests_host`
-  (it keeps `tests/fixtures/echo.words.json`) and `web/theme-worker.test.mjs` (the browser's host
-  makes those words).
+  (it keeps `tests/fixtures/echo.words.json`) and `web/theme-worker.test.mjs`: the real `echo.wasm`,
+  run by the browser's host on the same bytes, must make the same words, so Caprice's bytes mean to
+  the module what the player reads in them, and its output comes back as the player makes it.
+  The words wasmi had made were kept unchanged when the player took its place. What the player
+  cannot see is the module itself (its maths library, how it was compiled): that is `smoke.mjs`'s,
+  the node test's and the fixtures' check in CI (below).
 - **It is checked every time it is loaded, never trusted** (`eggs::program::check`, wasmparser):
   at most 1 MB (`MOST_BYTES`); it imports only `caprice:theme/host@1.0.0`'s four functions with
   their signatures, exports exactly the world's (`events`, `frame`, `cabi_post_frame`,
@@ -2282,16 +2300,25 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   **a program's shapes are a frame behind its input**: what must stay in step travels in one output
   (the shapes and the carried title's offset), and the zoom is Caprice's, so zooming is never late.
   A worker that does not load in `LOAD_SECONDS` or answer a frame in `ANSWER_SECONDS` is ended
-  (`terminate`), as is one whose program traps; under `cargo test` wasmi runs it with fuel (`FUEL`,
-  its crates optimized in the test profile, with `portable-dispatch`); on the desktop it is never
-  run, and the usual desk shows with a word why. Leaving the theme ends its worker
-  (`program::Shown::forget`). Tests: `a_frame_that_never_ends_or_traps_stops_the_theme_saying_why`,
+  (`terminate`), as is one whose program traps; on the desktop it is never run, and the usual desk
+  shows with a word why; in the tests a stand-in that fails or never answers is stopped the same
+  way (`Stand::Fails`, `Stand::Silent`, after `ANSWER_SECONDS`). Leaving the theme ends its worker
+  (`program::Shown::forget`). Tests: `a_frame_that_never_comes_or_fails_stops_the_theme_saying_why`,
   `a_program_theme_that_fails_or_draws_more_than_it_may_is_stopped_with_a_word_why`; in the browser
   `smoke.mjs`, "a program theme plays in a worker of its own and draws the desk" and "a program
   theme that never answers is ended, and the usual desk shows".
-- **A frame may draw at most 40 000 points** (`MOST_POINTS`: a polygon's or a path's points and a
-  mesh's vertices, a circle or a line one), twice the Magic Snow's, which Caprice's own frame tessellates
-  in about 7 ms at a quarter of this machine's speed. Over it the frame is not drawn (the last one
+- **A frame may draw at most 450 000 points** (`MOST_POINTS`: a polygon's or a path's points and a
+  mesh's vertices, a circle or a line one): a little more than the most a built-in theme draws, so
+  a program may cost Caprice's frame what its own themes cost (the owner's call, 2026-11-15). The
+  Magic Vineyard draws 63 000 on a phone's desk, 136 000 to 168 000 on a computer's, 309 000 zoomed
+  out in a large window and about 420 000 in an ultrawide one, nearly all of it leaves as mesh
+  vertices; read and tessellated at a quarter of this machine's speed, 5, 11 to 14 and 26 ms (the
+  built-in pays the same tessellating, and its own drawing besides). It was 40 000, twice the
+  Snow's (7 ms): the Vineyard's port was over it everywhere. Not a limit by the window's area: a
+  theme's points grow with the land it shows (the width over the size of things and the zoom), so
+  a small window zoomed out costs as much as a large one. The limit stops a theme that runs away;
+  keeping a theme light is for where it is made (the plan's step 5: its points on a phone's desk
+  and a computer's, told to Claude). Over it the frame is not drawn (the last one
   stays); `OVER_FRAMES` running stop the theme. What cannot be drawn (a number that is not finite,
   a mesh's index beyond it, a polygon of two points, a path of one) is left out. egui tessellates the shapes as
   they come: a mesh of Caprice's own per layer was measured slower. Tests:
@@ -2328,20 +2355,34 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   never zoomed; it is drawn after the desk's shapes, behind the pages. Zoomed about the foot
   instead, the Snow's port stood 4.6 points off the built-in at the first zoom tried: the
   comparison below fails so.
-- **The Magic Snow and its port draw the same, frame for frame** (`themes/snow/theme.rs`, built into
-  `tests/fixtures/snow.wasm`): two `Harness`es given the same story, window and keys, one in
-  `Theme::Snow`, one in the port; each frame of the built-in is compared with the port's next (a
-  frame behind), shape for shape (kind, points, triangles, colours, widths), while blocks are cut
-  and float up, an igloo is finished and lit, zoomed in and out, in three windows and with the bar
-  at the foot and at the sides: at most 0.0005 points apart, the colours the same. Both are seeded
-  alike (`story_seed`, above), and `Eggs::painted` keeps what `draw_snow` or `draw_program` painted. So
-  **`eggs/snow.rs` and `themes/snow` change together**, as do the SDK's helpers and what they mirror
-  (`Layer::solid`, `oval`, `radial`, `Color::see_through` and `lerp` are `eggs.rs`'s `solid`, `oval`,
-  `radial`, `glow` and egui's `lerp_to_gamma`, to the rounding): change one, change the other,
-  run `themes/build.sh`. While the size of things follows a window resized, the port's shapes are
+- **The Magic Snow and the Magic Vineyard draw the same as their ports, frame for frame**
+  (`themes/snow/theme.rs` and `themes/vineyard/theme.rs`, built into `tests/fixtures/`): two
+  `Harness`es given the same story, window and keys (`Twins`), one in the built-in theme, one in its
+  port; each frame of the built-in is compared with the port's next (a frame behind), shape for
+  shape (kind, points, triangles, colours, widths; a rectangle as the polygon of its corners, a
+  mesh with no triangles as nothing), zoomed in and out, in three windows and with the bar at the
+  foot and at the sides; for the Snow while blocks are cut and float up and an igloo is finished
+  and lit (at most 0.0005 points apart, the colours the same), for the Vineyard while bunches
+  ripen a page at a time, the stretch before turns and drops its leaves, and the starlings fly (the
+  same to the bit). Both are seeded alike (`story_seed`, above), and `Eggs::painted` keeps what
+  `draw_snow`, `draw_vineyard` or `draw_program` painted. The ports are played natively (above), so
+  this compares the sources; the module's own maths is the browser's to show. So
+  **`eggs/snow.rs` and `themes/snow` change together, and `eggs/vineyard.rs` and `eggs/country.rs`
+  with `themes/vineyard`** (the port carries the country, and `eggs.rs`'s `flame` and `ribbon`,
+  as its own), as do the SDK's helpers and what they mirror (`Layer::solid`, `oval`, `radial`,
+  `Color::see_through` and `lerp`, `Point::rot90` are `eggs.rs`'s `solid`, `oval`, `radial`, `glow`
+  and egui's `lerp_to_gamma` and `rot90`, to the rounding): change one, change the other, run
+  `themes/build.sh`. While the size of things follows a window resized, the port's shapes are
   zoomed about where the ground is a frame later than they were laid out for (a fraction of a point):
-  not compared. Test: `the_magic_snow_as_a_program_draws_what_the_built_in_one_draws_frame_by_frame`;
-  in the browser `smoke.mjs`, "the Magic Snow as a program draws its hillside" and "and its snow falls".
+  not compared. A port that is wrong is caught: the Vineyard's ground a unit off is a point apart,
+  a leaf's green two shades off, the starlings, the turning or the ripening a little early, each
+  fails. Tests: `the_magic_snow_as_a_program_draws_what_the_built_in_one_draws_frame_by_frame`,
+  `the_magic_vineyard_as_a_program_grows_and_turns_as_the_built_in_one_frame_by_frame`,
+  `the_magic_vineyard_as_a_program_draws_what_the_built_in_one_draws_zoomed_and_in_other_windows`
+  (two, run side by side: a Vineyard frame is ten times a Snow frame to draw and compare);
+  in the browser `smoke.mjs`, "the Magic Snow as a program draws its hillside", "and its snow
+  falls" and "the Magic Vineyard as a program draws its own sky and its slope" (the only places
+  their real modules draw on Caprice's desk).
 - **Its carrier is flown by Caprice's course, drawn and offset by the program** (`Carrier::Program`,
   `pose_of` as the balloon's): a program that calls `ask-lift` brings new chapter titles, under the
   same rules as every carrier (`maybe_lift_title`, `update_lift`, `Eggs::odds`); while one is
@@ -2361,10 +2402,16 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
 - **The themes in `themes/` are built as the writer's tab will build them** (`themes/build.sh`):
   rustc 1.99.1, the SDK as one rlib, one file, the flags Caprice fixes (`--max-memory` among them),
   the output always named `theme.wasm`; the same rustc gives the same bytes. Their modules are the
-  tests' fixtures (`tests/fixtures/*.wasm`, checked in). Change a theme or the SDK, then run the
-  script; `tests/fixtures/spin.wasm` is `spin.wat` (test `the_theme_that_never_answers_is_the_module_its_text_says`).
-  `themes/echo` draws back what it is told, `themes/fireflies` is small enough to read at once, and
-  `themes/snow` is the Magic Snow (the example a theme Claude writes learns from: plan, step 5).
+  tests' fixtures (`tests/fixtures/*.wasm`, checked in), and stand in the tests for the same files
+  built for the machine (`themes/played`, which `build.sh` passes over: it has no `theme.rs`). So
+  nothing in `cargo test` sees a module that is not its source built: change a theme or the SDK,
+  then run the script; CI builds them again and fails if a fixture differs. `tests/fixtures/spin.wasm`
+  is `spin.wat` (test `the_theme_that_never_answers_is_the_module_its_text_says`), the module
+  `smoke.mjs` ends for not answering. `themes/echo` draws back what it is told,
+  `themes/fireflies` is small enough to read at once, and `themes/snow` and `themes/vineyard` are
+  the Magic Snow and the Magic Vineyard (the examples a theme Claude writes learns from, plan,
+  step 5: the Snow drawing on the desk's own colour and snowing in the window, the Vineyard a
+  layout of its own and its own sky, all of it zoomed).
 
 ## 5. Checklists for common changes
 
@@ -2388,11 +2435,13 @@ the comment of `assets/theme-template.svg` (R35).
 
 **A change to what theme programs are told, may ask or draw** (R36): never an edit of
 `caprice:theme@1.0.0` once published: a new version of the world in `theme-sdk/wit/theme.wit`, its
-bindings made again (`theme-sdk/tests/bindings.rs` says how), both hosts (`web/theme-worker.js`,
-`platform::program::lift`) and `eggs::program` (`input_bytes`, `event_bytes`, `read`, `check`) taught it,
-`themes/echo` echoing it, `themes/build.sh` run, and `CAPRICE_FIXTURES=1 cargo test` to keep the
-words for `web/theme-worker.test.mjs`. A change to the Magic Snow (`eggs/snow.rs`) is made in its port
-(`themes/snow/theme.rs`) too, and the fixtures built again.
+bindings made again (`theme-sdk/tests/bindings.rs` says how), the browser's host
+(`web/theme-worker.js`), the tests' player (`platform::program::played`, and the SDK's `native`) and
+`eggs::program` (`input_bytes`, `event_bytes`, `read`, `check`) taught it, `themes/echo` echoing it,
+`themes/build.sh` run, and `CAPRICE_FIXTURES=1 cargo test` to keep the words for
+`web/theme-worker.test.mjs`. A change to the Magic Snow (`eggs/snow.rs`) or the Magic Vineyard
+(`eggs/vineyard.rs`, `eggs/country.rs`) is made in its port (`themes/snow`, `themes/vineyard`) too,
+and the fixtures built again.
 
 **A new paragraph attribute** (like line spacing or chapter title): `ParaAttrs` → `run_format` /
 `paragraph_job` → the toolbar (`ui.rs`) → file format default (R9) → Word mapping (R10) → whether
@@ -2478,8 +2527,10 @@ result sent back, a stand-in answer in `api.test.mjs` and in `cloud::stand_in` (
   redesigns. Name them as sentences of the behaviour.
 - For anything incremental, compare with doing it from scratch.
 - Before trusting a new test, check it fails without the fix.
-- Theme programs (R36) run under wasmi in the tests; `node --test web/theme-worker.test.mjs` checks
-  that the browser's host makes the same words; `themes/build.sh` makes their fixtures.
+- No theme program's module is run in the tests (R36): each stands for its theme's source played
+  natively (`themes/played`), or for what the test says (`platform::program::stand_in`);
+  `node --test web/theme-worker.test.mjs` checks that the browser's host makes the same words of the
+  real modules; `themes/build.sh` makes those modules, and CI checks they are what is checked in.
 - `cargo mutants` (config in `.cargo/mutants.toml`) finds untested code. `/tmp` is a small tmpfs
   here: run it with `TMPDIR` on disk.
 
@@ -2769,7 +2820,8 @@ result sent back, a stand-in answer in `api.test.mjs` and in `cloud::stand_in` (
   their objects), so the interface is WIT, shipped as core modules with Caprice's own hosts, and a
   theme's source is kept so it can be wrapped as a component later. egui tessellating the Snow's
   2 000 shapes costs 1.6–3.5 ms at a quarter speed, less than a built-in theme's own drawing on the
-  frame; the limit is 40 000 points a frame. Program themes are the browser's only.
+  frame; the limit was 40 000 points a frame (450 000 since the Vineyard's port, below). Program
+  themes are the browser's only.
 - **2026-11-15 — A program names its ground, and has a window layer of its own.** Porting the Magic
   Snow (the plan's step 2) showed what the first interface lacked: the Snow zooms about its ground,
   14 units above the bar, and its snow falls in the window, unzoomed. A program could have made up
@@ -2780,5 +2832,17 @@ result sent back, a stand-in answer in `api.test.mjs` and in `cloud::stand_in` (
   the window is (`desk.window`), and `frame-output.window` is never zoomed. A path (a line through
   points, joined) was added too: the Snow's see-through outlines drawn as segments showed knots
   where they met. The world was not yet published, so `1.0.0` itself changed.
+- **2026-11-15 — No WebAssembly in the tests; a frame may draw 450 000 points.** Porting the Magic
+  Vineyard (the plan's step 2's second half) needed nothing new of the world, but two things of
+  Caprice. Its frame under wasmi, the tests' engine, took 264 ms and more fuel than the tests gave:
+  so wasmi was dropped (the owner's call, proposed on 2026-11-14), and each module stands in the tests
+  for its theme's source built for the machine, the browser's host held to the same words through
+  the echo theme (R36); a desktop that plays program themes one day brings an engine of its own.
+  And it draws 136 000 to 420 000 points a frame, nearly all leaves as mesh vertices, against the
+  40 000 a program could: the limit became a little more than the most a built-in theme draws, so a
+  program may cost Caprice's frame what its own themes do, and keeping a theme light moved to where
+  it is made (step 5). A limit by the window's area was weighed and dropped: a theme's points grow
+  with the land it shows, not the window's size, so it would have stopped themes in small windows
+  zoomed out; drawing fewer leaves when they are small would have made them change while zooming.
 - **No `.docx` import.** Export only.
 - **Contents heading is "Contents"** (English), in the app and in Word.
