@@ -1,0 +1,24 @@
+{
+  "world": "caprice:theme@1.0.0",
+  "name": "Magic Vineyard",
+  "about": "Turning leaves, ripe grapes, and the year's last light",
+  "author": "Caprice",
+  "colours": {
+    "accent": "#7e2440",
+    "button": "#f0e4ce",
+    "button_hover": "#e8d6b6",
+    "caret": "#8a2846",
+    "desk": "#d6bc86",
+    "desk_top": "#96bcde",
+    "dock": "#faf4e6",
+    "dock_edge": "#deccac",
+    "field": "#fffcf4",
+    "light": "yes",
+    "on_accent": "#ffffff",
+    "text": "#3e2620",
+    "text_dim": "#785a48",
+    "text_hot": "#24120e",
+    "thumb": "#c0a278"
+  },
+  "toolchain": "rustc 1.99.1"
+}

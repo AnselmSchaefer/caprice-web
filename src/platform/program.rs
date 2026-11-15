@@ -48,6 +48,38 @@ pub type Words = Vec<u32>;
 /// lift, ground].
 pub const HEAD: usize = 8;
 
+/// The most of a gap between two looks at a program that counts against it, in seconds.
+const BUSY: f64 = 0.25;
+
+/// What is on its way to a program (loading, a frame): since when, how long it may take, and when
+/// Caprice last looked. Only the time Caprice was there to hear counts: of a gap between two looks
+/// (a frame of Caprice's own that took long, the page hidden) at most `BUSY` does. A frame that held
+/// the page for over a second while a worker answered in milliseconds left the answer unread, and
+/// the theme was stopped for not answering (the Magic Vineyard in headless Chromium's software
+/// drawing, 2026-11-16); a program that never answers is still stopped, on the slowest device too.
+#[derive(Clone, Copy, Debug)]
+pub struct Waiting {
+    since: f64,
+    pub most: f64,
+    looked: f64,
+}
+
+impl Waiting {
+    pub fn new(now: f64, most: f64) -> Waiting {
+        Waiting { since: now, most, looked: now }
+    }
+
+    /// Looked at, at `now`: whether it has taken longer than it may.
+    pub fn late(&mut self, now: f64) -> bool {
+        let gap = now - self.looked;
+        if gap > BUSY {
+            self.since += gap - BUSY;
+        }
+        self.looked = self.looked.max(now);
+        now - self.since > self.most
+    }
+}
+
 /// A program loaded, asked for frames, its newest answer taken.
 pub struct Program(Runner);
 
@@ -94,7 +126,7 @@ mod browser {
     use wasm_bindgen::prelude::*;
     use web_sys::{MessageEvent, Worker, WorkerOptions, WorkerType};
 
-    use super::{ANSWER_SECONDS, Ask, LOAD_SECONDS, Waker, Words};
+    use super::{ANSWER_SECONDS, Ask, LOAD_SECONDS, Waiting, Waker, Words};
 
     /// What the worker has said since it was last asked.
     #[derive(Default)]
@@ -109,8 +141,8 @@ mod browser {
     pub struct Runner {
         worker: Option<Worker>,
         inbox: Rc<RefCell<Inbox>>,
-        /// When what is on its way (loading, a frame) was asked for, and how long it may take.
-        asked: Option<(f64, f64)>,
+        /// What is on its way (loading, a frame), and how long it may take.
+        asked: Option<Waiting>,
         _heard: Closure<dyn FnMut(MessageEvent)>,
         _failed: Closure<dyn FnMut(web_sys::ErrorEvent)>,
     }
@@ -161,7 +193,7 @@ mod browser {
                 }
                 None => inbox.borrow_mut().stopped = Some("its worker could not be started".into()),
             }
-            Runner { worker, inbox, asked: Some((now, LOAD_SECONDS)), _heard: heard, _failed: failed }
+            Runner { worker, inbox, asked: Some(Waiting::new(now, LOAD_SECONDS)), _heard: heard, _failed: failed }
         }
 
         pub fn ask(&mut self, ask: &Ask, now: f64) -> bool {
@@ -187,7 +219,7 @@ mod browser {
                 return false;
             }
             inbox.answered = false;
-            self.asked = Some((now, ANSWER_SECONDS));
+            self.asked = Some(Waiting::new(now, ANSWER_SECONDS));
             true
         }
 
@@ -198,10 +230,10 @@ mod browser {
         pub fn stopped(&mut self, now: f64) -> Option<String> {
             let late = {
                 let inbox = self.inbox.borrow();
-                !inbox.answered && inbox.stopped.is_none() && self.asked.is_some_and(|(at, most)| now - at > most)
+                !inbox.answered && inbox.stopped.is_none() && self.asked.as_mut().is_some_and(|w| w.late(now))
             };
             if late {
-                let what = if self.asked.is_some_and(|a| a.1 == LOAD_SECONDS) { "did not load" } else { "did not answer" };
+                let what = if self.asked.is_some_and(|w| w.most == LOAD_SECONDS) { "did not load" } else { "did not answer" };
                 self.stop(format!("it {what} in time"));
             }
             self.inbox.borrow().stopped.clone()
@@ -246,7 +278,7 @@ mod played {
     use theme_sdk::native::{Answers, Desk, FrameInput, FrameOutput, Pages, Played, answering};
     use theme_sdk::{Carrier, Event, Point, Pose, Rect, Shape};
 
-    use super::{ANSWER_SECONDS, Ask, HEAD, Waker, Words};
+    use super::{ANSWER_SECONDS, Ask, HEAD, Waiting, Waker, Words};
 
     /// What a module stands for when the tests run it.
     pub enum Stand {
@@ -348,8 +380,8 @@ mod played {
         stand: Option<Stand>,
         words: Option<Words>,
         stopped: Option<String>,
-        /// When the frame that never came was asked for.
-        asked: Option<f64>,
+        /// The frame that never came, as the browser's runner waits for one.
+        asked: Option<Waiting>,
     }
 
     impl Runner {
@@ -377,7 +409,7 @@ mod played {
                     let why = format!("it failed: {why}");
                     self.stop(why);
                 }
-                Some(Stand::Silent) => self.asked = Some(now),
+                Some(Stand::Silent) => self.asked = Some(Waiting::new(now, ANSWER_SECONDS)),
                 None => return false,
             }
             true
@@ -388,7 +420,7 @@ mod played {
         }
 
         pub fn stopped(&mut self, now: f64) -> Option<String> {
-            if self.asked.is_some_and(|at| now - at > ANSWER_SECONDS) {
+            if self.asked.as_mut().is_some_and(|w| w.late(now)) {
                 self.stop("it did not answer in time".into());
             }
             self.stopped.clone()
@@ -427,5 +459,47 @@ mod desktop {
             Some("themes that are programs play in Caprice in the browser only".into())
         }
         pub fn stop(&mut self, _why: String) {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Whether `w` is found late, looked at every `step` seconds from `from` to `to`.
+    fn looked(w: &mut Waiting, from: f64, to: f64, step: f64) -> bool {
+        let mut now = from;
+        let mut late = false;
+        while now <= to && !late {
+            late = w.late(now);
+            now += step;
+        }
+        late
+    }
+
+    #[test]
+    fn a_program_is_given_its_time_only_while_caprice_is_there_to_hear_it() {
+        // Asked, then a frame of Caprice's own holds the page for a second and a half: the answer
+        // that came meanwhile is not yet read, and the program is not late for it.
+        let mut w = Waiting::new(10.0, ANSWER_SECONDS);
+        assert!(!w.late(11.5), "a long frame is not the program's");
+        assert!(!looked(&mut w, 11.5, 12.2, 1.0 / 60.0), "nor the frames just after it");
+        assert!(looked(&mut w, 12.2, 13.0, 1.0 / 60.0), "but a second of frames is");
+        // The page hidden for a minute.
+        let mut w = Waiting::new(0.0, ANSWER_SECONDS);
+        assert!(!w.late(60.0));
+    }
+
+    #[test]
+    fn a_program_that_never_answers_is_stopped_on_the_slowest_device_too() {
+        for step in [1.0 / 60.0, 0.1, 0.5, 2.0] {
+            let mut w = Waiting::new(0.0, ANSWER_SECONDS);
+            let mut now = 0.0;
+            while !w.late(now) {
+                now += step;
+                assert!(now < 30.0, "never stopped, looked at every {step} s");
+            }
+            assert!(now <= ANSWER_SECONDS / BUSY.min(step) * step + step, "looked at every {step} s: stopped after {now} s");
+        }
     }
 }

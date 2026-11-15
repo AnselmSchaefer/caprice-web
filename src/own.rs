@@ -916,9 +916,13 @@ pub struct Entry {
     pub carries: bool,
     #[serde(default)]
     pub added: u64,
-    /// A program (R36), kept as `<id>.wasm`, rather than a drawing.
+    /// A program (R36), kept as `<id>.wasm` (its source, if it came with it, as `<id>.rs`), rather
+    /// than a drawing.
     #[serde(default)]
     pub program: bool,
+    /// The toolchain that built a program, as its file said (`bundle::Manifest::toolchain`).
+    #[serde(default)]
+    pub toolchain: String,
     /// What the gallery signed, for a theme taken from it.
     #[serde(default)]
     pub gallery: Option<Signed>,
@@ -982,9 +986,11 @@ impl Signed {
 pub struct Shelf {
     pub dir: Option<PathBuf>,
     pub entries: Vec<Entry>,
-    /// Without a folder: the drawings, and the pictures of them; and the programs.
+    /// Without a folder: the drawings, and the pictures of them (a program's with no drawing); and
+    /// the programs, and their sources.
     held: HashMap<String, (String, ColorImage)>,
     held_modules: HashMap<String, Vec<u8>>,
+    held_sources: HashMap<String, String>,
     /// The key the gallery's signatures are checked with (`GALLERY_KEY`; another in tests).
     pub gallery_key: [u8; 32],
     /// Changed since the gallery last loaded its pictures.
@@ -994,7 +1000,7 @@ pub struct Shelf {
 impl Shelf {
     pub fn kept_in(dir: Option<PathBuf>) -> Self {
         let entries = dir.as_ref().and_then(|d| fs::read_to_string(d.join("index.json")).ok()).and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
-        let mut shelf = Self { dir, entries, held: HashMap::new(), held_modules: HashMap::new(), gallery_key: GALLERY_KEY, version: 0 };
+        let mut shelf = Self { dir, entries, held: HashMap::new(), held_modules: HashMap::new(), held_sources: HashMap::new(), gallery_key: GALLERY_KEY, version: 0 };
         shelf.check_signatures();
         shelf
     }
@@ -1035,11 +1041,59 @@ impl Shelf {
             }
         }
         let entry = Entry { id: id.clone(), name: name.to_owned(), about: about.to_owned(), author: String::new(), colours, grows: true, carries: true,
-            added: crate::platform::since_epoch().as_secs(), program: true, gallery, from_gallery: false };
+            added: crate::platform::since_epoch().as_secs(), program: true, toolchain: String::new(), gallery, from_gallery: false };
         self.entries.push(entry);
         self.check_signatures();
         self.save()?;
         Ok(id)
+    }
+
+    /// Put a theme file's program on the shelf (`bundle::open` read it), with its source and its
+    /// picture for the gallery; its id.
+    pub fn add_bundle(&mut self, b: &crate::bundle::Bundle) -> Result<String, String> {
+        let m = &b.manifest;
+        let id = self.add_program(&m.name, &m.about, m.colours.clone(), &b.module, None)?;
+        match &self.dir {
+            Some(d) => {
+                if let Some(source) = &b.source {
+                    fs::write(d.join(format!("{id}.rs")), source.as_bytes()).map_err(|e| e.to_string())?;
+                }
+                if let Some(p) = &b.preview {
+                    write_png(&d.join(format!("{id}.png")), p);
+                }
+            }
+            None => {
+                if let Some(source) = &b.source {
+                    self.held_sources.insert(id.clone(), source.clone());
+                }
+                if let Some(p) = &b.preview {
+                    self.held.insert(id.clone(), (String::new(), p.clone()));
+                }
+            }
+        }
+        if let Some(e) = self.entries.iter_mut().find(|e| e.id == id) {
+            (e.author, e.toolchain) = (m.author.clone(), m.toolchain.clone());
+        }
+        self.save()?;
+        Ok(id)
+    }
+
+    /// A program theme on the shelf as a theme file's parts, to give to someone as it came.
+    pub fn bundle(&self, id: &str) -> Option<crate::bundle::Bundle> {
+        let e = self.get(id).filter(|e| e.program)?;
+        let manifest = crate::bundle::Manifest {
+            world: crate::bundle::WORLD.into(), name: e.name.clone(), about: e.about.clone(), author: e.author.clone(),
+            colours: e.colours.clone(), toolchain: e.toolchain.clone(),
+        };
+        Some(crate::bundle::Bundle { manifest, module: self.module(id)?, source: self.source(id), preview: self.thumb(id) })
+    }
+
+    /// The source of a program theme on the shelf, if it came with it.
+    pub fn source(&self, id: &str) -> Option<String> {
+        match &self.dir {
+            Some(d) => fs::read_to_string(d.join(format!("{id}.rs"))).ok(),
+            None => self.held_sources.get(id).cloned(),
+        }
     }
 
     pub fn get(&self, id: &str) -> Option<&Entry> {
@@ -1080,6 +1134,7 @@ impl Shelf {
             carries: pack.carrier.is_some(),
             added: crate::platform::since_epoch().as_secs(),
             program: false,
+            toolchain: String::new(),
             gallery: None,
             from_gallery: false,
         };
@@ -1087,14 +1142,7 @@ impl Shelf {
             Some(d) => {
                 fs::create_dir_all(d).map_err(|e| e.to_string())?;
                 fs::write(d.join(format!("{id}.svg")), pack.svg.as_bytes()).map_err(|e| e.to_string())?;
-                let t = &ready.thumb;
-                let rgba: Vec<u8> = t.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
-                if let Some(img) = image::RgbaImage::from_raw(t.size[0] as u32, t.size[1] as u32, rgba) {
-                    let mut png = std::io::Cursor::new(Vec::new());
-                    if img.write_to(&mut png, image::ImageFormat::Png).is_ok() {
-                        let _ = fs::write(d.join(format!("{id}.png")), png.into_inner());
-                    }
-                }
+                write_png(&d.join(format!("{id}.png")), &ready.thumb);
             }
             None => {
                 self.held.insert(id.clone(), (pack.svg.clone(), ready.thumb.clone()));
@@ -1110,8 +1158,9 @@ impl Shelf {
         self.entries.retain(|e| e.id != id);
         self.held.remove(id);
         self.held_modules.remove(id);
+        self.held_sources.remove(id);
         if let Some(d) = &self.dir {
-            for ext in ["svg", "png", "wasm"] {
+            for ext in ["svg", "png", "wasm", "rs"] {
                 let _ = fs::remove_file(d.join(format!("{id}.{ext}")));
             }
         }
@@ -1127,6 +1176,17 @@ impl Shelf {
     }
 }
 
+/// A picture for the gallery written as a PNG, if it can be: it is only ever a picture.
+fn write_png(path: &Path, picture: &ColorImage) {
+    let rgba: Vec<u8> = picture.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
+    if let Some(img) = image::RgbaImage::from_raw(picture.size[0] as u32, picture.size[1] as u32, rgba) {
+        let mut png = std::io::Cursor::new(Vec::new());
+        if img.write_to(&mut png, image::ImageFormat::Png).is_ok() {
+            let _ = fs::write(path, png.into_inner());
+        }
+    }
+}
+
 // ---- In the app ------------------------------------------------------------------------------
 
 /// What a drawing imported came to, for its window.
@@ -1138,8 +1198,14 @@ pub struct Report {
     pub problems: Vec<String>,
 }
 
-/// A drawing being checked off the frame: its name, and what it comes to.
-type Importing = (String, Receiver<Result<Ready, Vec<String>>>);
+/// A theme read and checked, ready for the shelf: a drawing, or a theme file's program.
+pub enum Prepared {
+    Drawing(Ready),
+    Program(crate::bundle::Opened),
+}
+
+/// A theme being checked off the frame: its name, and what it comes to.
+type Importing = (String, Receiver<Result<Prepared, Vec<String>>>);
 
 /// Making and keeping themes of one's own: the import on its way, its report, the guide, the
 /// gallery's pictures.
@@ -1170,16 +1236,17 @@ pub enum Ask {
 }
 
 impl App {
-    /// Ask for a drawing to import as a theme.
+    /// Ask for a theme to import: a drawing, or a theme file.
     pub fn choose_theme_file(&mut self, ctx: &egui::Context) {
-        let dialog = crate::platform::Dialog::new().add_filter("Theme drawing (SVG)", &["svg"]);
+        let dialog = crate::platform::Dialog::new().add_filter("Theme (SVG drawing or Caprice theme file)", &["svg", crate::bundle::EXTENSION]);
         self.ask_path(ctx, crate::fileio::DialogFor::ImportTheme, dialog);
     }
 
-    /// Import the drawing at `path` as a theme.
+    /// Import the theme at `path`: a theme file (a zip) or a drawing, whatever its name says.
     pub fn import_theme(&mut self, ctx: &egui::Context, path: &Path) {
         let name = path.file_stem().map_or("My theme".to_owned(), |s| s.to_string_lossy().replace(['_', '-'], " "));
         match fs::read(path) {
+            Ok(bytes) if crate::bundle::is_bundle(&bytes) => self.import_theme_file(ctx, bytes, name),
             Ok(bytes) => self.import_theme_svg(ctx, String::from_utf8_lossy(&bytes).into_owned(), name),
             Err(e) => self.workshop.report = Some(Report { name, added: false, found: Vec::new(), notes: Vec::new(), problems: vec![format!("The file could not be read: {e}.")] }),
         }
@@ -1187,11 +1254,21 @@ impl App {
 
     /// Import a drawing as a theme, checked off the frame; it is chosen once it is on the shelf.
     pub fn import_theme_svg(&mut self, ctx: &egui::Context, svg: String, name: String) {
+        let named = name.clone();
+        self.prepare_theme(ctx, name, move || prepare(&svg, &named).map(Prepared::Drawing));
+    }
+
+    /// Import a theme file (`bundle`), checked off the frame; it is chosen once it is on the shelf.
+    pub fn import_theme_file(&mut self, ctx: &egui::Context, bytes: Vec<u8>, name: String) {
+        let named = name.clone();
+        self.prepare_theme(ctx, name, move || crate::bundle::open(&bytes, &named).map(Prepared::Program));
+    }
+
+    fn prepare_theme(&mut self, ctx: &egui::Context, name: String, read: impl FnOnce() -> Result<Prepared, Vec<String>> + Send + 'static) {
         let (tx, rx) = channel();
         let wake = crate::platform::Waker::new(ctx);
-        let named = name.clone();
         crate::platform::spawn(move || {
-            let _ = tx.send(prepare(&svg, &named));
+            let _ = tx.send(read());
             wake.wake();
         });
         self.workshop.importing = Some((name, rx));
@@ -1203,22 +1280,27 @@ impl App {
         if let Some((name, rx)) = &self.workshop.importing {
             let got = match rx.try_recv() {
                 Ok(r) => Some(r),
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(Err(vec!["The drawing could not be read.".into()])),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(Err(vec!["The theme could not be read.".into()])),
                 Err(std::sync::mpsc::TryRecvError::Empty) => None,
             };
             if let Some(got) = got {
                 let name = name.clone();
                 self.workshop.importing = None;
                 self.workshop.report = Some(match got {
-                    Ok(ready) => match self.themes.own.add(&ready) {
-                        Ok(id) => {
-                            let name = ready.checked.pack.meta.name.clone();
-                            self.themes.choose_own(ctx, &id);
-                            self.status = format!("- theme \u{201c}{name}\u{201d} added");
-                            Report { name, added: true, found: ready.checked.found, notes: ready.checked.notes, problems: Vec::new() }
+                    Ok(prepared) => {
+                        let (added, named, found, notes) = match prepared {
+                            Prepared::Drawing(ready) => (self.themes.own.add(&ready), ready.checked.pack.meta.name, ready.checked.found, ready.checked.notes),
+                            Prepared::Program(o) => (self.themes.own.add_bundle(&o.bundle), o.bundle.manifest.name, o.found, o.notes),
+                        };
+                        match added {
+                            Ok(id) => {
+                                self.themes.choose_own(ctx, &id);
+                                self.status = format!("- theme \u{201c}{named}\u{201d} added");
+                                Report { name: named, added: true, found, notes, problems: Vec::new() }
+                            }
+                            Err(e) => Report { name, added: false, found: Vec::new(), notes: Vec::new(), problems: vec![format!("The theme could not be kept: {e}.")] },
                         }
-                        Err(e) => Report { name, added: false, found: Vec::new(), notes: Vec::new(), problems: vec![format!("The theme could not be kept: {e}.")] },
-                    },
+                    }
                     Err(problems) => {
                         self.status = "- the theme was not added".into();
                         Report { name, added: false, found: Vec::new(), notes: Vec::new(), problems }
@@ -1251,17 +1333,27 @@ impl App {
             }
             Ask::Guide => self.workshop.guide = true,
             Ask::Export(id) => {
-                let name = self.themes.own.get(&id).map_or("Theme".to_owned(), |e| e.name.clone());
-                let dialog = crate::platform::Dialog::new().add_filter("Theme drawing (SVG)", &["svg"]).set_file_name(format!("{name}.svg"));
+                let (name, program) = self.themes.own.get(&id).map_or(("Theme".to_owned(), false), |e| (e.name.clone(), e.program));
+                let ext = crate::bundle::EXTENSION;
+                let dialog = match program {
+                    true => crate::platform::Dialog::new().add_filter("Caprice theme file", &[ext]).set_file_name(format!("{name}.{ext}")),
+                    false => crate::platform::Dialog::new().add_filter("Theme drawing (SVG)", &["svg"]).set_file_name(format!("{name}.svg")),
+                };
                 self.ask_path(ctx, crate::fileio::DialogFor::ExportTheme(id), dialog);
             }
             Ask::Delete(id) => self.workshop.deleting = Some(id),
         }
     }
 
-    /// Write the theme `id`'s drawing to `path`, to keep, change or give to someone.
+    /// Write the theme `id` to `path`, to keep, change or give to someone: its drawing, or, for a
+    /// program, a theme file as it came.
     pub fn export_theme_to(&mut self, id: &str, path: &Path) {
-        self.status = match self.themes.own.svg(id).map(|svg| fs::write(path, svg.as_bytes())) {
+        let own = &self.themes.own;
+        let bytes = match own.get(id).is_some_and(|e| e.program) {
+            true => own.bundle(id).map(|b| crate::bundle::write(&b)),
+            false => own.svg(id).map(|svg| Ok(svg.into_bytes())),
+        };
+        self.status = match bytes.map(|b| b.and_then(|b| fs::write(path, b).map_err(|e| e.to_string()))) {
             Some(Ok(())) => format!("- theme saved as {}", path.file_name().map_or(String::new(), |n| n.to_string_lossy().into_owned())),
             Some(Err(e)) => format!("- theme not saved: {e}"),
             None => "- the theme is no longer there".into(),
