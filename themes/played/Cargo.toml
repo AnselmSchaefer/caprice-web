@@ -1,0 +1,16 @@
+# The theme programs of `themes/`, built for the machine from their sources against the SDK: what
+# their modules stand for under Caprice's `cargo test`, where no WebAssembly is run (R36). Each
+# theme's `played()` (from `theme!`) is the theme to play. Not a theme itself: `themes/build.sh`
+# builds only the folders with a `theme.rs`.
+[package]
+name = "themes-played"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+name = "themes_played"
+path = "lib.rs"
+
+[dependencies]
+theme-sdk = { path = "../../theme-sdk", version = "1.0.0" }

@@ -12,9 +12,12 @@
 //! never zoomed.
 //!
 //! Polygons cost the most to draw (egui smooths every edge, doubling its points): a gradient or a
-//! field of many small fills is cheaper as one mesh. A frame may hold 40 000 points (a polygon's
-//! points and a mesh's vertices; a circle or a line is one), twice what the Magic Snow draws; over
-//! that it is not drawn, and a theme over it frame after frame is stopped.
+//! field of many small fills is cheaper as one mesh. A frame may hold 450 000 points (a polygon's
+//! points and a mesh's vertices; a circle or a line is one), a little more than the Magic Vineyard
+//! draws zoomed out in the widest window; over that it is not drawn, and a theme over it frame
+//! after frame is stopped. That is a limit, not a goal: the Snow draws 20 000 points, the Vineyard
+//! 63 000 on a phone's desk and 136 000 to 168 000 on a computer's, and every point is paid for in
+//! Caprice's frame, on the writer's own phone too.
 //!
 //! The crate needs nothing but `std`, and builds with the bindings it carries (made ahead of time
 //! from `wit/theme.wit`), so a theme's build is this crate and one file.
@@ -32,8 +35,88 @@ use std::ops::{Add, Mul, Neg, Sub};
 pub use bindings::caprice::theme::types::{Carrier, Circle, Event, Line, Mesh, Pages, Path, Point, Polygon, Pose, Rect, Shape, Vertex};
 
 /// What a theme may ask of Caprice, at any time.
+#[cfg(target_arch = "wasm32")]
 pub mod host {
     pub use crate::bindings::caprice::theme::host::{ask_lift, garden, page_count, story_seed};
+}
+
+/// What a theme may ask of Caprice, at any time: played natively (`native`), answered from what
+/// the player was given for the frame.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod host {
+    use crate::native::ANSWERS;
+
+    fn answers<R>(f: impl FnOnce(&crate::native::Answers) -> R) -> R {
+        ANSWERS.with_borrow(|a| f(a.as_ref().expect("Caprice is asked only during a frame or its events")))
+    }
+
+    pub fn story_seed() -> u64 {
+        answers(|a| a.seed)
+    }
+
+    pub fn garden() -> Vec<u32> {
+        answers(|a| a.garden.clone())
+    }
+
+    pub fn page_count() -> u32 {
+        answers(|a| a.pages)
+    }
+
+    pub fn ask_lift() -> bool {
+        crate::native::ASKED.set(true);
+        answers(|a| a.lift)
+    }
+}
+
+/// A theme played without WebAssembly, its source compiled for the machine it runs on: Caprice's
+/// tests play the themes of `themes/` so, as stand-ins for their modules (`theme!` gives each a
+/// `played()`). What `host` answers is given with each frame.
+#[cfg(not(target_arch = "wasm32"))]
+#[doc(hidden)]
+pub mod native {
+    use std::cell::{Cell, RefCell};
+
+    pub use crate::bindings::caprice::theme::types::{Desk, Pages};
+    pub use crate::bindings::{FrameInput, FrameOutput};
+    use crate::{Event, Running, Theme};
+
+    /// What `host` answers while a frame or its events are played.
+    pub struct Answers {
+        pub seed: u64,
+        pub garden: Vec<u32>,
+        pub pages: u32,
+        pub lift: bool,
+    }
+
+    thread_local! {
+        pub(crate) static ANSWERS: RefCell<Option<Answers>> = const { RefCell::new(None) };
+        pub(crate) static ASKED: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// A theme as Caprice's tests play it: told the events, then asked for the frame, as the
+    /// world's exports are called.
+    pub trait Played {
+        fn events(&mut self, events: &[Event]);
+        fn frame(&mut self, input: FrameInput) -> FrameOutput;
+    }
+
+    impl<T: Theme> Played for Running<T> {
+        fn events(&mut self, events: &[Event]) {
+            Running::events(self, events);
+        }
+        fn frame(&mut self, input: FrameInput) -> FrameOutput {
+            Running::frame(self, input)
+        }
+    }
+
+    /// `play` run with `host` answering `answers`; what it gave, and whether it called `ask-lift`.
+    pub fn answering<R>(answers: Answers, play: impl FnOnce() -> R) -> (R, bool) {
+        ANSWERS.set(Some(answers));
+        ASKED.set(false);
+        let r = play();
+        ANSWERS.set(None);
+        (r, ASKED.get())
+    }
 }
 
 /// A theme: made once when it is loaded, told what happened, asked for frames.
@@ -47,7 +130,9 @@ pub trait Theme: 'static {
     fn frame(&mut self, input: &Input, out: &mut Out);
 }
 
-/// Makes the type a theme: `theme!(Fireflies);` once, in the theme's file.
+/// Makes the type a theme: `theme!(Fireflies);` once, in the theme's file. Built for WebAssembly
+/// it exports the world's functions; built for the machine (Caprice's tests), it gives `played()`,
+/// the theme to play natively (`native`).
 #[macro_export]
 macro_rules! theme {
     ($ty:ty) => {
@@ -58,6 +143,13 @@ macro_rules! theme {
             unsafe { $crate::rt::realloc(old, old_len, align, new_len) }
         }
 
+        /// The theme, played without WebAssembly.
+        #[cfg(not(target_arch = "wasm32"))]
+        pub fn played() -> ::std::boxed::Box<dyn $crate::native::Played> {
+            ::std::boxed::Box::new($crate::Running::<$ty>::new())
+        }
+
+        #[cfg(target_arch = "wasm32")]
         const _: () = {
             thread_local!(static THEME: ::std::cell::RefCell<$crate::Running<$ty>> = ::std::cell::RefCell::new($crate::Running::new()));
 
@@ -336,6 +428,12 @@ impl Point {
 
     pub fn dot(self, o: Point) -> f32 {
         self.x * o.x + self.y * o.y
+    }
+
+    /// Turned a quarter round, the right way into the up way on the screen (egui's `Vec2::rot90`):
+    /// across a way, as a stroke's side.
+    pub fn rot90(self) -> Point {
+        pt(self.y, -self.x)
     }
 
     /// The way `angle` radians round from the right, clockwise on the screen (egui's `Vec2::angled`).

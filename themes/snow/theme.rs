@@ -367,6 +367,7 @@ impl Igloo {
     /// size is `lake_u`: a glint traces round it in the ice, it rises out of the dark water, floats
     /// up to its place in the igloo, becomes the brick there as it lands, and the hole freezes
     /// over. The lake's part of it goes into `lake`, the block's into `out`.
+    #[allow(clippy::too_many_arguments)]
     fn coming(&self, lake: &mut Layer, out: &mut Layer, j: usize, g: f32, from: Point, lake_u: f32, time: f64) {
         let (w, d) = (BLOCK.0 * lake_u / 2.0, 3.0 * lake_u);
         let corners = [from + pt(-w, -d), from + pt(w, -d), from + pt(w, d), from + pt(-w, d)];

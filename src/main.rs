@@ -6743,9 +6743,12 @@ mod tests {
     }
 
     const SNOW: &[u8] = include_bytes!("../tests/fixtures/snow.wasm");
+    const VINEYARD: &[u8] = include_bytes!("../tests/fixtures/vineyard.wasm");
 
-    /// A shape as the Snow's comparison sees it: what kind it is, its points and their colours, its
-    /// width or radius, and a mesh's triangles. A rectangle is the polygon of its corners.
+    /// A shape as the comparisons of the built-in themes and their ports see it: what kind it is,
+    /// its points and their colours, its width or radius, and a mesh's triangles. A rectangle is the
+    /// polygon of its corners; a mesh without triangles draws nothing (the built-in Vineyard keeps
+    /// one for the leaves fallen from a stretch before any has).
     #[derive(Debug)]
     struct Outline {
         kind: &'static str,
@@ -6769,6 +6772,7 @@ mod tests {
             Shape::Path(p) if p.fill != egui::Color32::TRANSPARENT => o("polygon", p.points.clone(), vec![p.fill], 0.0),
             Shape::Path(p) => o(if p.closed { "closed line" } else { "line" }, p.points.clone(), vec![solid(&p.stroke.color)], p.stroke.width),
             Shape::LineSegment { points, stroke } => o("segment", points.to_vec(), vec![stroke.color], stroke.width),
+            Shape::Mesh(m) if m.indices.is_empty() => None,
             Shape::Mesh(m) => Some(Outline {
                 kind: "mesh",
                 points: m.vertices.iter().map(|v| v.pos).collect(),
@@ -6776,7 +6780,7 @@ mod tests {
                 size: 0.0,
                 triangles: m.indices.clone(),
             }),
-            other => panic!("the Snow draws no {other:?}"),
+            other => panic!("no magic theme draws {other:?}"),
         }
     }
 
@@ -6789,8 +6793,8 @@ mod tests {
         color: u8,
     }
 
-    /// Whether the built-in Snow's frame and the port's draw the same shapes, in the same order,
-    /// and how far apart they are; at the first that differs in kind or count, why.
+    /// Whether a built-in theme's frame and its port's draw the same shapes, in the same order, and
+    /// how far apart they are; at the first that differs in kind or count, why.
     fn apart(built: &[egui::Shape], port: &[egui::Shape]) -> Result<Apart, String> {
         let (a, b): (Vec<Outline>, Vec<Outline>) = (built.iter().filter_map(outline).collect(), port.iter().filter_map(outline).collect());
         let mut d = Apart { shapes: a.len(), ..Apart::default() };
@@ -6808,23 +6812,24 @@ mod tests {
         Ok(d)
     }
 
-    /// The Magic Snow drawn by Caprice and by its port to a theme program (`themes/snow`), side by
-    /// side: two apps given the same story, window and keys at the same moments, both keeping what
-    /// they paint.
-    struct Snows {
+    /// A built-in magic theme drawn by Caprice and by its port to a theme program (`themes/snow`,
+    /// `themes/vineyard`), side by side: two apps given the same story, window and keys at the same
+    /// moments, both keeping what they paint.
+    struct Twins<T> {
         built: Harness,
         port: Harness,
-        /// How far apart the frames compared were at most, and what was in them.
+        /// How many shapes the port puts in the window every frame.
+        window: usize,
+        /// What the built-in theme drew in each frame compared, as `look` sees it.
+        look: fn(&App) -> T,
+        seen: Vec<T>,
+        /// How far apart the frames compared were at most, and at which zooms.
         worst: Apart,
-        compared: usize,
-        coming: usize,
-        finishing: usize,
-        lit: usize,
         zooms: Vec<f32>,
     }
 
-    impl Snows {
-        fn new() -> Snows {
+    impl<T> Twins<T> {
+        fn new(theme: theme::Theme, module: &[u8], window: usize, look: fn(&App) -> T) -> Twins<T> {
             let (mut built, mut port) = (Harness::new(), Harness::new());
             for h in [&mut built, &mut port] {
                 h.app.story_id = "a story".into();
@@ -6832,11 +6837,11 @@ mod tests {
                 h.frames(3, vec![], Modifiers::NONE);
             }
             let ctx = built.ctx.clone();
-            built.app.themes.choose(&ctx, theme::Theme::Snow);
-            let id = port.app.themes.own.add_program("Snow", "", Default::default(), SNOW, None).unwrap();
+            built.app.themes.choose(&ctx, theme);
+            let id = port.app.themes.own.add_program(theme.name(), "", Default::default(), module, None).unwrap();
             let ctx = port.ctx.clone();
             port.app.themes.choose_own(&ctx, &id);
-            let mut s = Snows { built, port, worst: Apart::default(), compared: 0, coming: 0, finishing: 0, lit: 0, zooms: Vec::new() };
+            let mut s = Twins { built, port, window, look, seen: Vec::new(), worst: Apart::default(), zooms: Vec::new() };
             s.both(|h| {
                 h.app.eggs.odds = Some(0.0);
                 h.wait(1.0);
@@ -6849,111 +6854,190 @@ mod tests {
             f(&mut self.port);
         }
 
-        /// `n` frames, `step` seconds apart, each of the built-in Snow's compared with the port's
+        /// `n` frames, `step` seconds apart, each of the built-in theme's compared with the port's
         /// next: a program's shapes are a frame behind (R36), so the port draws in each frame what
         /// the built-in drew in the one before.
         fn compare(&mut self, n: usize, step: f64) {
             for _ in 0..n {
                 let was = self.built.app.eggs.painted.clone().unwrap();
-                let hill = self.built.app.eggs.snow.clone().expect("the built-in Snow drawn");
+                self.seen.push((self.look)(&self.built.app));
                 self.both(|h| {
                     h.time += step - 1.0 / 60.0;
                     h.frames(1, vec![], Modifiers::NONE);
                 });
-                let seen = program_seen(&self.port);
-                assert!(seen.stopped.is_none() && seen.window == 140, "the port plays, its snow in the window: {seen:?}");
+                let shown = program_seen(&self.port);
+                assert!(shown.stopped.is_none() && shown.window == self.window, "the port plays, {} shapes in the window: {shown:?}", self.window);
                 let now = self.port.app.eggs.painted.clone().unwrap();
-                let d = apart(&was, &now).unwrap_or_else(|why| panic!("frame {} not the same: {why}", self.compared));
-                assert!(d.at < 0.1 && d.color <= 1, "frame {}: within a tenth of a pixel and a shade: {d:?}", self.compared);
+                let d = apart(&was, &now).unwrap_or_else(|why| panic!("frame {} not the same: {why}", self.seen.len()));
+                assert!(d.at < 0.1 && d.color <= 1, "frame {}: within a tenth of a pixel and a shade: {d:?}", self.seen.len());
                 let z = self.built.app.zoom / self.built.app.fitting_zoom(self.built.app.eggs.desk);
                 if !self.zooms.iter().any(|w| (w - z).abs() < 0.05) {
                     self.zooms.push(z);
                 }
                 self.worst = Apart { shapes: self.worst.shapes.max(d.shapes), at: self.worst.at.max(d.at), color: self.worst.color.max(d.color) };
-                self.compared += 1;
-                self.coming += usize::from(hill.coming.is_some());
-                self.finishing += usize::from(hill.finishing);
-                self.lit = self.lit.max(hill.lit);
             }
+        }
+
+        /// A chapter begun, and pages of it written.
+        fn chapter(&mut self, title: &'static str, sentences: usize) {
+            self.both(|h| {
+                if title == "Chapter One" {
+                    chapter_one(h);
+                } else {
+                    h.key(Key::Enter, Modifiers::NONE);
+                    h.type_text(title);
+                    h.click_widget("Chapter");
+                }
+                h.key(Key::Enter, Modifiers::NONE);
+                h.type_text(&SENTENCE.repeat(sentences));
+            });
+        }
+
+        /// Zoomed in, and out further than the fitting zoom, writing on: the theme's ground nearer
+        /// and further, what is in the window as it was; `n` frames compared at each.
+        fn zoomed(&mut self, n: usize) {
+            for (key, times) in [(Key::Equals, 4), (Key::Minus, 7)] {
+                self.both(|h| {
+                    // A press a frame, as a writer's quick presses come.
+                    for _ in 0..times {
+                        let e = egui::Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers: Modifiers::COMMAND };
+                        h.frames(1, vec![e], Modifiers::COMMAND);
+                    }
+                    h.wait(1.0);
+                    h.type_text(&SENTENCE.repeat(40));
+                });
+                self.compare(n, 0.1);
+            }
+            assert!(self.zooms.iter().any(|&z| z > 1.4) && self.zooms.iter().any(|&z| z < 0.8), "zoomed in and out: {:?}", self.zooms);
+        }
+
+        /// Other windows, the page bar along the foot of the desk and at its side. (While the size
+        /// of things follows the window's, over a moment, the port's shapes are zoomed about where
+        /// the ground is a frame later than they were laid out for: not compared.) `n` frames
+        /// compared in each.
+        fn windows(&mut self, n: usize) {
+            for (width, height, side) in [(900.0, 640.0, ui::BarSide::Bottom), (1700.0, 1000.0, ui::BarSide::Right), (1240.0, 900.0, ui::BarSide::Left)] {
+                // A tenth of a second a frame, the most the size of things follows by in one.
+                self.both(|h| {
+                    (h.width, h.height) = (width, height);
+                    h.app.bar.side = side;
+                    for _ in 0..8 {
+                        h.time += 0.1;
+                        h.frames(1, vec![], Modifiers::NONE);
+                    }
+                });
+                self.compare(n, 0.25);
+            }
+        }
+
+        fn said(&self, what: &str) {
+            eprintln!("{what}: compared {} frames of up to {} shapes, zoomed {:?}: at most {} points and {} of 255 apart", self.seen.len(), self.worst.shapes, self.zooms, self.worst.at, self.worst.color);
         }
     }
 
     #[test]
     fn the_magic_snow_as_a_program_draws_what_the_built_in_one_draws_frame_by_frame() {
-        let mut s = Snows::new();
+        let mut s = Twins::new(theme::Theme::Snow, SNOW, 140, |a| a.eggs.snow.clone().expect("the built-in Snow drawn"));
         s.compare(3, 1.0 / 60.0);
         // A chapter of a few pages: a block cut out of the lake for each, rising and floating onto
         // the igloo, compared all the way.
-        s.both(|h| {
-            chapter_one(h);
-            h.key(Key::Enter, Modifiers::NONE);
-            h.type_text(&SENTENCE.repeat(120));
-        });
+        s.chapter("Chapter One", 120);
         s.compare(40, 0.1);
-        assert!(s.coming > 20, "blocks on their way: {}", s.coming);
+        let coming = s.seen.iter().filter(|h| h.coming.is_some()).count();
+        assert!(coming > 20, "blocks on their way: {coming}");
         // The next chapter begun: the igloo before finished, its bricks dropping in, its tunnel
         // built and its light coming on.
-        s.both(|h| {
-            h.key(Key::Enter, Modifiers::NONE);
-            h.type_text("Chapter Two");
-            h.click_widget("Chapter");
-            h.key(Key::Enter, Modifiers::NONE);
-            h.type_text(&SENTENCE.repeat(60));
-        });
+        s.chapter("Chapter Two", 60);
         s.compare(65, 0.1);
-        assert!(s.finishing > 50 && s.lit == 1, "the igloo finished and lit: {} {}", s.finishing, s.lit);
-        // Zoomed in, and out further than the fitting zoom: the hillside nearer and further, the snow
-        // still falling in the window.
-        for (key, times) in [(Key::Equals, 4), (Key::Minus, 7)] {
-            s.both(|h| {
-                for _ in 0..times {
-                    h.key(key, Modifiers::COMMAND);
-                }
-                h.wait(1.0);
-                h.type_text(&SENTENCE.repeat(40));
-            });
-            s.compare(30, 0.1);
-        }
-        assert!(s.zooms.iter().any(|&z| z > 1.4) && s.zooms.iter().any(|&z| z < 0.8), "zoomed in and out: {:?}", s.zooms);
-        // Other windows, the page bar along the foot of the desk and at its side. (While the size
-        // of things follows the window's, over a moment, the port's shapes are zoomed about where
-        // the ground is a frame later than they were laid out for: not compared.)
-        for (width, height, side) in [(900.0, 640.0, ui::BarSide::Bottom), (1700.0, 1000.0, ui::BarSide::Right), (1240.0, 900.0, ui::BarSide::Left)] {
-            s.both(|h| {
-                (h.width, h.height) = (width, height);
-                h.app.bar.side = side;
-                for _ in 0..12 {
-                    h.wait(0.1);
-                }
-            });
-            s.compare(10, 0.25);
-        }
-        eprintln!("compared {} frames of up to {} shapes, zoomed {:?}: at most {} points and {} of 255 apart", s.compared, s.worst.shapes, s.zooms, s.worst.at, s.worst.color);
+        let (finishing, lit) = (s.seen.iter().filter(|h| h.finishing).count(), s.seen.iter().map(|h| h.lit).max());
+        assert!(finishing > 50 && lit == Some(1), "the igloo finished and lit: {finishing} {lit:?}");
+        // Zoomed in and out, the hillside nearer and further, the snow still falling in the window;
+        // other windows and bars.
+        s.zoomed(30);
+        s.windows(10);
+        s.said("the Snow");
+    }
+
+    /// The Magic Vineyard drawn by Caprice and by its port, side by side (`Twins`), and what the
+    /// built-in drew in each frame compared, with how many pages its newest chapter had.
+    fn vineyards() -> Twins<(eggs::vineyard::Seen, usize)> {
+        let look = |a: &App| (a.eggs.vineyard.clone().expect("the built-in Vineyard drawn"), a.doc.garden.last().map_or(0, |&p| p as usize));
+        Twins::new(theme::Theme::Vineyard, VINEYARD, 0, look)
+    }
+
+    // The Vineyard's comparison is two tests, run side by side: each of its frames is ten times the
+    // Snow's to draw and compare.
+    #[test]
+    fn the_magic_vineyard_as_a_program_grows_and_turns_as_the_built_in_one_frame_by_frame() {
+        let mut s = vineyards();
+        s.compare(3, 1.0 / 60.0);
+        // A chapter of a few pages: a bunch for each, swelling green and ripening purple one after
+        // another, compared all the way.
+        s.chapter("Chapter One", 300);
+        s.compare(36, 0.1);
+        let ripe: Vec<usize> = s.seen.iter().map(|(v, _)| v.plots.last().map_or(0, |p| p.1)).collect();
+        let ripening = s.seen.iter().zip(&ripe).filter(|((_, pages), ripe)| *ripe < pages).count();
+        let mut counts = ripe.clone();
+        counts.dedup();
+        assert!(counts.len() >= 2 && ripening > 25, "bunches ripening a page at a time: {counts:?}, {ripening} frames");
+        // The next chapter begun: the stretch before turning gold and red, its leaves letting go one
+        // after another and lying in the grass, over the whole of its turning.
+        s.chapter("Chapter Two", 60);
+        s.compare(20, 0.9);
+        let turning = s.seen.iter().filter(|(v, _)| v.turning.is_some()).count();
+        let (falling, fallen) = (s.seen.iter().map(|(v, _)| v.falling).max(), s.seen.iter().map(|(v, _)| v.fallen).max());
+        assert!(turning > 15 && falling > Some(0) && fallen == Some(12), "the stretch before turned, its leaves fallen: {turning} {falling:?} {fallen:?}");
+        // A murmuration of starlings, from before it comes until it has gone.
+        let every = eggs::vineyard::FLOCK_EVERY as f64;
+        let wait = (every - eggs::vineyard::FLOCK as f64 - 1.0 - s.built.time).rem_euclid(every);
+        s.both(|h| h.time += wait);
+        s.compare(10, 2.6);
+        let birds = s.seen.iter().map(|(v, _)| v.birds).max();
+        assert!(birds > Some(100), "the starlings in the sky: {birds:?}");
+        s.said("the Vineyard growing");
+    }
+
+    #[test]
+    fn the_magic_vineyard_as_a_program_draws_what_the_built_in_one_draws_zoomed_and_in_other_windows() {
+        let mut s = vineyards();
+        // Two chapters' stretches, the one before turned.
+        s.chapter("Chapter One", 120);
+        s.chapter("Chapter Two", 40);
+        s.compare(3, 1.0 / 60.0);
+        // Zoomed in and out, the whole vineyard nearer and further; other windows and bars.
+        s.zoomed(8);
+        s.windows(3);
+        assert!(s.seen.iter().all(|(v, _)| v.plots.len() == 2), "both stretches drawn");
+        s.said("the Vineyard zoomed");
     }
 
     #[test]
     fn a_program_theme_that_fails_or_draws_more_than_it_may_is_stopped_with_a_word_why() {
-        let world = |frame: &str, data: &str| wat::parse_str(format!(r#"(module (memory (export "memory") 10 512) {data}
+        use platform::program::{Stand, stand_in};
+        // Modules of the world's exports, written by hand, each standing for a program that
+        // misbehaves (no WebAssembly is run under the tests).
+        let world = |frame: &str| wat::parse_str(format!(r#"(module (memory (export "memory") 10 512)
             (func (export "cabi_realloc") (param i32 i32 i32 i32) (result i32) i32.const 600000)
             (func (export "events") (param i32 i32))
             (func (export "frame") (param i32) (result i32) {frame} i32.const 1024)
             (func (export "cabi_post_frame") (param i32)))"#)).unwrap();
+        let (failing, over) = (world("unreachable"), world("nop"));
+        stand_in(&failing, || Stand::Fails("unreachable"));
         let mut h = Harness::new();
-        in_program_theme(&mut h, &world("unreachable", ""), 0.0);
+        in_program_theme(&mut h, &failing, 0.0);
         assert!(program_seen(&h).stopped.is_some_and(|w| w.starts_with("it failed")), "{:?}", program_seen(&h));
         assert!(h.app.shown_status.contains("the theme was stopped"), "{}", h.app.shown_status);
         assert!(h.app.eggs.program.drawn().desk.is_empty(), "the usual desk");
 
-        // One polygon of a point more than a frame may have: its output at 1024, the shape at 2048,
-        // its points (all at 0, 0) at 4096.
-        let le = |v: u32| v.to_le_bytes().iter().map(|b| format!("\\{b:02x}")).collect::<String>();
-        let data = format!(r#"(data (i32.const 1024) "{}{}{}{}{}{}{}") (data (i32.const 2048) "\01\00\00\00{}{}{}")"#,
-            le(2048), le(1), le(0), le(0), le(0), le(0), le(0), le(4096), le(eggs::program::MOST_POINTS as u32 + 1), le(0xff00_00ff));
+        // One polygon of a point more than a frame may have, all its points at 0, 0.
+        let points = eggs::program::MOST_POINTS as u32 + 1;
+        let words = [vec![1, 0, 0, 0, 0, 0, 0, 0, 2, 0xff00_00ff, points], vec![0; 2 * points as usize]].concat();
+        stand_in(&over, move || Stand::Words(words.clone()));
         let mut h = Harness::new();
-        in_program_theme(&mut h, &world("", &data), 0.0);
+        in_program_theme(&mut h, &over, 0.0);
         h.frames(10, vec![], Modifiers::NONE);
         let seen = program_seen(&h);
-        assert!(seen.stopped.as_ref().is_some_and(|w| w.contains("more than the 40000")), "{seen:?}");
+        assert!(seen.stopped.as_ref().is_some_and(|w| w.contains(&format!("more than the {} a theme may", eggs::program::MOST_POINTS))), "{seen:?}");
     }
 
     #[test]

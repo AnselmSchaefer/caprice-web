@@ -296,8 +296,8 @@ pub struct Eggs {
     pub own: own::Shown,
     /// The program theme shown, if one is (R36).
     pub program: program::Shown,
-    /// What the Magic Snow or a program theme painted last frame, when a test asks to keep it
-    /// (`Some`): for the test that the Snow ported to a program draws as the built-in one does.
+    /// What the Magic Snow, the Magic Vineyard or a program theme painted last frame, when a test
+    /// asks to keep it (`Some`): for the tests that their ports to programs draw as they do.
     #[cfg(test)]
     pub painted: Option<Vec<Shape>>,
 }

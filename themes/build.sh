@@ -13,6 +13,7 @@ fixed=(--edition 2024 --target wasm32-unknown-unknown -O -C codegen-units=1 -C p
        --remap-path-prefix "$PWD/theme-sdk=/sdk" --remap-path-prefix "$PWD/themes=/themes")
 rustc +1.99.1 "${fixed[@]}" --crate-type rlib --crate-name theme_sdk theme-sdk/src/lib.rs -o "$out/libtheme_sdk.rlib"
 for dir in themes/*/; do
+    [ -f "$dir/theme.rs" ] || continue
     name=$(basename "$dir")
     mkdir -p "$out/$name"
     rustc +1.99.1 "${fixed[@]}" --crate-type cdylib --crate-name theme -C link-arg=--max-memory=33554432 \
