@@ -97,6 +97,9 @@ jobs:
       - name: Stories API, in the Workers runtime (Miniflare)
         working-directory: web
         run: node --test api/api.test.mjs
+      - name: Theme programs' host in the browser makes the words the tests' host makes (R36)
+        working-directory: web
+        run: node --test theme-worker.test.mjs
       - name: Chromium for the smoke test
         working-directory: web
         # The runner has the libraries Chromium needs; --with-deps also fetches fonts from Ubuntu's

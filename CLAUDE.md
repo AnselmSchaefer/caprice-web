@@ -26,6 +26,9 @@ behaviour**: its rules (§4) say what depends on what, and which tests guard eac
   the Durable Object in memory; about 16 s). Its limits are `vars` in `web/wrangler.jsonc`, among them the
   scenes a day (10 for now) Claude paints for the browser (`/api/scene`, with the secret `ANTHROPIC_API_KEY`; tests
   answer with a stand-in Claude).
+- Theme programs (R36): `themes/build.sh` builds `themes/*/theme.rs` against `theme-sdk/` into
+  `tests/fixtures/` (rustc 1.99.1, `-t wasm32-unknown-unknown`); `node --test web/theme-worker.test.mjs`
+  checks the browser's host against the tests' (`CAPRICE_FIXTURES=1 cargo test` keeps its words).
 - `cargo mutants` for untested code. `/tmp` is a small tmpfs here: set `TMPDIR` to a dir on disk.
 - Word output check: `CAPRICE_SAMPLE_OUT=out.docx cargo test sample_docx`, then
   `soffice --headless --convert-to pdf out.docx`
@@ -35,7 +38,8 @@ behaviour**: its rules (§4) say what depends on what, and which tests guard eac
 
 - `cargo test` passes, and clippy has no warnings beyond the ones already there (15 today).
 - `web/build.sh` builds, and `web/smoke.mjs` passes (it exits 1 on any failed check or page error).
-- `node --test web/api/api.test.mjs` passes when `web/api` or `web/wrangler.jsonc` changed.
+- `node --test web/api/api.test.mjs` passes when `web/api` or `web/wrangler.jsonc` changed, and
+  `node --test web/theme-worker.test.mjs` when theme programs' hosts or fixtures did.
 - CI (`.github/workflows/ci.yml`) runs all of these on every push, plus `cargo deny check`
   (`deny.toml`: vulnerabilities, licences, sources). A new advisory is looked at, not ignored
   blindly: fix it, or name it in `deny.toml` with the reason it does not reach Caprice.
@@ -102,7 +106,8 @@ Full list with reasons and tests in `ARCHITECTURE.md` §4.
     drawn on a page goes into one of them, or it is not printed. None of them moves a page break.
     Tests never reach the system's printers: they set `App::print.spooler`.
     The magic themes' garden, houses, ships, forest, reef, the lake and its igloos, vines and starlings, balloon, dragon and octopus (`eggs.rs`),
-    and a theme of one's own's picture, pieces and carrier (`eggs/own.rs`), are deliberately in none of them, and move no text.
+    and a theme of one's own's picture, pieces and carrier (`eggs/own.rs`), and a theme program's shapes (`eggs/program.rs`),
+    are deliberately in none of them, and move no text.
 12. **A story with a file saves itself; every story keeps versions by its id.** Anything that
     starts another story sets `story_id` and calls `Keeper::opened`. Leaving still offers to drop
     the changes since saving by hand (`as_saved`). `Harness` turns autosave, versions, the
@@ -129,9 +134,19 @@ Full list with reasons and tests in `ARCHITECTURE.md` §4.
     around them into `<defs>` (what they define stays), never with `display`. A new setting or kind
     of motion goes into the guide and the template too.
 
+16. **A theme that is a program (R36) draws only shapes, in a sandbox, a frame behind.** It is
+    checked on every load (`eggs::program::check`: only `host` imported, the world's exports, at
+    most 32 MB declared, WebAssembly 2.0 without SIMD), runs in a worker of its own (wasmi with
+    fuel in tests), and at most 40 000 points a frame are drawn. `caprice:theme@1.0.0` is never
+    edited once published: a change is a new version, taught to both hosts (`web/theme-worker.js`,
+    `platform::program::lift`) and the reader, with `themes/echo` and the fixtures made again.
+    It zooms about the ground the theme names; what it puts in the window is never zoomed. The Magic
+    Snow has a twin, `themes/snow`: a change to `eggs/snow.rs` is made there too (a test compares them
+    frame by frame).
+
 ## Files
 
-- Tracked: `README.md`, `ARCHITECTURE.md`, `CLAUDE.md`.
+- Tracked: `README.md`, `ARCHITECTURE.md`, `CLAUDE.md`; `theme-sdk/`, `themes/` and `tests/fixtures/` (R36).
 - Local, untracked planning notes: `TECHNICAL_DESCRIPTION.md` (older, superseded by
   `ARCHITECTURE.md`), `FORK_REQUIREMENTS.md` (when to fork egui), `CHAPTERS_PLAN.md`, `WEB_PLAN.md`,
   `THEME_PROGRAMS_PLAN.md` (themes Claude writes as sandboxed WebAssembly programs, for the gallery).

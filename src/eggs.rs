@@ -27,7 +27,6 @@
 //! shown is a function of the story and of time, so a test can look at any moment of it.
 
 use std::f32::consts::PI;
-use std::hash::{Hash, Hasher};
 
 use eframe::egui::{self, Color32, Pos2, Rect, Shape, Stroke, Vec2, pos2, vec2};
 
@@ -36,6 +35,7 @@ use crate::theme::Theme;
 
 pub mod forest;
 pub mod own;
+pub mod program;
 pub mod reef;
 pub mod snow;
 pub mod country;
@@ -52,6 +52,8 @@ pub enum Carrier {
     Octopus { right: bool },
     /// A theme of the writer's own's (`own::Shown::carrier`), flying the balloon's way.
     Own { right: bool },
+    /// A program theme's (R36): flown along the balloon's course, drawn and offset by the program.
+    Program { right: bool },
 }
 
 impl Carrier {
@@ -69,7 +71,7 @@ impl Carrier {
     pub fn pace(self) -> f32 {
         match self {
             Carrier::Dragon { .. } => 1.7,
-            Carrier::Balloon { .. } | Carrier::Own { .. } => 1.0,
+            Carrier::Balloon { .. } | Carrier::Own { .. } | Carrier::Program { .. } => 1.0,
             // It drifts down unhurried, as an octopus does.
             Carrier::Octopus { .. } => 1.5,
         }
@@ -292,6 +294,12 @@ pub struct Eggs {
     pub vineyard: Option<vineyard::Seen>,
     /// A theme of the writer's own, as it is shown (`own`).
     pub own: own::Shown,
+    /// The program theme shown, if one is (R36).
+    pub program: program::Shown,
+    /// What the Magic Snow or a program theme painted last frame, when a test asks to keep it
+    /// (`Some`): for the test that the Snow ported to a program draws as the built-in one does.
+    #[cfg(test)]
+    pub painted: Option<Vec<Shape>>,
 }
 
 /// What the Magic Snow keeps while a story is shown, as the reef does: the story and the chapter
@@ -381,7 +389,9 @@ impl Default for Eggs {
             built_for: None, built: 0.0, built_at: 0.0, order: Vec::new(), scale: None, houses: Vec::new(), light: None, sailed_for: None, berths: Vec::new(), rigged: 0.0, rigged_at: 0.0,
             launch: None, ships: Vec::new(), forest_for: None, flowed: 0, born: Vec::new(), merge: None, forest: None,
             reef_for: None, beds: Vec::new(), branched: 0.0, branched_at: 0.0, spawn: None, reef: None,
-            ice: Tended::default(), snow: None, vines: Tended::default(), vineyard: None, own: own::Shown::default() }
+            ice: Tended::default(), snow: None, vines: Tended::default(), vineyard: None, own: own::Shown::default(), program: program::Shown::default(),
+            #[cfg(test)]
+            painted: None }
     }
 }
 
@@ -401,6 +411,15 @@ impl Eggs {
         shown
     }
 
+    /// `shapes` painted on the desk, and kept if a test asked (`painted`).
+    fn paint(&mut self, painter: &egui::Painter, shapes: Vec<Shape>) {
+        #[cfg(test)]
+        if let Some(kept) = &mut self.painted {
+            kept.clone_from(&shapes);
+        }
+        painter.extend(shapes);
+    }
+
     /// Each magic theme to show the garden as it stands at its next frame, as when it is picked.
     fn regrown(&mut self) {
         (self.grown_for, self.built_for, self.forest_for) = (None, None, None);
@@ -408,6 +427,7 @@ impl Eggs {
         self.ice.forget();
         self.vines.forget();
         self.own.regrown();
+        self.program.regrown();
     }
 
     /// A number from 0 to 1, at random.
@@ -428,10 +448,17 @@ pub fn height_of(pages: usize) -> f32 {
 struct Seeds(u64);
 
 impl Seeds {
+    /// The numbers for `k` of the story `story`: from the story's seed (`program::story_seed`), as a
+    /// theme program's are (the SDK's `Seeds::of`), so they are the same on every machine and with
+    /// every Rust. (The standard library's hasher they once came from differs between 32- and
+    /// 64-bit and may change between releases.) Fixed for good: changing it moves every writer's
+    /// garden, houses, ships and igloos.
     fn of(story: &str, k: usize) -> Seeds {
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        (story, k).hash(&mut h);
-        Seeds(h.finish() | 1)
+        // splitmix64: every seed and number gives a number of its own.
+        let mut z = program::story_seed(story) ^ (k as u64).wrapping_add(1).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        Seeds((z ^ (z >> 31)) | 1)
     }
 
     /// A number from `lo` to `hi`.
@@ -535,7 +562,7 @@ pub fn pose_of(by: Carrier, t: f32, duck: Option<f32>) -> Pose {
     let k = by.pace();
     let along = |t: f32| match by {
         Carrier::Dragon { .. } => (t + 0.8 * surge(t)) / k,
-        Carrier::Balloon { .. } | Carrier::Octopus { .. } | Carrier::Own { .. } => t / k,
+        Carrier::Balloon { .. } | Carrier::Octopus { .. } | Carrier::Own { .. } | Carrier::Program { .. } => t / k,
     };
     Pose { t, ..pose(along(t), duck.map(along)) }
 }
@@ -604,7 +631,7 @@ fn rig(by: Carrier, p: Pose, place: Rect, page: Rect, desk: Rect) -> Rig {
     // the title it carries.
     let (right, tall, rope, sizes, reach) = match by {
         // The octopus has a way of its own (`offset`), and is never rigged.
-        Carrier::Balloon { right } | Carrier::Octopus { right } | Carrier::Own { right } => (right, TALL, page.height() * 0.02, (0.035, 0.06), 1.5),
+        Carrier::Balloon { right } | Carrier::Octopus { right } | Carrier::Own { right } | Carrier::Program { right } => (right, TALL, page.height() * 0.02, (0.035, 0.06), 1.5),
         Carrier::Dragon { right } => (right, DRAGON_TALL, 0.0, (0.045, 0.1), 5.0),
     };
     let side = if right { 1.0 } else { -1.0 };
@@ -615,7 +642,7 @@ fn rig(by: Carrier, p: Pose, place: Rect, page: Rect, desk: Rect) -> Rig {
     // The balloon bobs as it floats over; the dragon rises and sinks with its wings, the title
     // with it, less and less as it lowers the title into place.
     let heave = match by {
-        Carrier::Balloon { .. } | Carrier::Octopus { .. } | Carrier::Own { .. } => 0.0,
+        Carrier::Balloon { .. } | Carrier::Octopus { .. } | Carrier::Own { .. } | Carrier::Program { .. } => 0.0,
         Carrier::Dragon { .. } => heave(p.t) * size,
     };
     // How far beyond the title's middle the desk's edge is on the side it comes from, and on the
@@ -627,7 +654,7 @@ fn rig(by: Carrier, p: Pose, place: Rect, page: Rect, desk: Rect) -> Rig {
     let (hook, offset) = if p.hooked {
         let x = place.center().x + side * ((1.0 - p.run) * page.width() * 0.35 + away * come);
         let bob = match by {
-            Carrier::Balloon { .. } | Carrier::Octopus { .. } | Carrier::Own { .. } => (p.run * PI).sin() * page.height() * 0.015,
+            Carrier::Balloon { .. } | Carrier::Octopus { .. } | Carrier::Own { .. } | Carrier::Program { .. } => (p.run * PI).sin() * page.height() * 0.015,
             Carrier::Dragon { .. } => heave * (1.0 - p.lower),
         };
         let load = pos2(x, place.center().y - hang * (1.0 - p.lower) - bob);
@@ -2356,13 +2383,15 @@ impl App {
     pub fn maybe_lift_title(&mut self, ctx: &egui::Context) {
         // A theme of one's own brings it if it has a carrier, once that is drawn.
         let own = (self.themes.theme == Theme::Own && self.eggs.own.carrier_ready()).then_some(Carrier::Own { right: true });
-        let Some(mut by) = Carrier::of(self.themes.theme).or(own) else { return };
+        // A program theme brings it if it asked to (`ask-lift`).
+        let program = (program::program_theme(self).is_some() && self.eggs.program.carries()).then_some(Carrier::Program { right: true });
+        let Some(mut by) = Carrier::of(self.themes.theme).or(own).or(program) else { return };
         let (at, _) = self.doc.para_start(self.selection().0);
         // Only a title with words in it: an empty one is no load.
         if !self.doc.chapters(false).iter().any(|e| e.at == at) || self.eggs.roll() >= self.eggs.odds.unwrap_or(1.0) {
             return;
         }
-        let (Carrier::Balloon { right } | Carrier::Dragon { right } | Carrier::Octopus { right } | Carrier::Own { right }) = &mut by;
+        let (Carrier::Balloon { right } | Carrier::Dragon { right } | Carrier::Octopus { right } | Carrier::Own { right } | Carrier::Program { right }) = &mut by;
         self.eggs.from_right = !self.eggs.from_right;
         *right = self.eggs.from_right;
         let started = ctx.input(|i| i.time);
@@ -2410,6 +2439,15 @@ impl App {
         Some((lift.by, p, lift.at.saturating_sub(start)..end.saturating_sub(start)))
     }
 
+    /// How far the title being brought is from its place: as the program draws it for a program
+    /// theme's carrier, else along its carrier's way.
+    pub fn title_offset(&self, by: Carrier, p: Pose, place: Rect, page: Rect) -> Vec2 {
+        match by {
+            Carrier::Program { .. } => self.eggs.program.title_offset(),
+            _ => offset(by, p, place, page, self.eggs.desk),
+        }
+    }
+
     /// The dragon, the balloon or the octopus over page `i` lying at `page`, if it is at work there.
     pub fn draw_carrier(&self, ui: &egui::Ui, page: Rect, i: usize) {
         let (Some((by, p, _)), Some(place)) = (self.lifting(ui.ctx(), i), self.eggs.place) else { return };
@@ -2418,6 +2456,7 @@ impl App {
             Carrier::Balloon { .. } => balloon(by, p, place, page, self.eggs.desk),
             Carrier::Octopus { right } => reef::octopus_at(right, p, place, page, self.eggs.desk).draw(),
             Carrier::Own { .. } => self.eggs.own.carrier(by, p, place, page, self.eggs.desk, ui.ctx().input(|i| i.time)),
+            Carrier::Program { .. } => self.eggs.program.over(),
         });
     }
 }
@@ -2429,6 +2468,19 @@ mod tests {
     /// The desk the tests' pages lie on: a wide window.
     fn desk() -> Rect {
         Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 900.0))
+    }
+
+    #[test]
+    fn a_story_s_magic_themes_are_laid_out_the_same_everywhere_for_good() {
+        // Fixed numbers, not worked out here: they must not change with the machine, the Rust or
+        // anything else, or every writer's garden, houses and igloos move.
+        let numbers = |story: &str, k: usize| {
+            let mut s = Seeds::of(story, k);
+            (0..3).map(|_| s.next(0.0, 10_000.0) as u32).collect::<Vec<_>>()
+        };
+        assert_eq!(numbers("a story", 0), [6104, 9659, 2332]);
+        assert_eq!(numbers("a story", 99_000), [2060, 946, 4101]);
+        assert_eq!(numbers("0f3c9a1e-7b2d-4c55-9e10-2a6b8d4f1c37", 135_009), [6230, 2463, 4500]);
     }
 
     #[test]

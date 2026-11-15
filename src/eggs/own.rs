@@ -428,6 +428,13 @@ impl App {
     /// the newest finished.
     pub fn draw_own(&mut self, ui: &egui::Ui, area: Rect, page: Rect) {
         self.eggs.own.seen = None;
+        // A theme of one's own that is a program draws itself (R36).
+        if let Some(id) = super::program::program_theme(self) {
+            self.eggs.own.forget();
+            self.draw_program(ui, area, page, &id);
+            return;
+        }
+        self.eggs.program.forget();
         let id = match (self.themes.theme, &self.themes.own_id) {
             (Theme::Own, Some(id)) => id.clone(),
             _ => {

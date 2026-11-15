@@ -6613,6 +6613,389 @@ mod tests {
         assert!(g.app.pdf(&ctx, 0..=0).unwrap() == plain);
     }
 
+    use eggs::program::Event;
+    const FIREFLIES: &[u8] = include_bytes!("../tests/fixtures/fireflies.wasm");
+    const ECHO: &[u8] = include_bytes!("../tests/fixtures/echo.wasm");
+
+    /// A theme program put on the shelf and chosen, its first frame drawn (or it stopped); what
+    /// brings a title comes at `odds`.
+    fn in_program_theme(h: &mut Harness, module: &[u8], odds: f64) -> String {
+        h.frames(3, vec![], Modifiers::NONE);
+        let id = h.app.themes.own.add_program("Fireflies", "", Default::default(), module, None).unwrap();
+        let ctx = h.ctx.clone();
+        h.app.themes.choose_own(&ctx, &id);
+        h.app.eggs.odds = Some(odds);
+        h.frames_until("the program's first frame", |a| a.eggs.program.seen.as_ref().is_some_and(|s| s.frames > 0 || s.stopped.is_some()));
+        id
+    }
+
+    fn program_seen(h: &Harness) -> eggs::program::Seen {
+        h.app.eggs.program.seen.clone().expect("the program theme is drawn")
+    }
+
+    /// The fireflies' shapes besides their lights: the sky, the meadow, two for each jar and thirty
+    /// fireflies.
+    fn fireflies_without_lights(jars: usize) -> usize {
+        2 + 2 * jars + 30
+    }
+
+    #[test]
+    fn a_program_theme_draws_the_desk_and_lights_a_light_in_the_chapter_s_jar_for_each_page() {
+        let mut h = Harness::new();
+        in_program_theme(&mut h, FIREFLIES, 0.0);
+        h.frames(5, vec![], Modifiers::NONE);
+        assert_eq!(program_seen(&h).desk, fireflies_without_lights(1) + 1, "a jar, a light for its page");
+        h.type_text(&"It was nearly midnight and the Prime Minister sat alone in his office. ".repeat(160));
+        let pages = h.app.doc.pages();
+        assert!(pages >= 3, "pages: {pages}");
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(program_seen(&h).desk < fireflies_without_lights(1) + pages, "the new lights come one after another");
+        h.frames(200, vec![], Modifiers::NONE);
+        let seen = program_seen(&h);
+        assert_eq!(seen.desk, fireflies_without_lights(1) + pages, "a light a page");
+        assert!(seen.frames > 200 && seen.stopped.is_none() && seen.over == 0, "{seen:?}");
+    }
+
+    #[test]
+    fn a_program_theme_picked_shows_the_story_as_it_stands_at_once() {
+        let mut h = Harness::new();
+        h.type_text(&"It was nearly midnight and the Prime Minister sat alone in his office. ".repeat(160));
+        let pages = h.app.doc.pages();
+        in_program_theme(&mut h, FIREFLIES, 0.0);
+        h.frames(2, vec![], Modifiers::NONE);
+        assert_eq!(program_seen(&h).desk, fireflies_without_lights(1) + pages, "every light there, none coming");
+    }
+
+    #[test]
+    fn a_program_theme_hears_each_chapter_grow_and_begin_and_a_click_on_the_desk() {
+        let mut h = Harness::new();
+        in_program_theme(&mut h, ECHO, 0.0);
+        let heard = |h: &Harness, k: u8| -> Vec<egui::Pos2> {
+            h.app.eggs.program.drawn().desk.iter().filter_map(|s| match s {
+                egui::Shape::Circle(c) if c.fill.r() == k => Some(c.center),
+                _ => None,
+            }).collect()
+        };
+        assert_eq!(heard(&h, 10).len(), 1, "fresh, once, when picked");
+        let told = |h: &Harness| h.app.eggs.program.told.clone();
+        assert_eq!(told(&h), [Event::Fresh], "only that");
+        chapter_one(&mut h);
+        h.key(Key::Enter, Modifiers::NONE);
+        h.type_text(SENTENCE);
+        h.key(Key::Enter, Modifiers::NONE);
+        h.type_text("Chapter Two");
+        h.click_widget("Chapter");
+        h.key(Key::Enter, Modifiers::NONE);
+        h.type_text(&SENTENCE.repeat(150));
+        h.frames(4, vec![], Modifiers::NONE);
+        let garden = h.app.doc.garden.clone();
+        assert!(garden.len() == 2 && garden[1] >= 2, "{garden:?}");
+        let after = told(&h)[1..].to_vec();
+        assert_eq!(after.iter().filter(|e| matches!(e, Event::Begun(_))).collect::<Vec<_>>(), [&Event::Begun(1)], "the second chapter begun, told once: {after:?}");
+        let grown = |k: u32| after.iter().filter_map(|e| match e { Event::Grown { chapter, pages } if *chapter == k => Some(*pages), _ => None }).collect::<Vec<_>>();
+        assert_eq!(grown(1).last(), Some(&garden[1]), "its pages, as they grew: {after:?}");
+        assert!(grown(1).windows(2).all(|w| w[0] < w[1]), "each told once");
+        // A click on the desk beside the page, told where it is as the theme lays out (at the
+        // fitting zoom, here the zoom it is at); a click on the page is not the theme's.
+        let page = h.app.last_page_rect;
+        let at = egui::pos2(page.left() / 2.0, page.center().y);
+        h.press_at(at, true);
+        h.press_at(at, false);
+        h.click_in_page(egui::vec2(20.0, 20.0));
+        h.frames(2, vec![], Modifiers::NONE);
+        let clicked: Vec<egui::Pos2> = told(&h).iter().filter_map(|e| match e { Event::Clicked(p) => Some(*p), _ => None }).collect();
+        assert_eq!(clicked.len(), 1, "told once: {clicked:?}");
+        assert!((clicked[0] - at).length() < 1.0, "where it was clicked: {clicked:?}, {at:?}");
+        assert!(heard(&h, 13).is_empty() || heard(&h, 13)[0] == clicked[0]);
+    }
+
+    #[test]
+    fn a_program_theme_brings_a_new_chapter_title_with_its_carrier() {
+        let mut h = Harness::new();
+        in_program_theme(&mut h, FIREFLIES, 1.0);
+        h.frames(3, vec![], Modifiers::NONE);
+        chapter_one(&mut h);
+        let lift = h.app.eggs.lift.expect("the big firefly brings the title");
+        assert!(matches!(lift.by, eggs::Carrier::Program { .. }));
+        h.frames(30, vec![], Modifiers::NONE);
+        assert!(program_seen(&h).over > 0, "it draws its carrier over the page");
+        let ctx = h.ctx.clone();
+        let (by, p, _) = h.app.lifting(&ctx, 0).expect("on its way");
+        let place = h.app.eggs.place.expect("where the title goes");
+        assert!(h.app.title_offset(by, p, place, h.app.last_page_rect).length() > 10.0, "the title hangs where the program holds it");
+        h.frames(400, vec![], Modifiers::NONE);
+        assert!(h.app.eggs.lift.is_none() && program_seen(&h).over == 0, "gone again");
+    }
+
+    #[test]
+    fn print_shows_nothing_of_a_program_theme() {
+        let mut h = Harness::new();
+        chapter_one(&mut h);
+        let ctx = h.ctx.clone();
+        let plain = h.app.pdf(&ctx, 0..=0).unwrap();
+        let mut g = Harness::new();
+        in_program_theme(&mut g, FIREFLIES, 1.0);
+        chapter_one(&mut g);
+        g.frames(30, vec![], Modifiers::NONE);
+        assert!(program_seen(&g).desk > 0 && program_seen(&g).over > 0 && g.app.eggs.lift.is_some());
+        let ctx = g.ctx.clone();
+        assert!(g.app.pdf(&ctx, 0..=0).unwrap() == plain);
+    }
+
+    const SNOW: &[u8] = include_bytes!("../tests/fixtures/snow.wasm");
+
+    /// A shape as the Snow's comparison sees it: what kind it is, its points and their colours, its
+    /// width or radius, and a mesh's triangles. A rectangle is the polygon of its corners.
+    #[derive(Debug)]
+    struct Outline {
+        kind: &'static str,
+        points: Vec<egui::Pos2>,
+        colors: Vec<egui::Color32>,
+        size: f32,
+        triangles: Vec<u32>,
+    }
+
+    fn outline(shape: &egui::Shape) -> Option<Outline> {
+        use egui::Shape;
+        let solid = |c: &egui::epaint::ColorMode| match c {
+            egui::epaint::ColorMode::Solid(c) => *c,
+            _ => panic!("a line of one colour"),
+        };
+        let o = |kind, points, colors, size| Some(Outline { kind, points, colors, size, triangles: Vec::new() });
+        match shape {
+            Shape::Noop => None,
+            Shape::Circle(c) => o("circle", vec![c.center], vec![c.fill], c.radius),
+            Shape::Rect(r) => o("polygon", vec![r.rect.left_top(), r.rect.right_top(), r.rect.right_bottom(), r.rect.left_bottom()], vec![r.fill], 0.0),
+            Shape::Path(p) if p.fill != egui::Color32::TRANSPARENT => o("polygon", p.points.clone(), vec![p.fill], 0.0),
+            Shape::Path(p) => o(if p.closed { "closed line" } else { "line" }, p.points.clone(), vec![solid(&p.stroke.color)], p.stroke.width),
+            Shape::LineSegment { points, stroke } => o("segment", points.to_vec(), vec![stroke.color], stroke.width),
+            Shape::Mesh(m) => Some(Outline {
+                kind: "mesh",
+                points: m.vertices.iter().map(|v| v.pos).collect(),
+                colors: m.vertices.iter().map(|v| v.color).collect(),
+                size: 0.0,
+                triangles: m.indices.clone(),
+            }),
+            other => panic!("the Snow draws no {other:?}"),
+        }
+    }
+
+    /// How far apart two frames' shapes are at most: in points (here pixels), and in a colour's
+    /// part (of 255).
+    #[derive(Default, Debug)]
+    struct Apart {
+        shapes: usize,
+        at: f32,
+        color: u8,
+    }
+
+    /// Whether the built-in Snow's frame and the port's draw the same shapes, in the same order,
+    /// and how far apart they are; at the first that differs in kind or count, why.
+    fn apart(built: &[egui::Shape], port: &[egui::Shape]) -> Result<Apart, String> {
+        let (a, b): (Vec<Outline>, Vec<Outline>) = (built.iter().filter_map(outline).collect(), port.iter().filter_map(outline).collect());
+        let mut d = Apart { shapes: a.len(), ..Apart::default() };
+        for (k, (a, b)) in a.iter().zip(&b).enumerate() {
+            if a.kind != b.kind || a.points.len() != b.points.len() || a.triangles != b.triangles {
+                return Err(format!("shape {k} of {}: {a:?}\nthe port's: {b:?}", d.shapes));
+            }
+            let at = a.points.iter().zip(&b.points).map(|(p, q)| p.distance(*q)).fold((a.size - b.size).abs(), f32::max);
+            let color = a.colors.iter().zip(&b.colors).flat_map(|(p, q)| (0..4).map(move |i| p[i].abs_diff(q[i]))).max().unwrap_or(0);
+            (d.at, d.color) = (d.at.max(at), d.color.max(color));
+        }
+        if a.len() != b.len() {
+            return Err(format!("{} shapes, the port {}: the first left over {:?}", a.len(), b.len(), a.get(b.len()).or(b.get(a.len()))));
+        }
+        Ok(d)
+    }
+
+    /// The Magic Snow drawn by Caprice and by its port to a theme program (`themes/snow`), side by
+    /// side: two apps given the same story, window and keys at the same moments, both keeping what
+    /// they paint.
+    struct Snows {
+        built: Harness,
+        port: Harness,
+        /// How far apart the frames compared were at most, and what was in them.
+        worst: Apart,
+        compared: usize,
+        coming: usize,
+        finishing: usize,
+        lit: usize,
+        zooms: Vec<f32>,
+    }
+
+    impl Snows {
+        fn new() -> Snows {
+            let (mut built, mut port) = (Harness::new(), Harness::new());
+            for h in [&mut built, &mut port] {
+                h.app.story_id = "a story".into();
+                h.app.eggs.painted = Some(Vec::new());
+                h.frames(3, vec![], Modifiers::NONE);
+            }
+            let ctx = built.ctx.clone();
+            built.app.themes.choose(&ctx, theme::Theme::Snow);
+            let id = port.app.themes.own.add_program("Snow", "", Default::default(), SNOW, None).unwrap();
+            let ctx = port.ctx.clone();
+            port.app.themes.choose_own(&ctx, &id);
+            let mut s = Snows { built, port, worst: Apart::default(), compared: 0, coming: 0, finishing: 0, lit: 0, zooms: Vec::new() };
+            s.both(|h| {
+                h.app.eggs.odds = Some(0.0);
+                h.wait(1.0);
+            });
+            s
+        }
+
+        fn both(&mut self, f: impl Fn(&mut Harness)) {
+            f(&mut self.built);
+            f(&mut self.port);
+        }
+
+        /// `n` frames, `step` seconds apart, each of the built-in Snow's compared with the port's
+        /// next: a program's shapes are a frame behind (R36), so the port draws in each frame what
+        /// the built-in drew in the one before.
+        fn compare(&mut self, n: usize, step: f64) {
+            for _ in 0..n {
+                let was = self.built.app.eggs.painted.clone().unwrap();
+                let hill = self.built.app.eggs.snow.clone().expect("the built-in Snow drawn");
+                self.both(|h| {
+                    h.time += step - 1.0 / 60.0;
+                    h.frames(1, vec![], Modifiers::NONE);
+                });
+                let seen = program_seen(&self.port);
+                assert!(seen.stopped.is_none() && seen.window == 140, "the port plays, its snow in the window: {seen:?}");
+                let now = self.port.app.eggs.painted.clone().unwrap();
+                let d = apart(&was, &now).unwrap_or_else(|why| panic!("frame {} not the same: {why}", self.compared));
+                assert!(d.at < 0.1 && d.color <= 1, "frame {}: within a tenth of a pixel and a shade: {d:?}", self.compared);
+                let z = self.built.app.zoom / self.built.app.fitting_zoom(self.built.app.eggs.desk);
+                if !self.zooms.iter().any(|w| (w - z).abs() < 0.05) {
+                    self.zooms.push(z);
+                }
+                self.worst = Apart { shapes: self.worst.shapes.max(d.shapes), at: self.worst.at.max(d.at), color: self.worst.color.max(d.color) };
+                self.compared += 1;
+                self.coming += usize::from(hill.coming.is_some());
+                self.finishing += usize::from(hill.finishing);
+                self.lit = self.lit.max(hill.lit);
+            }
+        }
+    }
+
+    #[test]
+    fn the_magic_snow_as_a_program_draws_what_the_built_in_one_draws_frame_by_frame() {
+        let mut s = Snows::new();
+        s.compare(3, 1.0 / 60.0);
+        // A chapter of a few pages: a block cut out of the lake for each, rising and floating onto
+        // the igloo, compared all the way.
+        s.both(|h| {
+            chapter_one(h);
+            h.key(Key::Enter, Modifiers::NONE);
+            h.type_text(&SENTENCE.repeat(120));
+        });
+        s.compare(40, 0.1);
+        assert!(s.coming > 20, "blocks on their way: {}", s.coming);
+        // The next chapter begun: the igloo before finished, its bricks dropping in, its tunnel
+        // built and its light coming on.
+        s.both(|h| {
+            h.key(Key::Enter, Modifiers::NONE);
+            h.type_text("Chapter Two");
+            h.click_widget("Chapter");
+            h.key(Key::Enter, Modifiers::NONE);
+            h.type_text(&SENTENCE.repeat(60));
+        });
+        s.compare(65, 0.1);
+        assert!(s.finishing > 50 && s.lit == 1, "the igloo finished and lit: {} {}", s.finishing, s.lit);
+        // Zoomed in, and out further than the fitting zoom: the hillside nearer and further, the snow
+        // still falling in the window.
+        for (key, times) in [(Key::Equals, 4), (Key::Minus, 7)] {
+            s.both(|h| {
+                for _ in 0..times {
+                    h.key(key, Modifiers::COMMAND);
+                }
+                h.wait(1.0);
+                h.type_text(&SENTENCE.repeat(40));
+            });
+            s.compare(30, 0.1);
+        }
+        assert!(s.zooms.iter().any(|&z| z > 1.4) && s.zooms.iter().any(|&z| z < 0.8), "zoomed in and out: {:?}", s.zooms);
+        // Other windows, the page bar along the foot of the desk and at its side. (While the size
+        // of things follows the window's, over a moment, the port's shapes are zoomed about where
+        // the ground is a frame later than they were laid out for: not compared.)
+        for (width, height, side) in [(900.0, 640.0, ui::BarSide::Bottom), (1700.0, 1000.0, ui::BarSide::Right), (1240.0, 900.0, ui::BarSide::Left)] {
+            s.both(|h| {
+                (h.width, h.height) = (width, height);
+                h.app.bar.side = side;
+                for _ in 0..12 {
+                    h.wait(0.1);
+                }
+            });
+            s.compare(10, 0.25);
+        }
+        eprintln!("compared {} frames of up to {} shapes, zoomed {:?}: at most {} points and {} of 255 apart", s.compared, s.worst.shapes, s.zooms, s.worst.at, s.worst.color);
+    }
+
+    #[test]
+    fn a_program_theme_that_fails_or_draws_more_than_it_may_is_stopped_with_a_word_why() {
+        let world = |frame: &str, data: &str| wat::parse_str(format!(r#"(module (memory (export "memory") 10 512) {data}
+            (func (export "cabi_realloc") (param i32 i32 i32 i32) (result i32) i32.const 600000)
+            (func (export "events") (param i32 i32))
+            (func (export "frame") (param i32) (result i32) {frame} i32.const 1024)
+            (func (export "cabi_post_frame") (param i32)))"#)).unwrap();
+        let mut h = Harness::new();
+        in_program_theme(&mut h, &world("unreachable", ""), 0.0);
+        assert!(program_seen(&h).stopped.is_some_and(|w| w.starts_with("it failed")), "{:?}", program_seen(&h));
+        assert!(h.app.shown_status.contains("the theme was stopped"), "{}", h.app.shown_status);
+        assert!(h.app.eggs.program.drawn().desk.is_empty(), "the usual desk");
+
+        // One polygon of a point more than a frame may have: its output at 1024, the shape at 2048,
+        // its points (all at 0, 0) at 4096.
+        let le = |v: u32| v.to_le_bytes().iter().map(|b| format!("\\{b:02x}")).collect::<String>();
+        let data = format!(r#"(data (i32.const 1024) "{}{}{}{}{}{}{}") (data (i32.const 2048) "\01\00\00\00{}{}{}")"#,
+            le(2048), le(1), le(0), le(0), le(0), le(0), le(0), le(4096), le(eggs::program::MOST_POINTS as u32 + 1), le(0xff00_00ff));
+        let mut h = Harness::new();
+        in_program_theme(&mut h, &world("", &data), 0.0);
+        h.frames(10, vec![], Modifiers::NONE);
+        let seen = program_seen(&h);
+        assert!(seen.stopped.as_ref().is_some_and(|w| w.contains("more than the 40000")), "{seen:?}");
+    }
+
+    #[test]
+    fn a_gallery_theme_is_shown_under_the_gallery_s_name_until_a_byte_of_it_changes() {
+        let dir = std::env::temp_dir().join(format!("caprice-gallery-theme-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let key = ed25519_compact::KeyPair::from_seed(ed25519_compact::Seed::new([7; 32]));
+        let mut signed = own::Signed { name: "Fireflies of the gallery".into(), source: "ab".repeat(32), toolchain: "1.99.1-6c798e2613f0".into(), signature: String::new() };
+        signed.signature = {
+            use base64::Engine;
+            base64::engine::general_purpose::STANDARD.encode(*key.sk.sign(signed.message(FIREFLIES), None))
+        };
+        let mut shelf = own::Shelf::kept_in(Some(dir.clone()));
+        shelf.gallery_key = *key.pk;
+        let id = shelf.add_program("Mine", "", Default::default(), FIREFLIES, Some(signed.clone())).unwrap();
+        assert!(shelf.get(&id).unwrap().from_gallery);
+        assert_eq!(shelf.get(&id).unwrap().shown_name(), "Fireflies of the gallery");
+
+        // Read again from its folder, with Caprice's own key: none of it is the gallery's.
+        let shelf = own::Shelf::kept_in(Some(dir.clone()));
+        assert!(!shelf.get(&id).unwrap().from_gallery, "signed by another key than Caprice's");
+
+        // With a byte of its module changed (in its producers' note, so it still runs), it is the
+        // writer's own, under its own name.
+        let file = dir.join(format!("{id}.wasm"));
+        let mut module = std::fs::read(&file).unwrap();
+        let at = module.windows(5).position(|w| w == b"rustc").expect("the producers' note");
+        module[at] = b'R';
+        assert_eq!(eggs::program::check(&module), Ok(()));
+        std::fs::write(&file, &module).unwrap();
+        let mut shelf = own::Shelf::kept_in(Some(dir.clone()));
+        shelf.gallery_key = *key.pk;
+        shelf.check_signatures();
+        let entry = shelf.get(&id).unwrap();
+        assert!(!entry.from_gallery && entry.shown_name() == "Mine");
+        // And the module as it was is the gallery's again.
+        std::fs::write(&file, FIREFLIES).unwrap();
+        shelf.check_signatures();
+        assert!(shelf.get(&id).unwrap().from_gallery);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn the_theme_gallery_shows_one_s_own_themes_to_choose_export_and_delete() {
         let mut h = Harness::new();

@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+# theme-sdk/: what theme programs are written against (R36), tested with Caprice.
+[workspace]
+members = ["theme-sdk"]
+default-members = [".", "theme-sdk"]
+
 [dependencies]
 base64 = "0.23.1"
 eframe = "0.36.2"
@@ -16,6 +21,17 @@ serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_json = "1.0.151"
 ttf-parser = "0.25"
 zip = { version = "9.2.0", default-features = false, features = ["deflate"] }
+# Checking a theme program (R36): reading its sections, validating it against the fixed features;
+# the version wasmi (the tests' runtime) reads with. And the gallery's signatures over modules.
+wasmparser = { version = "=0.228.0", default-features = false, features = ["std", "validate", "features"] }
+ed25519-compact = { version = "2.6.0", default-features = false }
+sha2 = { version = "0.10.9", default-features = false }
+
+[dev-dependencies]
+# Theme programs run under `cargo test` (R36): with fuel, as the browser's own engine runs them.
+wasmi = { version = "=2.0.0", default-features = false, features = ["stable", "std", "validate", "portable-dispatch"] }
+wat = "1.263.0"
+theme-sdk = { path = "theme-sdk", version = "1.0.0" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rfd = "0.17.2"
@@ -24,8 +40,20 @@ rfd = "0.17.2"
 js-sys = "0.3.107"
 wasm-bindgen = "0.2.130"
 wasm-bindgen-futures = "0.4.80"
-web-sys = { version = "0.3.107", features = ["Window", "Document", "Element", "HtmlElement", "Node", "EventTarget", "HtmlCanvasElement", "Worker", "WorkerOptions", "WorkerType", "console", "PointerEvent"] }
+web-sys = { version = "0.3.107", features = ["Window", "Document", "Element", "HtmlElement", "Node", "EventTarget", "HtmlCanvasElement", "Worker", "WorkerOptions", "WorkerType", "console", "PointerEvent", "MessageEvent", "ErrorEvent"] }
 
+
+# Theme programs run under wasmi in the tests (R36): unoptimized it takes 20 s to run a frame that
+# never ends out of its fuel; optimized, its `portable-dispatch` (not the default, whose optimized
+# dispatch overflows the test threads' stacks).
+[profile.dev.package.wasmi]
+opt-level = 3
+[profile.dev.package.wasmi_core]
+opt-level = 3
+[profile.dev.package.wasmi_ir]
+opt-level = 3
+[profile.dev.package.wasmi_collections]
+opt-level = 3
 
 # Used by cargo-mutants (see .cargo/mutants.toml): no debug info keeps each build small and quick.
 [profile.mutants]

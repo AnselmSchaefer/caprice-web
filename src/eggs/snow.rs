@@ -451,7 +451,11 @@ pub fn places(story: &str, page: Rect, ground: f32, u: f32) -> Vec<Place> {
                 let d = near + step * (j + 0.5 * (level % 2) as f32 + s.next(0.0, 0.3));
                 let foot = pos2(if x < 0.0 { page.left() - d } else { page.right() + d }, y + s.next(-6.0, 6.0) * u);
                 let key = d + s.next(0.0, 380.0) * u + level as f32 * 25.0 * u;
-                out.push((key, Place { foot, size: u * k, haze: 0.5 * depth, w: 100.0 * u * k }));
+                // Not almost straight behind a place nearer down the hill: its igloo would hide
+                // behind that one's (a story in ten had one so).
+                if out.iter().all(|(_, q): &(f32, Place)| q.foot.distance(foot) > 20.0 * u * k) {
+                    out.push((key, Place { foot, size: u * k, haze: 0.5 * depth, w: 100.0 * u * k }));
+                }
             }
             j += 1.0;
         }
@@ -598,7 +602,6 @@ impl App {
         let unzoomed = e.unit(&ctx, area, now);
         let u = unzoomed * z;
         let story = &self.story_id;
-        let painter = ui.painter();
         let ground = area.bottom() - hidden - 14.0 * unzoomed;
         // The hillside is laid out as at the fitting zoom over as much of the desk as shows once
         // zoomed, then zoomed about the foot of the desk under the page's middle, where the
@@ -610,10 +613,10 @@ impl App {
         // comes nearer with the rest.
         let lake = Lake::of(area, ground, unzoomed);
         let laid = [hillside(story, seen_area, anchor.x, ground, unzoomed, now), lake.draw(story, moon(story, anchor.x, ground, unzoomed).x, now)];
-        painter.extend(laid.into_iter().flatten().map(|mut s| {
+        let mut shapes: Vec<Shape> = laid.into_iter().flatten().map(|mut s| {
             s.transform(zoom);
             s
-        }));
+        }).collect();
         let places = places(story, page, ground, u);
         let finishing = e.ice.finishing(now, FINISH);
         let mut seen = Seen { igloos: vec![(Rect::NOTHING, 0, 0.0); n], finishing: finishing.is_some(), ..Seen::default() };
@@ -630,7 +633,7 @@ impl App {
                 _ if k == n - 1 => 0.0,
                 _ => 1.0,
             };
-            painter.extend(igloo.draw(bricks, finished, now));
+            shapes.extend(igloo.draw(bricks, finished, now));
             if k == n - 1 && bricks.fract() > 0.0 {
                 // The block on its way, cut out of the lake below the place, as laid out unzoomed.
                 let below = anchor.x + (place.foot.x - anchor.x) / z;
@@ -644,9 +647,10 @@ impl App {
             seen.igloos[k] = (shown, bricks as usize, finished);
             seen.lit += usize::from(finished >= 1.0);
         }
-        painter.extend(coming.0);
-        painter.extend(coming.1);
-        painter.extend(snowfall(story, area, unzoomed, now));
+        shapes.extend(coming.0);
+        shapes.extend(coming.1);
+        shapes.extend(snowfall(story, area, unzoomed, now));
+        e.paint(ui.painter(), shapes);
         self.eggs.snow = Some(seen);
     }
 }
@@ -827,5 +831,15 @@ mod tests {
         let near = |p: &Place| (p.foot.x - page().left()).abs().min((p.foot.x - page().right()).abs());
         assert!(near(&got[0]) < near(&got[23]), "nearer the page first");
         assert_ne!(places("a story", page(), 880.0, 1.0)[0].foot, places("another story", page(), 880.0, 1.0)[0].foot, "each story its own");
+        // However the story's numbers fall, no igloo stands almost straight behind another.
+        for n in 0..300 {
+            let story = format!("story {n}");
+            let all = places(&story, page(), 880.0, 1.0);
+            let mut taken = Tended::default();
+            let got: Vec<Place> = (0..24).map(|k| all[taken.place(k, all.len(), |p| all[p].in_view(desk(), page()))]).collect();
+            for (k, p) in got.iter().enumerate() {
+                assert!(got[..k].iter().all(|q| q.foot.distance(p.foot) > 20.0 * p.size.min(q.size)), "{story}, {k}: a place of its own: {p:?}");
+            }
+        }
     }
 }

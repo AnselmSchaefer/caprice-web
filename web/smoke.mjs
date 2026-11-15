@@ -294,39 +294,90 @@ check("back closes the story and the welcome shows, and the page stays",
 const template = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../assets/theme-template.svg"));
 const colours = { accent: "#ffcf7a", button: "#262a38", button_hover: "#393d49", caret: "#a6874f", desk: "#1c2433", desk_top: "#151e3c", dock: "#101524", dock_edge: "#363a47", field: "#0c101b", light: "no", on_accent: "#080b0f", text: "#e3e4e8", text_dim: "#9da1ad", text_hot: "#ffffff", thumb: "#99825a" };
 const shelf = [{ id: "smoketheme", name: "Moonlit Bay", about: "", author: "", colours, grows: true, carries: true, added: 0 }];
-await page.evaluate(([files]) => new Promise((done, failed) => {
+// Files put into the browser's own (IndexedDB, as `platform::fs` keeps them), then the page
+// loaded again to read them and a blank story opened.
+const keptInBrowser = (files) => page.evaluate(([files]) => new Promise((done, failed) => {
   const r = indexedDB.open("caprice", 1);
   r.onsuccess = () => {
     const t = r.result.transaction("files", "readwrite");
-    for (const [p, text] of files) t.objectStore("files").put({ bytes: new TextEncoder().encode(text), modified: 0 }, p);
+    for (const [p, bytes] of files) t.objectStore("files").put({ bytes: Uint8Array.from(bytes), modified: 0 }, p);
     t.oncomplete = done;
     t.onerror = () => failed(t.error);
   };
   r.onerror = () => failed(r.error);
-}), [[["/caprice/theme.json", '{"own":"smoketheme"}'], ["/caprice/themes/index.json", JSON.stringify(shelf)], ["/caprice/themes/smoketheme.svg", template.toString()]]]);
-await page.reload();
-await started();
-await click(280, 340);
-await page.waitForTimeout(6000);
-await page.screenshot({ path: `${out}/12-own-theme.png` });
-// Beside the page, low on the desk: the cottage and the pines, not the plain desk.
+}), [files.map(([p, b]) => [p, Array.from(Buffer.from(b))])]);
+const keptAndOpened = async (files, wait) => {
+  await keptInBrowser(files);
+  await page.reload();
+  await started();
+  await click(280, 340);
+  await page.waitForTimeout(wait);
+};
+// Beside the page, low on the desk.
 const beside = () => page.screenshot({ clip: { x: 20, y: 560, width: 220, height: 200 } });
+// The screen's pixel, from a screenshot of it: a WebGL canvas cannot be read back.
+const pixelAt = async (x, y) => {
+  const shot = (await page.screenshot({ clip: { x, y, width: 1, height: 1 } })).toString("base64");
+  return page.evaluate(async png => {
+    const img = new Image();
+    img.src = `data:image/png;base64,${png}`;
+    await img.decode();
+    const g = document.createElement("canvas").getContext("2d");
+    g.drawImage(img, 0, 0);
+    return Array.from(g.getImageData(0, 0, 1, 1).data);
+  }, shot);
+};
+await keptAndOpened([["/caprice/theme.json", '{"own":"smoketheme"}'], ["/caprice/themes/index.json", JSON.stringify(shelf)], ["/caprice/themes/smoketheme.svg", template]], 6000);
+await page.screenshot({ path: `${out}/12-own-theme.png` });
+// The cottage and the pines, not the plain desk.
 const first = await beside();
 await page.waitForTimeout(700);
 const later = await beside();
-// The screen's pixel, from a screenshot of it: a WebGL canvas cannot be read back.
-const shot = (await page.screenshot({ clip: { x: 38, y: 258, width: 1, height: 1 } })).toString("base64");
-const pixel = await page.evaluate(async png => {
-  const img = new Image();
-  img.src = `data:image/png;base64,${png}`;
-  await img.decode();
-  const g = document.createElement("canvas").getContext("2d");
-  g.drawImage(img, 0, 0);
-  return Array.from(g.getImageData(0, 0, 1, 1).data);
-}, shot);
+const pixel = await pixelAt(38, 258);
 // The sky left of the page is a deep blue (#1d2858 or so); Midnight's desk is all but grey.
 check("a theme of one's own covers the desk with its picture", pixel[2] > pixel[0] + 30, pixel.join(","));
 check("and its picture moves", !first.equals(later));
+
+// A theme that is a program (R36), on the shelf as one of one's own: it plays in a worker of its
+// own and draws the desk, its fireflies moving; one whose frame never ends is ended, and the
+// usual desk shows.
+const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), "../tests/fixtures");
+// A grey palette, so the usual desk is told from the program's.
+const grey = { ...colours, desk: "#404040", desk_top: "#404040" };
+const programs = [
+  { id: "smokeprogram", name: "Fireflies", about: "", author: "", colours: grey, grows: true, carries: true, added: 0, program: true },
+  { id: "smokespin", name: "Spin", about: "", author: "", colours: grey, grows: true, carries: true, added: 0, program: true },
+  { id: "smokesnow", name: "Snow", about: "", author: "", colours: grey, grows: true, carries: false, added: 0, program: true },
+];
+// The desk left of the page, where fireflies drift.
+const leftOfPage = () => page.screenshot({ clip: { x: 20, y: 100, width: 360, height: 640 } });
+const themeWorkers = () => page.workers().filter(w => w.url().endsWith("/theme-worker.js")).length;
+await keptAndOpened([["/caprice/theme.json", '{"own":"smokeprogram"}'], ["/caprice/themes/index.json", JSON.stringify(programs)],
+  ["/caprice/themes/smokeprogram.wasm", fs.readFileSync(path.join(fixtures, "fireflies.wasm"))],
+  ["/caprice/themes/smokespin.wasm", fs.readFileSync(path.join(fixtures, "spin.wasm"))],
+  ["/caprice/themes/smokesnow.wasm", fs.readFileSync(path.join(fixtures, "snow.wasm"))]], 3000);
+await page.screenshot({ path: `${out}/13-program-theme.png` });
+const night = await pixelAt(38, 258);
+const flying = await leftOfPage();
+await page.waitForTimeout(500);
+// The night sky the program draws (from 8,12,32 at the top to 30,36,70 at the foot).
+check("a program theme plays in a worker of its own and draws the desk", themeWorkers() === 1 && night[0] < 40 && night[2] > night[0] + 15, `${themeWorkers()} workers, ${night.join(",")}`);
+check("and its fireflies move", !flying.equals(await leftOfPage()));
+// The Magic Snow ported to a program (themes/snow): the snowy hillside at the foot of the desk,
+// pale and blue in the dusk, and the snow falling in the window.
+await keptInBrowser([["/caprice/theme.json", '{"own":"smokesnow"}']]);
+await keptAndOpened([], 3000);
+await page.screenshot({ path: `${out}/13-program-snow.png` });
+const hillside = await pixelAt(38, 700);
+const falling = await leftOfPage();
+await page.waitForTimeout(500);
+check("the Magic Snow as a program draws its hillside", themeWorkers() === 1 && hillside[2] > 200 && hillside[2] >= hillside[0], `${themeWorkers()} workers, ${hillside.join(",")}`);
+check("and its snow falls", !falling.equals(await leftOfPage()));
+await keptInBrowser([["/caprice/theme.json", '{"own":"smokespin"}']]);
+await keptAndOpened([], 4000);
+await page.screenshot({ path: `${out}/14-program-stopped.png` });
+const usual = await pixelAt(38, 258);
+check("a program theme that never answers is ended, and the usual desk shows", themeWorkers() === 0 && Math.abs(usual[2] - usual[0]) < 15, `${themeWorkers()} workers, ${usual.join(",")}`);
 
 check("no errors on the page", errors.length === 0, [...new Set(errors)].slice(0, 8).join("\n  "));
 
