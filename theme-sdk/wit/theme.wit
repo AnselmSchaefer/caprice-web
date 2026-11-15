@@ -14,15 +14,20 @@ interface types {
     /// Convex: egui fills only convex shapes.
     record polygon { points: list<point>, color: color }
     record line { a: point, b: point, width: f32, color: color }
+    /// A line through `points`, back to the first if `closed`: joined smoothly where it bends.
+    record path { points: list<point>, closed: bool, width: f32, color: color }
     record vertex { at: point, color: color }
     /// Coloured triangles, three indices each: gradients.
     record mesh { vertices: list<vertex>, indices: list<u32> }
-    variant shape { circle(circle), polygon(polygon), line(line), mesh(mesh) }
+    variant shape { circle(circle), polygon(polygon), line(line), mesh(mesh), path(path) }
 
     /// The desk and the page as they lie at the fitting zoom, and the page bar if it shows. The
-    /// theme lays out for these; Caprice zooms all it draws by `zoom` at once, about the foot of
-    /// the desk under the page's middle. `unit` is the size of things (1 on a desk 900 high).
-    record desk { area: rect, page: rect, bar: option<rect>, zoom: f32, unit: f32 }
+    /// theme lays out for these; Caprice zooms all it draws behind the pages and over them by
+    /// `zoom` at once, about `ground`: the page's middle across, at the height the theme names
+    /// (`frame-output.ground`), which stays where it is on the screen as the writer zooms. `area`
+    /// is as much of the desk as shows once zoomed; `window` the desk as it lies on the screen,
+    /// at every zoom. `unit` is the size of things (1 on a desk 900 high).
+    record desk { area: rect, page: rect, bar: option<rect>, zoom: f32, unit: f32, window: rect, ground: point }
 
     /// Where the carrier is in its course, as Caprice flies it: 0 to 1 coming in beside the page,
     /// over the title's place, lowering it; whether the title is still held; 0 to 1 rising clear
@@ -34,14 +39,20 @@ interface types {
 
     record frame-input { time: f64, desk: desk, carrier: option<carrier> }
     record frame-output {
-        /// Behind every page.
+        /// Behind every page, zoomed with it.
         desk: list<shape>,
+        /// In front of `desk`, behind every page, laid out on `desk.window` and never zoomed: what
+        /// is in the window rather than on the desk, as snow falling.
+        window: list<shape>,
         /// Over the settled page, on the screen only: for the carrier.
         over: list<shape>,
         /// Milliseconds until the next frame is wanted: 0 while something moves.
         next: u32,
         /// How far the carried title is from its place, so Caprice moves it with the carrier.
         title-offset: point,
+        /// How far above the foot of the desk (the top of the page bar when it lies along it) the
+        /// theme's ground is, in units: Caprice zooms about it from the next frame (`desk.ground`).
+        ground: f32,
     }
 
     record pages { chapter: u32, pages: u32 }

@@ -140,6 +140,9 @@ Full list with reasons and tests in `ARCHITECTURE.md` §4.
     fuel in tests), and at most 40 000 points a frame are drawn. `caprice:theme@1.0.0` is never
     edited once published: a change is a new version, taught to both hosts (`web/theme-worker.js`,
     `platform::program::lift`) and the reader, with `themes/echo` and the fixtures made again.
+    It zooms about the ground the theme names; what it puts in the window is never zoomed. The Magic
+    Snow has a twin, `themes/snow`: a change to `eggs/snow.rs` is made there too (a test compares them
+    frame by frame).
 
 ## Files
 

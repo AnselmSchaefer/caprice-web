@@ -8,8 +8,9 @@
 // plan). The words are the same as `platform::program::lift` makes (web/theme-worker.test.mjs).
 
 const HOST = "caprice:theme/host@1.0.0";
-// The head of the words: desk shapes, over shapes, next, the title's offset (x, y), asked to lift.
-const HEAD = 6;
+// The head of the words: desk shapes, window shapes, over shapes, next, the title's offset (x, y),
+// asked to lift, the ground.
+const HEAD = 8;
 
 // A theme loaded: `frame(ask, words)` runs the events and a frame, and gives back the words
 // (grown as needed) and how many it wrote.
@@ -49,8 +50,8 @@ export async function load(bytes) {
       if (ptr + len * each > size) throw new Error("a list of its output lies outside its memory");
       return [ptr, len];
     };
-    if (ret + 28 > size) throw new Error("its output lies outside its memory");
-    const [desk, nd] = list(ret, 28), [over, no] = list(ret + 8, 28);
+    if (ret + 40 > size) throw new Error("its output lies outside its memory");
+    const [desk, nd] = list(ret, 28), [win, nw] = list(ret + 8, 28), [over, no] = list(ret + 16, 28);
     let n = HEAD;
     const need = (k) => {
       if (n + k > words.length) {
@@ -60,10 +61,10 @@ export async function load(bytes) {
       }
     };
     need(0);
-    words[0] = nd; words[1] = no;
-    words[2] = v.getUint32(ret + 16, true);
-    words[3] = v.getUint32(ret + 20, true); words[4] = v.getUint32(ret + 24, true);
-    words[5] = asked ? 1 : 0;
+    words[0] = nd; words[1] = nw; words[2] = no;
+    words[3] = v.getUint32(ret + 24, true);
+    words[4] = v.getUint32(ret + 28, true); words[5] = v.getUint32(ret + 32, true);
+    words[6] = asked ? 1 : 0; words[7] = v.getUint32(ret + 36, true);
     const shapes = (ptr, len) => {
       for (let i = 0; i < len; i++) {
         const b = ptr + 28 * i, p = b + 4;
@@ -92,12 +93,20 @@ export async function load(bytes) {
           n += 3 + 3 * nv;
           for (let k = 0; k < ni; k++) words[n + k] = v.getUint32(qi + 4 * k, true);
           n += ni;
+        } else if (kind === 4) {
+          const [q, m] = list(p, 8);
+          need(5 + 2 * m);
+          words[n] = 5; words[n + 1] = v.getUint32(p + 16, true); words[n + 2] = v.getUint32(p + 12, true);
+          words[n + 3] = v.getUint8(p + 8); words[n + 4] = m;
+          for (let k = 0; k < 2 * m; k++) words[n + 5 + k] = v.getUint32(q + 4 * k, true);
+          n += 5 + 2 * m;
         } else {
           throw new Error("a shape of no kind");
         }
       }
     };
     shapes(desk, nd);
+    shapes(win, nw);
     shapes(over, no);
     e.cabi_post_frame(ret);
     ask = null;

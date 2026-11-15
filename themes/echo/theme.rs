@@ -6,10 +6,12 @@
 //! the zoom and the size of things (at those two), 4 the bar if it shows (at its top left), 5 the
 //! time (r), 6 the story's seed (its low and high halves, as numbers), 7 its pages and how many
 //! chapters the garden has, 8 each chapter's pages (at its number), then each event heard since
-//! the last frame: 10 fresh, 11 grown (chapter, pages), 12 begun (chapter), 13 clicked (the point).
-//! Over the page, while a title is carried: 20 the pose (enter, run), 21 (lower, hook), 22 (look,
-//! t), 23 hooked and from the left, 24 the title (at its top left, as large as its width). The
-//! carried title is offset by (5, 7), and the next frame wanted in 250 ms.
+//! the last frame: 10 fresh, 11 grown (chapter, pages), 12 begun (chapter), 13 clicked (the point);
+//! 14 the desk on the screen (at its top left, as large as its width), 15 the ground (at it), and
+//! 16 a closed path round the page, as wide as the zoom. In the window: 30 at the ground. Over the
+//! page, while a title is carried: 20 the pose (enter, run), 21 (lower, hook), 22 (look, t), 23
+//! hooked and from the left, 24 the title (at its top left, as large as its width). The carried
+//! title is offset by (5, 7), the next frame wanted in 250 ms, and the ground 3 units up.
 
 use theme_sdk::{Color, Event, Input, Out, Theme, host, pt, theme};
 
@@ -46,6 +48,10 @@ impl Theme for Echo {
         for (k, &pages) in garden.iter().enumerate() {
             d.circle(pt(k as f32, pages as f32), 1.0, which(8));
         }
+        d.circle(input.window.min, input.window.width(), which(14));
+        d.circle(input.ground, 1.0, which(15));
+        d.path(input.page.corners(), true, input.zoom, which(16));
+        out.window.circle(input.ground, 1.0, which(30));
         for e in self.heard.drain(..) {
             match e {
                 Event::Fresh => d.circle(pt(0.0, 0.0), 1.0, which(10)),
@@ -67,6 +73,7 @@ impl Theme for Echo {
         }
         out.title_offset = pt(5.0, 7.0);
         out.next = 250;
+        out.ground = 3.0;
     }
 }
 

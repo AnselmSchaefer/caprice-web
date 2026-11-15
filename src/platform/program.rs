@@ -11,9 +11,9 @@
 use super::Waker;
 
 /// `frame-input` as the canonical ABI lays it out, in bytes.
-pub const INPUT_LEN: usize = 120;
-/// What a frame and the events before it may cost under wasmi (tests only): about six times what
-/// the Magic Snow's frame costs.
+pub const INPUT_LEN: usize = 144;
+/// What a frame and the events before it may cost under wasmi (tests only): about eight times what
+/// the Magic Snow's frame costs at most (17 to 24 million, `themes/snow`).
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub const FUEL: u64 = 200_000_000;
 /// Seconds a program has to load, and then to answer a frame, before it is ended (in the browser:
@@ -38,15 +38,18 @@ pub struct Ask {
     pub lift: bool,
 }
 
-/// A frame's output as flat words: the shapes behind the page and over it, how many of each, when
-/// the next frame is wanted, the carried title's offset, and whether the program asked to carry
-/// titles; then the shapes, desk first. A circle is 1, colour, x, y, r; a convex polygon 2,
-/// colour, n, n points; a line 3, colour, width, two points; a mesh 4, vertices, indices, each
-/// vertex (x, y, colour), the indices. Both hosts (`web/theme-worker.js`, `lift` here) write them.
+/// A frame's output as flat words: how many shapes there are on the desk, in the window and over
+/// the page, when the next frame is wanted, the carried title's offset, whether the program asked
+/// to carry titles, and how high its ground is; then the shapes, the desk's first, then the
+/// window's, then those over the page. A circle is 1, colour, x, y, r; a convex polygon 2, colour,
+/// n, n points; a line 3, colour, width, two points; a mesh 4, vertices, indices, each vertex (x,
+/// y, colour), the indices; a path 5, colour, width, closed, n, n points. Both hosts
+/// (`web/theme-worker.js`, `lift` here) write them.
 pub type Words = Vec<u32>;
 
-/// The words' head: [desk shapes, over shapes, next, offset x, offset y, asked to lift].
-pub const HEAD: usize = 6;
+/// The words' head: [desk shapes, window shapes, over shapes, next, offset x, offset y, asked to
+/// lift, ground].
+pub const HEAD: usize = 8;
 
 /// A program loaded, asked for frames, its newest answer taken.
 pub struct Program(Runner);
@@ -81,8 +84,9 @@ impl Program {
 }
 
 /// The program's `frame-output` at `ret` in its memory `m` lifted into words: the canonical ABI's
-/// layouts (a shape is 28 bytes, its case in the first byte and its payload from the fourth),
-/// every list checked to lie within the memory.
+/// layouts (the output is 40 bytes: three lists, then `next`, the offset and the ground; a shape is
+/// 28 bytes, its case in the first byte and its payload from the fourth), every list checked to lie
+/// within the memory.
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn lift(m: &[u8], ret: usize, asked: bool) -> Result<Words, String> {
     let word = |at: usize| m.get(at..at + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])).ok_or("its output lies outside its memory");
@@ -92,11 +96,11 @@ pub fn lift(m: &[u8], ret: usize, asked: bool) -> Result<Words, String> {
         end.map(|e| ptr..e).ok_or_else(|| "a list of its output lies outside its memory".to_string())
     };
     let mut w = vec![0; HEAD];
-    let (desk, over) = (list(ret, 28)?, list(ret + 8, 28)?);
-    w[0] = (desk.len() / 28) as u32;
-    w[1] = (over.len() / 28) as u32;
-    (w[2], w[3], w[4], w[5]) = (word(ret + 16)?, word(ret + 20)?, word(ret + 24)?, u32::from(asked));
-    for base in desk.step_by(28).chain(over.step_by(28)) {
+    let (desk, window, over) = (list(ret, 28)?, list(ret + 8, 28)?, list(ret + 16, 28)?);
+    (w[0], w[1], w[2]) = ((desk.len() / 28) as u32, (window.len() / 28) as u32, (over.len() / 28) as u32);
+    (w[3], w[4], w[5]) = (word(ret + 24)?, word(ret + 28)?, word(ret + 32)?);
+    (w[6], w[7]) = (u32::from(asked), word(ret + 36)?);
+    for base in desk.step_by(28).chain(window.step_by(28)).chain(over.step_by(28)) {
         let p = base + 4;
         match m[base] {
             0 => w.extend([1, word(p + 12)?, word(p)?, word(p + 4)?, word(p + 8)?]),
@@ -112,6 +116,13 @@ pub fn lift(m: &[u8], ret: usize, asked: bool) -> Result<Words, String> {
                 let (vertices, indices) = (list(p, 12)?, list(p + 8, 4)?);
                 w.extend([4, (vertices.len() / 12) as u32, (indices.len() / 4) as u32]);
                 for q in vertices.step_by(4).chain(indices.step_by(4)) {
+                    w.push(word(q)?);
+                }
+            }
+            4 => {
+                let points = list(p, 8)?;
+                w.extend([5, word(p + 16)?, word(p + 12)?, u32::from(m[p + 8]), (points.len() / 8) as u32]);
+                for q in points.step_by(4) {
                     w.push(word(q)?);
                 }
             }

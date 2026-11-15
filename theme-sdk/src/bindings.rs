@@ -66,7 +66,7 @@ pub unsafe fn _export_events_cabi<T_: Guest>(arg0: *mut u8, arg1: usize) {
 pub unsafe fn _export_frame_cabi<T_: Guest>(arg0: *mut u8) -> *mut u8 {
     unsafe {
         #[cfg(target_arch = "wasm32")] _rt::run_ctors_once();
-        let result29 = {
+        let result35 = {
             let l0 = *arg0.add(0).cast::<f64>();
             let l1 = *arg0.add(8).cast::<f32>();
             let l2 = *arg0.add(12).cast::<f32>();
@@ -79,7 +79,13 @@ pub unsafe fn _export_frame_cabi<T_: Guest>(arg0: *mut u8) -> *mut u8 {
             let l9 = i32::from(*arg0.add(40).cast::<u8>());
             let l14 = *arg0.add(60).cast::<f32>();
             let l15 = *arg0.add(64).cast::<f32>();
-            let l16 = i32::from(*arg0.add(68).cast::<u8>());
+            let l16 = *arg0.add(68).cast::<f32>();
+            let l17 = *arg0.add(72).cast::<f32>();
+            let l18 = *arg0.add(76).cast::<f32>();
+            let l19 = *arg0.add(80).cast::<f32>();
+            let l20 = *arg0.add(84).cast::<f32>();
+            let l21 = *arg0.add(88).cast::<f32>();
+            let l22 = i32::from(*arg0.add(92).cast::<u8>());
             T_::frame(caprice::theme::types::FrameInput {
                 time: l0,
                 desk: caprice::theme::types::Desk {
@@ -128,42 +134,56 @@ pub unsafe fn _export_frame_cabi<T_: Guest>(arg0: *mut u8) -> *mut u8 {
                     },
                     zoom: l14,
                     unit: l15,
+                    window: caprice::theme::types::Rect {
+                        min: caprice::theme::types::Point {
+                            x: l16,
+                            y: l17,
+                        },
+                        max: caprice::theme::types::Point {
+                            x: l18,
+                            y: l19,
+                        },
+                    },
+                    ground: caprice::theme::types::Point {
+                        x: l20,
+                        y: l21,
+                    },
                 },
-                carrier: match l16 {
+                carrier: match l22 {
                     0 => None,
                     1 => {
                         let e = {
-                            let l17 = *arg0.add(72).cast::<f32>();
-                            let l18 = *arg0.add(76).cast::<f32>();
-                            let l19 = *arg0.add(80).cast::<f32>();
-                            let l20 = i32::from(*arg0.add(84).cast::<u8>());
-                            let l21 = *arg0.add(88).cast::<f32>();
-                            let l22 = *arg0.add(92).cast::<f32>();
                             let l23 = *arg0.add(96).cast::<f32>();
-                            let l24 = i32::from(*arg0.add(100).cast::<u8>());
+                            let l24 = *arg0.add(100).cast::<f32>();
                             let l25 = *arg0.add(104).cast::<f32>();
-                            let l26 = *arg0.add(108).cast::<f32>();
+                            let l26 = i32::from(*arg0.add(108).cast::<u8>());
                             let l27 = *arg0.add(112).cast::<f32>();
                             let l28 = *arg0.add(116).cast::<f32>();
+                            let l29 = *arg0.add(120).cast::<f32>();
+                            let l30 = i32::from(*arg0.add(124).cast::<u8>());
+                            let l31 = *arg0.add(128).cast::<f32>();
+                            let l32 = *arg0.add(132).cast::<f32>();
+                            let l33 = *arg0.add(136).cast::<f32>();
+                            let l34 = *arg0.add(140).cast::<f32>();
                             caprice::theme::types::Carrier {
                                 pose: caprice::theme::types::Pose {
-                                    enter: l17,
-                                    run: l18,
-                                    lower: l19,
-                                    hooked: _rt::bool_lift(l20 as u8),
-                                    hook: l21,
-                                    look: l22,
-                                    t: l23,
+                                    enter: l23,
+                                    run: l24,
+                                    lower: l25,
+                                    hooked: _rt::bool_lift(l26 as u8),
+                                    hook: l27,
+                                    look: l28,
+                                    t: l29,
                                 },
-                                from_left: _rt::bool_lift(l24 as u8),
+                                from_left: _rt::bool_lift(l30 as u8),
                                 title: caprice::theme::types::Rect {
                                     min: caprice::theme::types::Point {
-                                        x: l25,
-                                        y: l26,
+                                        x: l31,
+                                        y: l32,
                                     },
                                     max: caprice::theme::types::Point {
-                                        x: l27,
-                                        y: l28,
+                                        x: l33,
+                                        y: l34,
                                     },
                                 },
                             }
@@ -174,267 +194,489 @@ pub unsafe fn _export_frame_cabi<T_: Guest>(arg0: *mut u8) -> *mut u8 {
                 },
             })
         };
-        _rt::cabi_dealloc(arg0, 120, 8);
-        let ptr30 = (&raw mut _RET_AREA.0).cast::<u8>();
+        _rt::cabi_dealloc(arg0, 144, 8);
+        let ptr36 = (&raw mut _RET_AREA.0).cast::<u8>();
         let caprice::theme::types::FrameOutput {
-            desk: desk31,
-            over: over31,
-            next: next31,
-            title_offset: title_offset31,
-        } = result29;
-        let vec43 = desk31;
-        let len43 = vec43.len();
-        let layout43 = _rt::alloc::Layout::from_size_align(
-                vec43.len() * (16 + 3 * ::core::mem::size_of::<*const u8>()),
+            desk: desk37,
+            window: window37,
+            over: over37,
+            next: next37,
+            title_offset: title_offset37,
+            ground: ground37,
+        } = result35;
+        let vec51 = desk37;
+        let len51 = vec51.len();
+        let layout51 = _rt::alloc::Layout::from_size_align(
+                vec51.len() * (16 + 3 * ::core::mem::size_of::<*const u8>()),
                 ::core::mem::size_of::<*const u8>(),
             )
             .unwrap();
-        let (result43, _cleanup43) = crate::rt::Cleanup::new(layout43);
-        if let Some(cleanup) = _cleanup43 {
+        let (result51, _cleanup51) = crate::rt::Cleanup::new(layout51);
+        if let Some(cleanup) = _cleanup51 {
             cleanup.forget();
         }
-        for (i, e) in vec43.into_iter().enumerate() {
-            let base = result43.add(i * (16 + 3 * ::core::mem::size_of::<*const u8>()));
+        for (i, e) in vec51.into_iter().enumerate() {
+            let base = result51.add(i * (16 + 3 * ::core::mem::size_of::<*const u8>()));
             {
-                use caprice::theme::types::Shape as V42;
+                use caprice::theme::types::Shape as V50;
                 match e {
-                    V42::Circle(e) => {
+                    V50::Circle(e) => {
                         *base.add(0).cast::<u8>() = (0i32) as u8;
                         let caprice::theme::types::Circle {
-                            at: at32,
-                            r: r32,
-                            color: color32,
+                            at: at38,
+                            r: r38,
+                            color: color38,
                         } = e;
-                        let caprice::theme::types::Point { x: x33, y: y33 } = at32;
+                        let caprice::theme::types::Point { x: x39, y: y39 } = at38;
                         *base.add(::core::mem::size_of::<*const u8>()).cast::<f32>() = _rt::as_f32(
-                            x33,
+                            x39,
                         );
                         *base
                             .add(4 + 1 * ::core::mem::size_of::<*const u8>())
-                            .cast::<f32>() = _rt::as_f32(y33);
+                            .cast::<f32>() = _rt::as_f32(y39);
                         *base
                             .add(8 + 1 * ::core::mem::size_of::<*const u8>())
-                            .cast::<f32>() = _rt::as_f32(r32);
+                            .cast::<f32>() = _rt::as_f32(r38);
                         *base
                             .add(12 + 1 * ::core::mem::size_of::<*const u8>())
-                            .cast::<i32>() = _rt::as_i32(color32);
+                            .cast::<i32>() = _rt::as_i32(color38);
                     }
-                    V42::Polygon(e) => {
+                    V50::Polygon(e) => {
                         *base.add(0).cast::<u8>() = (1i32) as u8;
                         let caprice::theme::types::Polygon {
-                            points: points34,
-                            color: color34,
+                            points: points40,
+                            color: color40,
                         } = e;
-                        let vec35 = <_ as Into<_rt::Vec<_>>>::into(points34)
-                            .into_boxed_slice();
-                        let ptr35 = vec35.as_ptr().cast::<u8>();
-                        let len35 = vec35.len();
-                        ::core::mem::forget(vec35);
-                        *base
-                            .add(2 * ::core::mem::size_of::<*const u8>())
-                            .cast::<usize>() = len35;
-                        *base
-                            .add(::core::mem::size_of::<*const u8>())
-                            .cast::<*mut u8>() = ptr35.cast_mut();
-                        *base
-                            .add(3 * ::core::mem::size_of::<*const u8>())
-                            .cast::<i32>() = _rt::as_i32(color34);
-                    }
-                    V42::Line(e) => {
-                        *base.add(0).cast::<u8>() = (2i32) as u8;
-                        let caprice::theme::types::Line {
-                            a: a36,
-                            b: b36,
-                            width: width36,
-                            color: color36,
-                        } = e;
-                        let caprice::theme::types::Point { x: x37, y: y37 } = a36;
-                        *base.add(::core::mem::size_of::<*const u8>()).cast::<f32>() = _rt::as_f32(
-                            x37,
-                        );
-                        *base
-                            .add(4 + 1 * ::core::mem::size_of::<*const u8>())
-                            .cast::<f32>() = _rt::as_f32(y37);
-                        let caprice::theme::types::Point { x: x38, y: y38 } = b36;
-                        *base
-                            .add(8 + 1 * ::core::mem::size_of::<*const u8>())
-                            .cast::<f32>() = _rt::as_f32(x38);
-                        *base
-                            .add(12 + 1 * ::core::mem::size_of::<*const u8>())
-                            .cast::<f32>() = _rt::as_f32(y38);
-                        *base
-                            .add(16 + 1 * ::core::mem::size_of::<*const u8>())
-                            .cast::<f32>() = _rt::as_f32(width36);
-                        *base
-                            .add(20 + 1 * ::core::mem::size_of::<*const u8>())
-                            .cast::<i32>() = _rt::as_i32(color36);
-                    }
-                    V42::Mesh(e) => {
-                        *base.add(0).cast::<u8>() = (3i32) as u8;
-                        let caprice::theme::types::Mesh {
-                            vertices: vertices39,
-                            indices: indices39,
-                        } = e;
-                        let vec40 = <_ as Into<_rt::Vec<_>>>::into(vertices39)
-                            .into_boxed_slice();
-                        let ptr40 = vec40.as_ptr().cast::<u8>();
-                        let len40 = vec40.len();
-                        ::core::mem::forget(vec40);
-                        *base
-                            .add(2 * ::core::mem::size_of::<*const u8>())
-                            .cast::<usize>() = len40;
-                        *base
-                            .add(::core::mem::size_of::<*const u8>())
-                            .cast::<*mut u8>() = ptr40.cast_mut();
-                        let vec41 = <_ as Into<_rt::Vec<_>>>::into(indices39)
+                        let vec41 = <_ as Into<_rt::Vec<_>>>::into(points40)
                             .into_boxed_slice();
                         let ptr41 = vec41.as_ptr().cast::<u8>();
                         let len41 = vec41.len();
                         ::core::mem::forget(vec41);
                         *base
-                            .add(4 * ::core::mem::size_of::<*const u8>())
+                            .add(2 * ::core::mem::size_of::<*const u8>())
                             .cast::<usize>() = len41;
                         *base
-                            .add(3 * ::core::mem::size_of::<*const u8>())
+                            .add(::core::mem::size_of::<*const u8>())
                             .cast::<*mut u8>() = ptr41.cast_mut();
+                        *base
+                            .add(3 * ::core::mem::size_of::<*const u8>())
+                            .cast::<i32>() = _rt::as_i32(color40);
                     }
-                }
-            }
-        }
-        *ptr30.add(::core::mem::size_of::<*const u8>()).cast::<usize>() = len43;
-        *ptr30.add(0).cast::<*mut u8>() = result43;
-        let vec55 = over31;
-        let len55 = vec55.len();
-        let layout55 = _rt::alloc::Layout::from_size_align(
-                vec55.len() * (16 + 3 * ::core::mem::size_of::<*const u8>()),
-                ::core::mem::size_of::<*const u8>(),
-            )
-            .unwrap();
-        let (result55, _cleanup55) = crate::rt::Cleanup::new(layout55);
-        if let Some(cleanup) = _cleanup55 {
-            cleanup.forget();
-        }
-        for (i, e) in vec55.into_iter().enumerate() {
-            let base = result55.add(i * (16 + 3 * ::core::mem::size_of::<*const u8>()));
-            {
-                use caprice::theme::types::Shape as V54;
-                match e {
-                    V54::Circle(e) => {
-                        *base.add(0).cast::<u8>() = (0i32) as u8;
-                        let caprice::theme::types::Circle {
-                            at: at44,
-                            r: r44,
-                            color: color44,
+                    V50::Line(e) => {
+                        *base.add(0).cast::<u8>() = (2i32) as u8;
+                        let caprice::theme::types::Line {
+                            a: a42,
+                            b: b42,
+                            width: width42,
+                            color: color42,
                         } = e;
-                        let caprice::theme::types::Point { x: x45, y: y45 } = at44;
+                        let caprice::theme::types::Point { x: x43, y: y43 } = a42;
                         *base.add(::core::mem::size_of::<*const u8>()).cast::<f32>() = _rt::as_f32(
-                            x45,
+                            x43,
                         );
                         *base
                             .add(4 + 1 * ::core::mem::size_of::<*const u8>())
-                            .cast::<f32>() = _rt::as_f32(y45);
+                            .cast::<f32>() = _rt::as_f32(y43);
+                        let caprice::theme::types::Point { x: x44, y: y44 } = b42;
                         *base
                             .add(8 + 1 * ::core::mem::size_of::<*const u8>())
-                            .cast::<f32>() = _rt::as_f32(r44);
+                            .cast::<f32>() = _rt::as_f32(x44);
                         *base
                             .add(12 + 1 * ::core::mem::size_of::<*const u8>())
-                            .cast::<i32>() = _rt::as_i32(color44);
+                            .cast::<f32>() = _rt::as_f32(y44);
+                        *base
+                            .add(16 + 1 * ::core::mem::size_of::<*const u8>())
+                            .cast::<f32>() = _rt::as_f32(width42);
+                        *base
+                            .add(20 + 1 * ::core::mem::size_of::<*const u8>())
+                            .cast::<i32>() = _rt::as_i32(color42);
                     }
-                    V54::Polygon(e) => {
-                        *base.add(0).cast::<u8>() = (1i32) as u8;
-                        let caprice::theme::types::Polygon {
-                            points: points46,
-                            color: color46,
+                    V50::Mesh(e) => {
+                        *base.add(0).cast::<u8>() = (3i32) as u8;
+                        let caprice::theme::types::Mesh {
+                            vertices: vertices45,
+                            indices: indices45,
                         } = e;
-                        let vec47 = <_ as Into<_rt::Vec<_>>>::into(points46)
+                        let vec46 = <_ as Into<_rt::Vec<_>>>::into(vertices45)
+                            .into_boxed_slice();
+                        let ptr46 = vec46.as_ptr().cast::<u8>();
+                        let len46 = vec46.len();
+                        ::core::mem::forget(vec46);
+                        *base
+                            .add(2 * ::core::mem::size_of::<*const u8>())
+                            .cast::<usize>() = len46;
+                        *base
+                            .add(::core::mem::size_of::<*const u8>())
+                            .cast::<*mut u8>() = ptr46.cast_mut();
+                        let vec47 = <_ as Into<_rt::Vec<_>>>::into(indices45)
                             .into_boxed_slice();
                         let ptr47 = vec47.as_ptr().cast::<u8>();
                         let len47 = vec47.len();
                         ::core::mem::forget(vec47);
                         *base
-                            .add(2 * ::core::mem::size_of::<*const u8>())
+                            .add(4 * ::core::mem::size_of::<*const u8>())
                             .cast::<usize>() = len47;
                         *base
-                            .add(::core::mem::size_of::<*const u8>())
-                            .cast::<*mut u8>() = ptr47.cast_mut();
-                        *base
                             .add(3 * ::core::mem::size_of::<*const u8>())
-                            .cast::<i32>() = _rt::as_i32(color46);
+                            .cast::<*mut u8>() = ptr47.cast_mut();
                     }
-                    V54::Line(e) => {
-                        *base.add(0).cast::<u8>() = (2i32) as u8;
-                        let caprice::theme::types::Line {
-                            a: a48,
-                            b: b48,
+                    V50::Path(e) => {
+                        *base.add(0).cast::<u8>() = (4i32) as u8;
+                        let caprice::theme::types::Path {
+                            points: points48,
+                            closed: closed48,
                             width: width48,
                             color: color48,
                         } = e;
-                        let caprice::theme::types::Point { x: x49, y: y49 } = a48;
-                        *base.add(::core::mem::size_of::<*const u8>()).cast::<f32>() = _rt::as_f32(
-                            x49,
-                        );
-                        *base
-                            .add(4 + 1 * ::core::mem::size_of::<*const u8>())
-                            .cast::<f32>() = _rt::as_f32(y49);
-                        let caprice::theme::types::Point { x: x50, y: y50 } = b48;
-                        *base
-                            .add(8 + 1 * ::core::mem::size_of::<*const u8>())
-                            .cast::<f32>() = _rt::as_f32(x50);
-                        *base
-                            .add(12 + 1 * ::core::mem::size_of::<*const u8>())
-                            .cast::<f32>() = _rt::as_f32(y50);
-                        *base
-                            .add(16 + 1 * ::core::mem::size_of::<*const u8>())
-                            .cast::<f32>() = _rt::as_f32(width48);
-                        *base
-                            .add(20 + 1 * ::core::mem::size_of::<*const u8>())
-                            .cast::<i32>() = _rt::as_i32(color48);
-                    }
-                    V54::Mesh(e) => {
-                        *base.add(0).cast::<u8>() = (3i32) as u8;
-                        let caprice::theme::types::Mesh {
-                            vertices: vertices51,
-                            indices: indices51,
-                        } = e;
-                        let vec52 = <_ as Into<_rt::Vec<_>>>::into(vertices51)
+                        let vec49 = <_ as Into<_rt::Vec<_>>>::into(points48)
                             .into_boxed_slice();
-                        let ptr52 = vec52.as_ptr().cast::<u8>();
-                        let len52 = vec52.len();
-                        ::core::mem::forget(vec52);
+                        let ptr49 = vec49.as_ptr().cast::<u8>();
+                        let len49 = vec49.len();
+                        ::core::mem::forget(vec49);
                         *base
                             .add(2 * ::core::mem::size_of::<*const u8>())
-                            .cast::<usize>() = len52;
+                            .cast::<usize>() = len49;
                         *base
                             .add(::core::mem::size_of::<*const u8>())
-                            .cast::<*mut u8>() = ptr52.cast_mut();
-                        let vec53 = <_ as Into<_rt::Vec<_>>>::into(indices51)
-                            .into_boxed_slice();
-                        let ptr53 = vec53.as_ptr().cast::<u8>();
-                        let len53 = vec53.len();
-                        ::core::mem::forget(vec53);
-                        *base
-                            .add(4 * ::core::mem::size_of::<*const u8>())
-                            .cast::<usize>() = len53;
+                            .cast::<*mut u8>() = ptr49.cast_mut();
                         *base
                             .add(3 * ::core::mem::size_of::<*const u8>())
-                            .cast::<*mut u8>() = ptr53.cast_mut();
+                            .cast::<u8>() = (match closed48 {
+                            true => 1,
+                            false => 0,
+                        }) as u8;
+                        *base
+                            .add(4 + 3 * ::core::mem::size_of::<*const u8>())
+                            .cast::<f32>() = _rt::as_f32(width48);
+                        *base
+                            .add(8 + 3 * ::core::mem::size_of::<*const u8>())
+                            .cast::<i32>() = _rt::as_i32(color48);
                     }
                 }
             }
         }
-        *ptr30.add(3 * ::core::mem::size_of::<*const u8>()).cast::<usize>() = len55;
-        *ptr30.add(2 * ::core::mem::size_of::<*const u8>()).cast::<*mut u8>() = result55;
-        *ptr30.add(4 * ::core::mem::size_of::<*const u8>()).cast::<i32>() = _rt::as_i32(
-            next31,
+        *ptr36.add(::core::mem::size_of::<*const u8>()).cast::<usize>() = len51;
+        *ptr36.add(0).cast::<*mut u8>() = result51;
+        let vec65 = window37;
+        let len65 = vec65.len();
+        let layout65 = _rt::alloc::Layout::from_size_align(
+                vec65.len() * (16 + 3 * ::core::mem::size_of::<*const u8>()),
+                ::core::mem::size_of::<*const u8>(),
+            )
+            .unwrap();
+        let (result65, _cleanup65) = crate::rt::Cleanup::new(layout65);
+        if let Some(cleanup) = _cleanup65 {
+            cleanup.forget();
+        }
+        for (i, e) in vec65.into_iter().enumerate() {
+            let base = result65.add(i * (16 + 3 * ::core::mem::size_of::<*const u8>()));
+            {
+                use caprice::theme::types::Shape as V64;
+                match e {
+                    V64::Circle(e) => {
+                        *base.add(0).cast::<u8>() = (0i32) as u8;
+                        let caprice::theme::types::Circle {
+                            at: at52,
+                            r: r52,
+                            color: color52,
+                        } = e;
+                        let caprice::theme::types::Point { x: x53, y: y53 } = at52;
+                        *base.add(::core::mem::size_of::<*const u8>()).cast::<f32>() = _rt::as_f32(
+                            x53,
+                        );
+                        *base
+                            .add(4 + 1 * ::core::mem::size_of::<*const u8>())
+                            .cast::<f32>() = _rt::as_f32(y53);
+                        *base
+                            .add(8 + 1 * ::core::mem::size_of::<*const u8>())
+                            .cast::<f32>() = _rt::as_f32(r52);
+                        *base
+                            .add(12 + 1 * ::core::mem::size_of::<*const u8>())
+                            .cast::<i32>() = _rt::as_i32(color52);
+                    }
+                    V64::Polygon(e) => {
+                        *base.add(0).cast::<u8>() = (1i32) as u8;
+                        let caprice::theme::types::Polygon {
+                            points: points54,
+                            color: color54,
+                        } = e;
+                        let vec55 = <_ as Into<_rt::Vec<_>>>::into(points54)
+                            .into_boxed_slice();
+                        let ptr55 = vec55.as_ptr().cast::<u8>();
+                        let len55 = vec55.len();
+                        ::core::mem::forget(vec55);
+                        *base
+                            .add(2 * ::core::mem::size_of::<*const u8>())
+                            .cast::<usize>() = len55;
+                        *base
+                            .add(::core::mem::size_of::<*const u8>())
+                            .cast::<*mut u8>() = ptr55.cast_mut();
+                        *base
+                            .add(3 * ::core::mem::size_of::<*const u8>())
+                            .cast::<i32>() = _rt::as_i32(color54);
+                    }
+                    V64::Line(e) => {
+                        *base.add(0).cast::<u8>() = (2i32) as u8;
+                        let caprice::theme::types::Line {
+                            a: a56,
+                            b: b56,
+                            width: width56,
+                            color: color56,
+                        } = e;
+                        let caprice::theme::types::Point { x: x57, y: y57 } = a56;
+                        *base.add(::core::mem::size_of::<*const u8>()).cast::<f32>() = _rt::as_f32(
+                            x57,
+                        );
+                        *base
+                            .add(4 + 1 * ::core::mem::size_of::<*const u8>())
+                            .cast::<f32>() = _rt::as_f32(y57);
+                        let caprice::theme::types::Point { x: x58, y: y58 } = b56;
+                        *base
+                            .add(8 + 1 * ::core::mem::size_of::<*const u8>())
+                            .cast::<f32>() = _rt::as_f32(x58);
+                        *base
+                            .add(12 + 1 * ::core::mem::size_of::<*const u8>())
+                            .cast::<f32>() = _rt::as_f32(y58);
+                        *base
+                            .add(16 + 1 * ::core::mem::size_of::<*const u8>())
+                            .cast::<f32>() = _rt::as_f32(width56);
+                        *base
+                            .add(20 + 1 * ::core::mem::size_of::<*const u8>())
+                            .cast::<i32>() = _rt::as_i32(color56);
+                    }
+                    V64::Mesh(e) => {
+                        *base.add(0).cast::<u8>() = (3i32) as u8;
+                        let caprice::theme::types::Mesh {
+                            vertices: vertices59,
+                            indices: indices59,
+                        } = e;
+                        let vec60 = <_ as Into<_rt::Vec<_>>>::into(vertices59)
+                            .into_boxed_slice();
+                        let ptr60 = vec60.as_ptr().cast::<u8>();
+                        let len60 = vec60.len();
+                        ::core::mem::forget(vec60);
+                        *base
+                            .add(2 * ::core::mem::size_of::<*const u8>())
+                            .cast::<usize>() = len60;
+                        *base
+                            .add(::core::mem::size_of::<*const u8>())
+                            .cast::<*mut u8>() = ptr60.cast_mut();
+                        let vec61 = <_ as Into<_rt::Vec<_>>>::into(indices59)
+                            .into_boxed_slice();
+                        let ptr61 = vec61.as_ptr().cast::<u8>();
+                        let len61 = vec61.len();
+                        ::core::mem::forget(vec61);
+                        *base
+                            .add(4 * ::core::mem::size_of::<*const u8>())
+                            .cast::<usize>() = len61;
+                        *base
+                            .add(3 * ::core::mem::size_of::<*const u8>())
+                            .cast::<*mut u8>() = ptr61.cast_mut();
+                    }
+                    V64::Path(e) => {
+                        *base.add(0).cast::<u8>() = (4i32) as u8;
+                        let caprice::theme::types::Path {
+                            points: points62,
+                            closed: closed62,
+                            width: width62,
+                            color: color62,
+                        } = e;
+                        let vec63 = <_ as Into<_rt::Vec<_>>>::into(points62)
+                            .into_boxed_slice();
+                        let ptr63 = vec63.as_ptr().cast::<u8>();
+                        let len63 = vec63.len();
+                        ::core::mem::forget(vec63);
+                        *base
+                            .add(2 * ::core::mem::size_of::<*const u8>())
+                            .cast::<usize>() = len63;
+                        *base
+                            .add(::core::mem::size_of::<*const u8>())
+                            .cast::<*mut u8>() = ptr63.cast_mut();
+                        *base
+                            .add(3 * ::core::mem::size_of::<*const u8>())
+                            .cast::<u8>() = (match closed62 {
+                            true => 1,
+                            false => 0,
+                        }) as u8;
+                        *base
+                            .add(4 + 3 * ::core::mem::size_of::<*const u8>())
+                            .cast::<f32>() = _rt::as_f32(width62);
+                        *base
+                            .add(8 + 3 * ::core::mem::size_of::<*const u8>())
+                            .cast::<i32>() = _rt::as_i32(color62);
+                    }
+                }
+            }
+        }
+        *ptr36.add(3 * ::core::mem::size_of::<*const u8>()).cast::<usize>() = len65;
+        *ptr36.add(2 * ::core::mem::size_of::<*const u8>()).cast::<*mut u8>() = result65;
+        let vec79 = over37;
+        let len79 = vec79.len();
+        let layout79 = _rt::alloc::Layout::from_size_align(
+                vec79.len() * (16 + 3 * ::core::mem::size_of::<*const u8>()),
+                ::core::mem::size_of::<*const u8>(),
+            )
+            .unwrap();
+        let (result79, _cleanup79) = crate::rt::Cleanup::new(layout79);
+        if let Some(cleanup) = _cleanup79 {
+            cleanup.forget();
+        }
+        for (i, e) in vec79.into_iter().enumerate() {
+            let base = result79.add(i * (16 + 3 * ::core::mem::size_of::<*const u8>()));
+            {
+                use caprice::theme::types::Shape as V78;
+                match e {
+                    V78::Circle(e) => {
+                        *base.add(0).cast::<u8>() = (0i32) as u8;
+                        let caprice::theme::types::Circle {
+                            at: at66,
+                            r: r66,
+                            color: color66,
+                        } = e;
+                        let caprice::theme::types::Point { x: x67, y: y67 } = at66;
+                        *base.add(::core::mem::size_of::<*const u8>()).cast::<f32>() = _rt::as_f32(
+                            x67,
+                        );
+                        *base
+                            .add(4 + 1 * ::core::mem::size_of::<*const u8>())
+                            .cast::<f32>() = _rt::as_f32(y67);
+                        *base
+                            .add(8 + 1 * ::core::mem::size_of::<*const u8>())
+                            .cast::<f32>() = _rt::as_f32(r66);
+                        *base
+                            .add(12 + 1 * ::core::mem::size_of::<*const u8>())
+                            .cast::<i32>() = _rt::as_i32(color66);
+                    }
+                    V78::Polygon(e) => {
+                        *base.add(0).cast::<u8>() = (1i32) as u8;
+                        let caprice::theme::types::Polygon {
+                            points: points68,
+                            color: color68,
+                        } = e;
+                        let vec69 = <_ as Into<_rt::Vec<_>>>::into(points68)
+                            .into_boxed_slice();
+                        let ptr69 = vec69.as_ptr().cast::<u8>();
+                        let len69 = vec69.len();
+                        ::core::mem::forget(vec69);
+                        *base
+                            .add(2 * ::core::mem::size_of::<*const u8>())
+                            .cast::<usize>() = len69;
+                        *base
+                            .add(::core::mem::size_of::<*const u8>())
+                            .cast::<*mut u8>() = ptr69.cast_mut();
+                        *base
+                            .add(3 * ::core::mem::size_of::<*const u8>())
+                            .cast::<i32>() = _rt::as_i32(color68);
+                    }
+                    V78::Line(e) => {
+                        *base.add(0).cast::<u8>() = (2i32) as u8;
+                        let caprice::theme::types::Line {
+                            a: a70,
+                            b: b70,
+                            width: width70,
+                            color: color70,
+                        } = e;
+                        let caprice::theme::types::Point { x: x71, y: y71 } = a70;
+                        *base.add(::core::mem::size_of::<*const u8>()).cast::<f32>() = _rt::as_f32(
+                            x71,
+                        );
+                        *base
+                            .add(4 + 1 * ::core::mem::size_of::<*const u8>())
+                            .cast::<f32>() = _rt::as_f32(y71);
+                        let caprice::theme::types::Point { x: x72, y: y72 } = b70;
+                        *base
+                            .add(8 + 1 * ::core::mem::size_of::<*const u8>())
+                            .cast::<f32>() = _rt::as_f32(x72);
+                        *base
+                            .add(12 + 1 * ::core::mem::size_of::<*const u8>())
+                            .cast::<f32>() = _rt::as_f32(y72);
+                        *base
+                            .add(16 + 1 * ::core::mem::size_of::<*const u8>())
+                            .cast::<f32>() = _rt::as_f32(width70);
+                        *base
+                            .add(20 + 1 * ::core::mem::size_of::<*const u8>())
+                            .cast::<i32>() = _rt::as_i32(color70);
+                    }
+                    V78::Mesh(e) => {
+                        *base.add(0).cast::<u8>() = (3i32) as u8;
+                        let caprice::theme::types::Mesh {
+                            vertices: vertices73,
+                            indices: indices73,
+                        } = e;
+                        let vec74 = <_ as Into<_rt::Vec<_>>>::into(vertices73)
+                            .into_boxed_slice();
+                        let ptr74 = vec74.as_ptr().cast::<u8>();
+                        let len74 = vec74.len();
+                        ::core::mem::forget(vec74);
+                        *base
+                            .add(2 * ::core::mem::size_of::<*const u8>())
+                            .cast::<usize>() = len74;
+                        *base
+                            .add(::core::mem::size_of::<*const u8>())
+                            .cast::<*mut u8>() = ptr74.cast_mut();
+                        let vec75 = <_ as Into<_rt::Vec<_>>>::into(indices73)
+                            .into_boxed_slice();
+                        let ptr75 = vec75.as_ptr().cast::<u8>();
+                        let len75 = vec75.len();
+                        ::core::mem::forget(vec75);
+                        *base
+                            .add(4 * ::core::mem::size_of::<*const u8>())
+                            .cast::<usize>() = len75;
+                        *base
+                            .add(3 * ::core::mem::size_of::<*const u8>())
+                            .cast::<*mut u8>() = ptr75.cast_mut();
+                    }
+                    V78::Path(e) => {
+                        *base.add(0).cast::<u8>() = (4i32) as u8;
+                        let caprice::theme::types::Path {
+                            points: points76,
+                            closed: closed76,
+                            width: width76,
+                            color: color76,
+                        } = e;
+                        let vec77 = <_ as Into<_rt::Vec<_>>>::into(points76)
+                            .into_boxed_slice();
+                        let ptr77 = vec77.as_ptr().cast::<u8>();
+                        let len77 = vec77.len();
+                        ::core::mem::forget(vec77);
+                        *base
+                            .add(2 * ::core::mem::size_of::<*const u8>())
+                            .cast::<usize>() = len77;
+                        *base
+                            .add(::core::mem::size_of::<*const u8>())
+                            .cast::<*mut u8>() = ptr77.cast_mut();
+                        *base
+                            .add(3 * ::core::mem::size_of::<*const u8>())
+                            .cast::<u8>() = (match closed76 {
+                            true => 1,
+                            false => 0,
+                        }) as u8;
+                        *base
+                            .add(4 + 3 * ::core::mem::size_of::<*const u8>())
+                            .cast::<f32>() = _rt::as_f32(width76);
+                        *base
+                            .add(8 + 3 * ::core::mem::size_of::<*const u8>())
+                            .cast::<i32>() = _rt::as_i32(color76);
+                    }
+                }
+            }
+        }
+        *ptr36.add(5 * ::core::mem::size_of::<*const u8>()).cast::<usize>() = len79;
+        *ptr36.add(4 * ::core::mem::size_of::<*const u8>()).cast::<*mut u8>() = result79;
+        *ptr36.add(6 * ::core::mem::size_of::<*const u8>()).cast::<i32>() = _rt::as_i32(
+            next37,
         );
-        let caprice::theme::types::Point { x: x56, y: y56 } = title_offset31;
-        *ptr30.add(4 + 4 * ::core::mem::size_of::<*const u8>()).cast::<f32>() = _rt::as_f32(
-            x56,
+        let caprice::theme::types::Point { x: x80, y: y80 } = title_offset37;
+        *ptr36.add(4 + 6 * ::core::mem::size_of::<*const u8>()).cast::<f32>() = _rt::as_f32(
+            x80,
         );
-        *ptr30.add(8 + 4 * ::core::mem::size_of::<*const u8>()).cast::<f32>() = _rt::as_f32(
-            y56,
+        *ptr36.add(8 + 6 * ::core::mem::size_of::<*const u8>()).cast::<f32>() = _rt::as_f32(
+            y80,
         );
-        ptr30
+        *ptr36.add(12 + 6 * ::core::mem::size_of::<*const u8>()).cast::<f32>() = _rt::as_f32(
+            ground37,
+        );
+        ptr36
     }
 }
 #[doc(hidden)]
@@ -443,10 +685,10 @@ pub unsafe fn __post_return_frame<T_: Guest>(arg0: *mut u8) {
     unsafe {
         let l0 = *arg0.add(0).cast::<*mut u8>();
         let l1 = *arg0.add(::core::mem::size_of::<*const u8>()).cast::<usize>();
-        let base12 = l0;
-        let len12 = l1;
-        for i in 0..len12 {
-            let base = base12.add(i * (16 + 3 * ::core::mem::size_of::<*const u8>()));
+        let base15 = l0;
+        let len15 = l1;
+        for i in 0..len15 {
+            let base = base15.add(i * (16 + 3 * ::core::mem::size_of::<*const u8>()));
             {
                 let l2 = i32::from(*base.add(0).cast::<u8>());
                 match l2 {
@@ -463,7 +705,7 @@ pub unsafe fn __post_return_frame<T_: Guest>(arg0: *mut u8) {
                         _rt::cabi_dealloc(base5, len5 * 8, 4);
                     }
                     2 => {}
-                    _ => {
+                    3 => {
                         let l6 = *base
                             .add(::core::mem::size_of::<*const u8>())
                             .cast::<*mut u8>();
@@ -483,37 +725,36 @@ pub unsafe fn __post_return_frame<T_: Guest>(arg0: *mut u8) {
                         let len11 = l10;
                         _rt::cabi_dealloc(base11, len11 * 4, 4);
                     }
+                    _ => {
+                        let l12 = *base
+                            .add(::core::mem::size_of::<*const u8>())
+                            .cast::<*mut u8>();
+                        let l13 = *base
+                            .add(2 * ::core::mem::size_of::<*const u8>())
+                            .cast::<usize>();
+                        let base14 = l12;
+                        let len14 = l13;
+                        _rt::cabi_dealloc(base14, len14 * 8, 4);
+                    }
                 }
             }
         }
         _rt::cabi_dealloc(
-            base12,
-            len12 * (16 + 3 * ::core::mem::size_of::<*const u8>()),
+            base15,
+            len15 * (16 + 3 * ::core::mem::size_of::<*const u8>()),
             ::core::mem::size_of::<*const u8>(),
         );
-        let l13 = *arg0.add(2 * ::core::mem::size_of::<*const u8>()).cast::<*mut u8>();
-        let l14 = *arg0.add(3 * ::core::mem::size_of::<*const u8>()).cast::<usize>();
-        let base25 = l13;
-        let len25 = l14;
-        for i in 0..len25 {
-            let base = base25.add(i * (16 + 3 * ::core::mem::size_of::<*const u8>()));
+        let l16 = *arg0.add(2 * ::core::mem::size_of::<*const u8>()).cast::<*mut u8>();
+        let l17 = *arg0.add(3 * ::core::mem::size_of::<*const u8>()).cast::<usize>();
+        let base31 = l16;
+        let len31 = l17;
+        for i in 0..len31 {
+            let base = base31.add(i * (16 + 3 * ::core::mem::size_of::<*const u8>()));
             {
-                let l15 = i32::from(*base.add(0).cast::<u8>());
-                match l15 {
+                let l18 = i32::from(*base.add(0).cast::<u8>());
+                match l18 {
                     0 => {}
                     1 => {
-                        let l16 = *base
-                            .add(::core::mem::size_of::<*const u8>())
-                            .cast::<*mut u8>();
-                        let l17 = *base
-                            .add(2 * ::core::mem::size_of::<*const u8>())
-                            .cast::<usize>();
-                        let base18 = l16;
-                        let len18 = l17;
-                        _rt::cabi_dealloc(base18, len18 * 8, 4);
-                    }
-                    2 => {}
-                    _ => {
                         let l19 = *base
                             .add(::core::mem::size_of::<*const u8>())
                             .cast::<*mut u8>();
@@ -522,23 +763,107 @@ pub unsafe fn __post_return_frame<T_: Guest>(arg0: *mut u8) {
                             .cast::<usize>();
                         let base21 = l19;
                         let len21 = l20;
-                        _rt::cabi_dealloc(base21, len21 * 12, 4);
+                        _rt::cabi_dealloc(base21, len21 * 8, 4);
+                    }
+                    2 => {}
+                    3 => {
                         let l22 = *base
-                            .add(3 * ::core::mem::size_of::<*const u8>())
+                            .add(::core::mem::size_of::<*const u8>())
                             .cast::<*mut u8>();
                         let l23 = *base
-                            .add(4 * ::core::mem::size_of::<*const u8>())
+                            .add(2 * ::core::mem::size_of::<*const u8>())
                             .cast::<usize>();
                         let base24 = l22;
                         let len24 = l23;
-                        _rt::cabi_dealloc(base24, len24 * 4, 4);
+                        _rt::cabi_dealloc(base24, len24 * 12, 4);
+                        let l25 = *base
+                            .add(3 * ::core::mem::size_of::<*const u8>())
+                            .cast::<*mut u8>();
+                        let l26 = *base
+                            .add(4 * ::core::mem::size_of::<*const u8>())
+                            .cast::<usize>();
+                        let base27 = l25;
+                        let len27 = l26;
+                        _rt::cabi_dealloc(base27, len27 * 4, 4);
+                    }
+                    _ => {
+                        let l28 = *base
+                            .add(::core::mem::size_of::<*const u8>())
+                            .cast::<*mut u8>();
+                        let l29 = *base
+                            .add(2 * ::core::mem::size_of::<*const u8>())
+                            .cast::<usize>();
+                        let base30 = l28;
+                        let len30 = l29;
+                        _rt::cabi_dealloc(base30, len30 * 8, 4);
                     }
                 }
             }
         }
         _rt::cabi_dealloc(
-            base25,
-            len25 * (16 + 3 * ::core::mem::size_of::<*const u8>()),
+            base31,
+            len31 * (16 + 3 * ::core::mem::size_of::<*const u8>()),
+            ::core::mem::size_of::<*const u8>(),
+        );
+        let l32 = *arg0.add(4 * ::core::mem::size_of::<*const u8>()).cast::<*mut u8>();
+        let l33 = *arg0.add(5 * ::core::mem::size_of::<*const u8>()).cast::<usize>();
+        let base47 = l32;
+        let len47 = l33;
+        for i in 0..len47 {
+            let base = base47.add(i * (16 + 3 * ::core::mem::size_of::<*const u8>()));
+            {
+                let l34 = i32::from(*base.add(0).cast::<u8>());
+                match l34 {
+                    0 => {}
+                    1 => {
+                        let l35 = *base
+                            .add(::core::mem::size_of::<*const u8>())
+                            .cast::<*mut u8>();
+                        let l36 = *base
+                            .add(2 * ::core::mem::size_of::<*const u8>())
+                            .cast::<usize>();
+                        let base37 = l35;
+                        let len37 = l36;
+                        _rt::cabi_dealloc(base37, len37 * 8, 4);
+                    }
+                    2 => {}
+                    3 => {
+                        let l38 = *base
+                            .add(::core::mem::size_of::<*const u8>())
+                            .cast::<*mut u8>();
+                        let l39 = *base
+                            .add(2 * ::core::mem::size_of::<*const u8>())
+                            .cast::<usize>();
+                        let base40 = l38;
+                        let len40 = l39;
+                        _rt::cabi_dealloc(base40, len40 * 12, 4);
+                        let l41 = *base
+                            .add(3 * ::core::mem::size_of::<*const u8>())
+                            .cast::<*mut u8>();
+                        let l42 = *base
+                            .add(4 * ::core::mem::size_of::<*const u8>())
+                            .cast::<usize>();
+                        let base43 = l41;
+                        let len43 = l42;
+                        _rt::cabi_dealloc(base43, len43 * 4, 4);
+                    }
+                    _ => {
+                        let l44 = *base
+                            .add(::core::mem::size_of::<*const u8>())
+                            .cast::<*mut u8>();
+                        let l45 = *base
+                            .add(2 * ::core::mem::size_of::<*const u8>())
+                            .cast::<usize>();
+                        let base46 = l44;
+                        let len46 = l45;
+                        _rt::cabi_dealloc(base46, len46 * 8, 4);
+                    }
+                }
+            }
+        }
+        _rt::cabi_dealloc(
+            base47,
+            len47 * (16 + 3 * ::core::mem::size_of::<*const u8>()),
             ::core::mem::size_of::<*const u8>(),
         );
     }
@@ -568,10 +893,10 @@ pub use __export_world_theme_cabi;
 #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
 #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
 struct _RetArea(
-    [::core::mem::MaybeUninit<u8>; 8 + 5 * ::core::mem::size_of::<*const u8>()],
+    [::core::mem::MaybeUninit<u8>; 16 + 6 * ::core::mem::size_of::<*const u8>()],
 );
 static mut _RET_AREA: _RetArea = _RetArea(
-    [::core::mem::MaybeUninit::uninit(); 8 + 5 * ::core::mem::size_of::<*const u8>()],
+    [::core::mem::MaybeUninit::uninit(); 16 + 6 * ::core::mem::size_of::<*const u8>()],
 );
 #[rustfmt::skip]
 #[allow(dead_code, clippy::all)]
@@ -781,6 +1106,27 @@ pub mod caprice {
                         .finish()
                 }
             }
+            /// A line through `points`, back to the first if `closed`: joined smoothly where it bends.
+            #[derive(Clone)]
+            pub struct Path {
+                pub points: _rt::Vec<Point>,
+                pub closed: bool,
+                pub width: f32,
+                pub color: Color,
+            }
+            impl ::core::fmt::Debug for Path {
+                fn fmt(
+                    &self,
+                    f: &mut ::core::fmt::Formatter<'_>,
+                ) -> ::core::fmt::Result {
+                    f.debug_struct("Path")
+                        .field("points", &self.points)
+                        .field("closed", &self.closed)
+                        .field("width", &self.width)
+                        .field("color", &self.color)
+                        .finish()
+                }
+            }
             #[repr(C)]
             #[derive(Clone, Copy)]
             pub struct Vertex {
@@ -821,6 +1167,7 @@ pub mod caprice {
                 Polygon(Polygon),
                 Line(Line),
                 Mesh(Mesh),
+                Path(Path),
             }
             impl ::core::fmt::Debug for Shape {
                 fn fmt(
@@ -836,12 +1183,16 @@ pub mod caprice {
                         }
                         Shape::Line(e) => f.debug_tuple("Shape::Line").field(e).finish(),
                         Shape::Mesh(e) => f.debug_tuple("Shape::Mesh").field(e).finish(),
+                        Shape::Path(e) => f.debug_tuple("Shape::Path").field(e).finish(),
                     }
                 }
             }
             /// The desk and the page as they lie at the fitting zoom, and the page bar if it shows. The
-            /// theme lays out for these; Caprice zooms all it draws by `zoom` at once, about the foot of
-            /// the desk under the page's middle. `unit` is the size of things (1 on a desk 900 high).
+            /// theme lays out for these; Caprice zooms all it draws behind the pages and over them by
+            /// `zoom` at once, about `ground`: the page's middle across, at the height the theme names
+            /// (`frame-output.ground`), which stays where it is on the screen as the writer zooms. `area`
+            /// is as much of the desk as shows once zoomed; `window` the desk as it lies on the screen,
+            /// at every zoom. `unit` is the size of things (1 on a desk 900 high).
             #[repr(C)]
             #[derive(Clone, Copy)]
             pub struct Desk {
@@ -850,6 +1201,8 @@ pub mod caprice {
                 pub bar: ::core::option::Option<Rect>,
                 pub zoom: f32,
                 pub unit: f32,
+                pub window: Rect,
+                pub ground: Point,
             }
             impl ::core::fmt::Debug for Desk {
                 fn fmt(
@@ -862,6 +1215,8 @@ pub mod caprice {
                         .field("bar", &self.bar)
                         .field("zoom", &self.zoom)
                         .field("unit", &self.unit)
+                        .field("window", &self.window)
+                        .field("ground", &self.ground)
                         .finish()
                 }
             }
@@ -937,14 +1292,20 @@ pub mod caprice {
             }
             #[derive(Clone)]
             pub struct FrameOutput {
-                /// Behind every page.
+                /// Behind every page, zoomed with it.
                 pub desk: _rt::Vec<Shape>,
+                /// In front of `desk`, behind every page, laid out on `desk.window` and never zoomed: what
+                /// is in the window rather than on the desk, as snow falling.
+                pub window: _rt::Vec<Shape>,
                 /// Over the settled page, on the screen only: for the carrier.
                 pub over: _rt::Vec<Shape>,
                 /// Milliseconds until the next frame is wanted: 0 while something moves.
                 pub next: u32,
                 /// How far the carried title is from its place, so Caprice moves it with the carrier.
                 pub title_offset: Point,
+                /// How far above the foot of the desk (the top of the page bar when it lies along it) the
+                /// theme's ground is, in units: Caprice zooms about it from the next frame (`desk.ground`).
+                pub ground: f32,
             }
             impl ::core::fmt::Debug for FrameOutput {
                 fn fmt(
@@ -953,9 +1314,11 @@ pub mod caprice {
                 ) -> ::core::fmt::Result {
                     f.debug_struct("FrameOutput")
                         .field("desk", &self.desk)
+                        .field("window", &self.window)
                         .field("over", &self.over)
                         .field("next", &self.next)
                         .field("title-offset", &self.title_offset)
+                        .field("ground", &self.ground)
                         .finish()
                 }
             }
@@ -1153,33 +1516,35 @@ macro_rules! __export_theme_impl {
         "wasm32")] #[unsafe (link_section =
         "component-type:wit-bindgen:0.63.0:caprice:theme@1.0.0:theme:imports and exports")]
         #[doc(hidden)] #[allow(clippy::octal_escapes)] pub static
-        __WIT_BINDGEN_COMPONENT_TYPE : [u8; 1028] = *
+        __WIT_BINDGEN_COMPONENT_TYPE : [u8; 1111] = *
         b"\
-\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\x88\x07\x01A\x02\x01\
+\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xdb\x07\x01A\x02\x01\
 A\x0f\x01B\x09\x01@\0\0w\x04\0\x0astory-seed\x01\0\x01py\x01@\0\0\x01\x04\0\x06g\
 arden\x01\x02\x01@\0\0y\x04\0\x0apage-count\x01\x03\x01@\0\0\x7f\x04\0\x08ask-li\
-ft\x01\x04\x03\0\x18caprice:theme/host@1.0.0\x05\0\x01B&\x01r\x02\x01xv\x01yv\x04\
+ft\x01\x04\x03\0\x18caprice:theme/host@1.0.0\x05\0\x01B(\x01r\x02\x01xv\x01yv\x04\
 \0\x05point\x03\0\0\x01r\x02\x03min\x01\x03max\x01\x04\0\x04rect\x03\0\x02\x01y\x04\
 \0\x05color\x03\0\x04\x01r\x03\x02at\x01\x01rv\x05color\x05\x04\0\x06circle\x03\0\
 \x06\x01p\x01\x01r\x02\x06points\x08\x05color\x05\x04\0\x07polygon\x03\0\x09\x01\
-r\x04\x01a\x01\x01b\x01\x05widthv\x05color\x05\x04\0\x04line\x03\0\x0b\x01r\x02\x02\
-at\x01\x05color\x05\x04\0\x06vertex\x03\0\x0d\x01p\x0e\x01py\x01r\x02\x08vertice\
-s\x0f\x07indices\x10\x04\0\x04mesh\x03\0\x11\x01q\x04\x06circle\x01\x07\0\x07pol\
-ygon\x01\x0a\0\x04line\x01\x0c\0\x04mesh\x01\x12\0\x04\0\x05shape\x03\0\x13\x01k\
-\x03\x01r\x05\x04area\x03\x04page\x03\x03bar\x15\x04zoomv\x04unitv\x04\0\x04desk\
-\x03\0\x16\x01r\x07\x05enterv\x03runv\x05lowerv\x06hooked\x7f\x04hookv\x04lookv\x01\
-tv\x04\0\x04pose\x03\0\x18\x01r\x03\x04pose\x19\x09from-left\x7f\x05title\x03\x04\
-\0\x07carrier\x03\0\x1a\x01k\x1b\x01r\x03\x04timeu\x04desk\x17\x07carrier\x1c\x04\
-\0\x0bframe-input\x03\0\x1d\x01p\x14\x01r\x04\x04desk\x1f\x04over\x1f\x04nexty\x0c\
-title-offset\x01\x04\0\x0cframe-output\x03\0\x20\x01r\x02\x07chaptery\x05pagesy\x04\
-\0\x05pages\x03\0\"\x01q\x04\x05fresh\0\0\x05grown\x01#\0\x05begun\x01y\0\x07cli\
-cked\x01\x01\0\x04\0\x05event\x03\0$\x03\0\x19caprice:theme/types@1.0.0\x05\x01\x02\
-\x03\0\x01\x05event\x03\0\x05event\x03\0\x02\x02\x03\0\x01\x0bframe-input\x03\0\x0b\
-frame-input\x03\0\x04\x02\x03\0\x01\x0cframe-output\x03\0\x0cframe-output\x03\0\x06\
-\x01p\x03\x01@\x01\x06events\x08\x01\0\x04\0\x06events\x01\x09\x01@\x01\x05input\
-\x05\0\x07\x04\0\x05frame\x01\x0a\x04\0\x19caprice:theme/theme@1.0.0\x04\0\x0b\x0b\
-\x01\0\x05theme\x03\0\0\0G\x09producers\x01\x0cprocessed-by\x02\x0dwit-component\
-\x070.262.0\x10wit-bindgen-rust\x060.63.0";
+r\x04\x01a\x01\x01b\x01\x05widthv\x05color\x05\x04\0\x04line\x03\0\x0b\x01r\x04\x06\
+points\x08\x06closed\x7f\x05widthv\x05color\x05\x04\0\x04path\x03\0\x0d\x01r\x02\
+\x02at\x01\x05color\x05\x04\0\x06vertex\x03\0\x0f\x01p\x10\x01py\x01r\x02\x08ver\
+tices\x11\x07indices\x12\x04\0\x04mesh\x03\0\x13\x01q\x05\x06circle\x01\x07\0\x07\
+polygon\x01\x0a\0\x04line\x01\x0c\0\x04mesh\x01\x14\0\x04path\x01\x0e\0\x04\0\x05\
+shape\x03\0\x15\x01k\x03\x01r\x07\x04area\x03\x04page\x03\x03bar\x17\x04zoomv\x04\
+unitv\x06window\x03\x06ground\x01\x04\0\x04desk\x03\0\x18\x01r\x07\x05enterv\x03\
+runv\x05lowerv\x06hooked\x7f\x04hookv\x04lookv\x01tv\x04\0\x04pose\x03\0\x1a\x01\
+r\x03\x04pose\x1b\x09from-left\x7f\x05title\x03\x04\0\x07carrier\x03\0\x1c\x01k\x1d\
+\x01r\x03\x04timeu\x04desk\x19\x07carrier\x1e\x04\0\x0bframe-input\x03\0\x1f\x01\
+p\x16\x01r\x06\x04desk!\x06window!\x04over!\x04nexty\x0ctitle-offset\x01\x06grou\
+ndv\x04\0\x0cframe-output\x03\0\"\x01r\x02\x07chaptery\x05pagesy\x04\0\x05pages\x03\
+\0$\x01q\x04\x05fresh\0\0\x05grown\x01%\0\x05begun\x01y\0\x07clicked\x01\x01\0\x04\
+\0\x05event\x03\0&\x03\0\x19caprice:theme/types@1.0.0\x05\x01\x02\x03\0\x01\x05e\
+vent\x03\0\x05event\x03\0\x02\x02\x03\0\x01\x0bframe-input\x03\0\x0bframe-input\x03\
+\0\x04\x02\x03\0\x01\x0cframe-output\x03\0\x0cframe-output\x03\0\x06\x01p\x03\x01\
+@\x01\x06events\x08\x01\0\x04\0\x06events\x01\x09\x01@\x01\x05input\x05\0\x07\x04\
+\0\x05frame\x01\x0a\x04\0\x19caprice:theme/theme@1.0.0\x04\0\x0b\x0b\x01\0\x05th\
+eme\x03\0\0\0G\x09producers\x01\x0cprocessed-by\x02\x0dwit-component\x070.262.0\x10\
+wit-bindgen-rust\x060.63.0";
         };
     };
 }
@@ -1192,31 +1557,33 @@ pub use __export_theme_impl as export;
 )]
 #[doc(hidden)]
 #[allow(clippy::octal_escapes)]
-pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 1043] = *b"\
-\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xf7\x06\x01A\x02\x01\
+pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 1126] = *b"\
+\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xca\x07\x01A\x02\x01\
 A\x0a\x01B\x09\x01@\0\0w\x04\0\x0astory-seed\x01\0\x01py\x01@\0\0\x01\x04\0\x06g\
 arden\x01\x02\x01@\0\0y\x04\0\x0apage-count\x01\x03\x01@\0\0\x7f\x04\0\x08ask-li\
-ft\x01\x04\x03\0\x18caprice:theme/host@1.0.0\x05\0\x01B&\x01r\x02\x01xv\x01yv\x04\
+ft\x01\x04\x03\0\x18caprice:theme/host@1.0.0\x05\0\x01B(\x01r\x02\x01xv\x01yv\x04\
 \0\x05point\x03\0\0\x01r\x02\x03min\x01\x03max\x01\x04\0\x04rect\x03\0\x02\x01y\x04\
 \0\x05color\x03\0\x04\x01r\x03\x02at\x01\x01rv\x05color\x05\x04\0\x06circle\x03\0\
 \x06\x01p\x01\x01r\x02\x06points\x08\x05color\x05\x04\0\x07polygon\x03\0\x09\x01\
-r\x04\x01a\x01\x01b\x01\x05widthv\x05color\x05\x04\0\x04line\x03\0\x0b\x01r\x02\x02\
-at\x01\x05color\x05\x04\0\x06vertex\x03\0\x0d\x01p\x0e\x01py\x01r\x02\x08vertice\
-s\x0f\x07indices\x10\x04\0\x04mesh\x03\0\x11\x01q\x04\x06circle\x01\x07\0\x07pol\
-ygon\x01\x0a\0\x04line\x01\x0c\0\x04mesh\x01\x12\0\x04\0\x05shape\x03\0\x13\x01k\
-\x03\x01r\x05\x04area\x03\x04page\x03\x03bar\x15\x04zoomv\x04unitv\x04\0\x04desk\
-\x03\0\x16\x01r\x07\x05enterv\x03runv\x05lowerv\x06hooked\x7f\x04hookv\x04lookv\x01\
-tv\x04\0\x04pose\x03\0\x18\x01r\x03\x04pose\x19\x09from-left\x7f\x05title\x03\x04\
-\0\x07carrier\x03\0\x1a\x01k\x1b\x01r\x03\x04timeu\x04desk\x17\x07carrier\x1c\x04\
-\0\x0bframe-input\x03\0\x1d\x01p\x14\x01r\x04\x04desk\x1f\x04over\x1f\x04nexty\x0c\
-title-offset\x01\x04\0\x0cframe-output\x03\0\x20\x01r\x02\x07chaptery\x05pagesy\x04\
-\0\x05pages\x03\0\"\x01q\x04\x05fresh\0\0\x05grown\x01#\0\x05begun\x01y\0\x07cli\
-cked\x01\x01\0\x04\0\x05event\x03\0$\x03\0\x19caprice:theme/types@1.0.0\x05\x01\x02\
-\x03\0\x01\x05event\x03\0\x05event\x03\0\x02\x02\x03\0\x01\x0bframe-input\x03\0\x0b\
-frame-input\x03\0\x04\x02\x03\0\x01\x0cframe-output\x03\0\x0cframe-output\x03\0\x06\
-\x04\09caprice:theme/theme-with-all-of-its-exports-removed@1.0.0\x04\0\x0b+\x01\0\
-%theme-with-all-of-its-exports-removed\x03\0\0\0G\x09producers\x01\x0cprocessed-\
-by\x02\x0dwit-component\x070.262.0\x10wit-bindgen-rust\x060.63.0";
+r\x04\x01a\x01\x01b\x01\x05widthv\x05color\x05\x04\0\x04line\x03\0\x0b\x01r\x04\x06\
+points\x08\x06closed\x7f\x05widthv\x05color\x05\x04\0\x04path\x03\0\x0d\x01r\x02\
+\x02at\x01\x05color\x05\x04\0\x06vertex\x03\0\x0f\x01p\x10\x01py\x01r\x02\x08ver\
+tices\x11\x07indices\x12\x04\0\x04mesh\x03\0\x13\x01q\x05\x06circle\x01\x07\0\x07\
+polygon\x01\x0a\0\x04line\x01\x0c\0\x04mesh\x01\x14\0\x04path\x01\x0e\0\x04\0\x05\
+shape\x03\0\x15\x01k\x03\x01r\x07\x04area\x03\x04page\x03\x03bar\x17\x04zoomv\x04\
+unitv\x06window\x03\x06ground\x01\x04\0\x04desk\x03\0\x18\x01r\x07\x05enterv\x03\
+runv\x05lowerv\x06hooked\x7f\x04hookv\x04lookv\x01tv\x04\0\x04pose\x03\0\x1a\x01\
+r\x03\x04pose\x1b\x09from-left\x7f\x05title\x03\x04\0\x07carrier\x03\0\x1c\x01k\x1d\
+\x01r\x03\x04timeu\x04desk\x19\x07carrier\x1e\x04\0\x0bframe-input\x03\0\x1f\x01\
+p\x16\x01r\x06\x04desk!\x06window!\x04over!\x04nexty\x0ctitle-offset\x01\x06grou\
+ndv\x04\0\x0cframe-output\x03\0\"\x01r\x02\x07chaptery\x05pagesy\x04\0\x05pages\x03\
+\0$\x01q\x04\x05fresh\0\0\x05grown\x01%\0\x05begun\x01y\0\x07clicked\x01\x01\0\x04\
+\0\x05event\x03\0&\x03\0\x19caprice:theme/types@1.0.0\x05\x01\x02\x03\0\x01\x05e\
+vent\x03\0\x05event\x03\0\x02\x02\x03\0\x01\x0bframe-input\x03\0\x0bframe-input\x03\
+\0\x04\x02\x03\0\x01\x0cframe-output\x03\0\x0cframe-output\x03\0\x06\x04\09capri\
+ce:theme/theme-with-all-of-its-exports-removed@1.0.0\x04\0\x0b+\x01\0%theme-with\
+-all-of-its-exports-removed\x03\0\0\0G\x09producers\x01\x0cprocessed-by\x02\x0dw\
+it-component\x070.262.0\x10wit-bindgen-rust\x060.63.0";
 #[inline(never)]
 #[doc(hidden)]
 pub fn __link_custom_section_describing_imports() {

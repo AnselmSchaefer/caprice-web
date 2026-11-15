@@ -6742,6 +6742,195 @@ mod tests {
         assert!(g.app.pdf(&ctx, 0..=0).unwrap() == plain);
     }
 
+    const SNOW: &[u8] = include_bytes!("../tests/fixtures/snow.wasm");
+
+    /// A shape as the Snow's comparison sees it: what kind it is, its points and their colours, its
+    /// width or radius, and a mesh's triangles. A rectangle is the polygon of its corners.
+    #[derive(Debug)]
+    struct Outline {
+        kind: &'static str,
+        points: Vec<egui::Pos2>,
+        colors: Vec<egui::Color32>,
+        size: f32,
+        triangles: Vec<u32>,
+    }
+
+    fn outline(shape: &egui::Shape) -> Option<Outline> {
+        use egui::Shape;
+        let solid = |c: &egui::epaint::ColorMode| match c {
+            egui::epaint::ColorMode::Solid(c) => *c,
+            _ => panic!("a line of one colour"),
+        };
+        let o = |kind, points, colors, size| Some(Outline { kind, points, colors, size, triangles: Vec::new() });
+        match shape {
+            Shape::Noop => None,
+            Shape::Circle(c) => o("circle", vec![c.center], vec![c.fill], c.radius),
+            Shape::Rect(r) => o("polygon", vec![r.rect.left_top(), r.rect.right_top(), r.rect.right_bottom(), r.rect.left_bottom()], vec![r.fill], 0.0),
+            Shape::Path(p) if p.fill != egui::Color32::TRANSPARENT => o("polygon", p.points.clone(), vec![p.fill], 0.0),
+            Shape::Path(p) => o(if p.closed { "closed line" } else { "line" }, p.points.clone(), vec![solid(&p.stroke.color)], p.stroke.width),
+            Shape::LineSegment { points, stroke } => o("segment", points.to_vec(), vec![stroke.color], stroke.width),
+            Shape::Mesh(m) => Some(Outline {
+                kind: "mesh",
+                points: m.vertices.iter().map(|v| v.pos).collect(),
+                colors: m.vertices.iter().map(|v| v.color).collect(),
+                size: 0.0,
+                triangles: m.indices.clone(),
+            }),
+            other => panic!("the Snow draws no {other:?}"),
+        }
+    }
+
+    /// How far apart two frames' shapes are at most: in points (here pixels), and in a colour's
+    /// part (of 255).
+    #[derive(Default, Debug)]
+    struct Apart {
+        shapes: usize,
+        at: f32,
+        color: u8,
+    }
+
+    /// Whether the built-in Snow's frame and the port's draw the same shapes, in the same order,
+    /// and how far apart they are; at the first that differs in kind or count, why.
+    fn apart(built: &[egui::Shape], port: &[egui::Shape]) -> Result<Apart, String> {
+        let (a, b): (Vec<Outline>, Vec<Outline>) = (built.iter().filter_map(outline).collect(), port.iter().filter_map(outline).collect());
+        let mut d = Apart { shapes: a.len(), ..Apart::default() };
+        for (k, (a, b)) in a.iter().zip(&b).enumerate() {
+            if a.kind != b.kind || a.points.len() != b.points.len() || a.triangles != b.triangles {
+                return Err(format!("shape {k} of {}: {a:?}\nthe port's: {b:?}", d.shapes));
+            }
+            let at = a.points.iter().zip(&b.points).map(|(p, q)| p.distance(*q)).fold((a.size - b.size).abs(), f32::max);
+            let color = a.colors.iter().zip(&b.colors).flat_map(|(p, q)| (0..4).map(move |i| p[i].abs_diff(q[i]))).max().unwrap_or(0);
+            (d.at, d.color) = (d.at.max(at), d.color.max(color));
+        }
+        if a.len() != b.len() {
+            return Err(format!("{} shapes, the port {}: the first left over {:?}", a.len(), b.len(), a.get(b.len()).or(b.get(a.len()))));
+        }
+        Ok(d)
+    }
+
+    /// The Magic Snow drawn by Caprice and by its port to a theme program (`themes/snow`), side by
+    /// side: two apps given the same story, window and keys at the same moments, both keeping what
+    /// they paint.
+    struct Snows {
+        built: Harness,
+        port: Harness,
+        /// How far apart the frames compared were at most, and what was in them.
+        worst: Apart,
+        compared: usize,
+        coming: usize,
+        finishing: usize,
+        lit: usize,
+        zooms: Vec<f32>,
+    }
+
+    impl Snows {
+        fn new() -> Snows {
+            let (mut built, mut port) = (Harness::new(), Harness::new());
+            for h in [&mut built, &mut port] {
+                h.app.story_id = "a story".into();
+                h.app.eggs.painted = Some(Vec::new());
+                h.frames(3, vec![], Modifiers::NONE);
+            }
+            let ctx = built.ctx.clone();
+            built.app.themes.choose(&ctx, theme::Theme::Snow);
+            let id = port.app.themes.own.add_program("Snow", "", Default::default(), SNOW, None).unwrap();
+            let ctx = port.ctx.clone();
+            port.app.themes.choose_own(&ctx, &id);
+            let mut s = Snows { built, port, worst: Apart::default(), compared: 0, coming: 0, finishing: 0, lit: 0, zooms: Vec::new() };
+            s.both(|h| {
+                h.app.eggs.odds = Some(0.0);
+                h.wait(1.0);
+            });
+            s
+        }
+
+        fn both(&mut self, f: impl Fn(&mut Harness)) {
+            f(&mut self.built);
+            f(&mut self.port);
+        }
+
+        /// `n` frames, `step` seconds apart, each of the built-in Snow's compared with the port's
+        /// next: a program's shapes are a frame behind (R36), so the port draws in each frame what
+        /// the built-in drew in the one before.
+        fn compare(&mut self, n: usize, step: f64) {
+            for _ in 0..n {
+                let was = self.built.app.eggs.painted.clone().unwrap();
+                let hill = self.built.app.eggs.snow.clone().expect("the built-in Snow drawn");
+                self.both(|h| {
+                    h.time += step - 1.0 / 60.0;
+                    h.frames(1, vec![], Modifiers::NONE);
+                });
+                let seen = program_seen(&self.port);
+                assert!(seen.stopped.is_none() && seen.window == 140, "the port plays, its snow in the window: {seen:?}");
+                let now = self.port.app.eggs.painted.clone().unwrap();
+                let d = apart(&was, &now).unwrap_or_else(|why| panic!("frame {} not the same: {why}", self.compared));
+                assert!(d.at < 0.1 && d.color <= 1, "frame {}: within a tenth of a pixel and a shade: {d:?}", self.compared);
+                let z = self.built.app.zoom / self.built.app.fitting_zoom(self.built.app.eggs.desk);
+                if !self.zooms.iter().any(|w| (w - z).abs() < 0.05) {
+                    self.zooms.push(z);
+                }
+                self.worst = Apart { shapes: self.worst.shapes.max(d.shapes), at: self.worst.at.max(d.at), color: self.worst.color.max(d.color) };
+                self.compared += 1;
+                self.coming += usize::from(hill.coming.is_some());
+                self.finishing += usize::from(hill.finishing);
+                self.lit = self.lit.max(hill.lit);
+            }
+        }
+    }
+
+    #[test]
+    fn the_magic_snow_as_a_program_draws_what_the_built_in_one_draws_frame_by_frame() {
+        let mut s = Snows::new();
+        s.compare(3, 1.0 / 60.0);
+        // A chapter of a few pages: a block cut out of the lake for each, rising and floating onto
+        // the igloo, compared all the way.
+        s.both(|h| {
+            chapter_one(h);
+            h.key(Key::Enter, Modifiers::NONE);
+            h.type_text(&SENTENCE.repeat(120));
+        });
+        s.compare(40, 0.1);
+        assert!(s.coming > 20, "blocks on their way: {}", s.coming);
+        // The next chapter begun: the igloo before finished, its bricks dropping in, its tunnel
+        // built and its light coming on.
+        s.both(|h| {
+            h.key(Key::Enter, Modifiers::NONE);
+            h.type_text("Chapter Two");
+            h.click_widget("Chapter");
+            h.key(Key::Enter, Modifiers::NONE);
+            h.type_text(&SENTENCE.repeat(60));
+        });
+        s.compare(65, 0.1);
+        assert!(s.finishing > 50 && s.lit == 1, "the igloo finished and lit: {} {}", s.finishing, s.lit);
+        // Zoomed in, and out further than the fitting zoom: the hillside nearer and further, the snow
+        // still falling in the window.
+        for (key, times) in [(Key::Equals, 4), (Key::Minus, 7)] {
+            s.both(|h| {
+                for _ in 0..times {
+                    h.key(key, Modifiers::COMMAND);
+                }
+                h.wait(1.0);
+                h.type_text(&SENTENCE.repeat(40));
+            });
+            s.compare(30, 0.1);
+        }
+        assert!(s.zooms.iter().any(|&z| z > 1.4) && s.zooms.iter().any(|&z| z < 0.8), "zoomed in and out: {:?}", s.zooms);
+        // Other windows, the page bar along the foot of the desk and at its side. (While the size
+        // of things follows the window's, over a moment, the port's shapes are zoomed about where
+        // the ground is a frame later than they were laid out for: not compared.)
+        for (width, height, side) in [(900.0, 640.0, ui::BarSide::Bottom), (1700.0, 1000.0, ui::BarSide::Right), (1240.0, 900.0, ui::BarSide::Left)] {
+            s.both(|h| {
+                (h.width, h.height) = (width, height);
+                h.app.bar.side = side;
+                for _ in 0..12 {
+                    h.wait(0.1);
+                }
+            });
+            s.compare(10, 0.25);
+        }
+        eprintln!("compared {} frames of up to {} shapes, zoomed {:?}: at most {} points and {} of 255 apart", s.compared, s.worst.shapes, s.zooms, s.worst.at, s.worst.color);
+    }
+
     #[test]
     fn a_program_theme_that_fails_or_draws_more_than_it_may_is_stopped_with_a_word_why() {
         let world = |frame: &str, data: &str| wat::parse_str(format!(r#"(module (memory (export "memory") 10 512) {data}

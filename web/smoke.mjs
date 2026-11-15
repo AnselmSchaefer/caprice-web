@@ -347,13 +347,15 @@ const grey = { ...colours, desk: "#404040", desk_top: "#404040" };
 const programs = [
   { id: "smokeprogram", name: "Fireflies", about: "", author: "", colours: grey, grows: true, carries: true, added: 0, program: true },
   { id: "smokespin", name: "Spin", about: "", author: "", colours: grey, grows: true, carries: true, added: 0, program: true },
+  { id: "smokesnow", name: "Snow", about: "", author: "", colours: grey, grows: true, carries: false, added: 0, program: true },
 ];
 // The desk left of the page, where fireflies drift.
 const leftOfPage = () => page.screenshot({ clip: { x: 20, y: 100, width: 360, height: 640 } });
 const themeWorkers = () => page.workers().filter(w => w.url().endsWith("/theme-worker.js")).length;
 await keptAndOpened([["/caprice/theme.json", '{"own":"smokeprogram"}'], ["/caprice/themes/index.json", JSON.stringify(programs)],
   ["/caprice/themes/smokeprogram.wasm", fs.readFileSync(path.join(fixtures, "fireflies.wasm"))],
-  ["/caprice/themes/smokespin.wasm", fs.readFileSync(path.join(fixtures, "spin.wasm"))]], 3000);
+  ["/caprice/themes/smokespin.wasm", fs.readFileSync(path.join(fixtures, "spin.wasm"))],
+  ["/caprice/themes/smokesnow.wasm", fs.readFileSync(path.join(fixtures, "snow.wasm"))]], 3000);
 await page.screenshot({ path: `${out}/13-program-theme.png` });
 const night = await pixelAt(38, 258);
 const flying = await leftOfPage();
@@ -361,6 +363,16 @@ await page.waitForTimeout(500);
 // The night sky the program draws (from 8,12,32 at the top to 30,36,70 at the foot).
 check("a program theme plays in a worker of its own and draws the desk", themeWorkers() === 1 && night[0] < 40 && night[2] > night[0] + 15, `${themeWorkers()} workers, ${night.join(",")}`);
 check("and its fireflies move", !flying.equals(await leftOfPage()));
+// The Magic Snow ported to a program (themes/snow): the snowy hillside at the foot of the desk,
+// pale and blue in the dusk, and the snow falling in the window.
+await keptInBrowser([["/caprice/theme.json", '{"own":"smokesnow"}']]);
+await keptAndOpened([], 3000);
+await page.screenshot({ path: `${out}/13-program-snow.png` });
+const hillside = await pixelAt(38, 700);
+const falling = await leftOfPage();
+await page.waitForTimeout(500);
+check("the Magic Snow as a program draws its hillside", themeWorkers() === 1 && hillside[2] > 200 && hillside[2] >= hillside[0], `${themeWorkers()} workers, ${hillside.join(",")}`);
+check("and its snow falls", !falling.equals(await leftOfPage()));
 await keptInBrowser([["/caprice/theme.json", '{"own":"smokespin"}']]);
 await keptAndOpened([], 4000);
 await page.screenshot({ path: `${out}/14-program-stopped.png` });

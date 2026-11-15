@@ -4,9 +4,10 @@
 //! WebAssembly beyond a fixed set), runs it apart from the app (`platform::Program`: a worker of
 //! its own in the browser), tells it what happened (the story shown, a chapter grown or begun),
 //! and each frame asks it for shapes. It draws the newest it has, never waiting, so a program's
-//! shapes are a frame behind; zoomed here, all at once, as the Magic Vineyard is (the program lays
-//! out as at the fitting zoom). Its carrier brings new chapter titles, flown by Caprice's course
-//! (`pose_of`), drawn and offset by the program.
+//! shapes are a frame behind; zoomed here, all at once, as the Magic Snow and the Vineyard are
+//! (the program lays out as at the fitting zoom), about the ground it names; what it puts in the
+//! window (as snow falling) is never zoomed. Its carrier brings new chapter titles, flown by
+//! Caprice's course (`pose_of`), drawn and offset by the program.
 //!
 //! Like the other magic themes it lies on the desk behind every page, and its carrier over the
 //! settled page only: nothing of it is printed or saved, and nothing of it moves the text (R30).
@@ -165,9 +166,25 @@ pub struct Carried {
     pub title: Rect,
 }
 
-/// The frame's input as the canonical ABI lays out `frame-input` (120 bytes): the time, the desk
-/// (its area, the page, the bar if it shows, the zoom and the size of things), and the carrier.
-pub fn input_bytes(time: f64, area: Rect, page: Rect, bar: Option<Rect>, zoom: f32, unit: f32, carried: Option<Carried>) -> [u8; INPUT_LEN] {
+/// The desk as a program is told of it (the world's `desk`): as much of it as shows, the page and
+/// the bar, laid out as at the fitting zoom; the zoom and the size of things; the desk on the
+/// screen; and the point it is zoomed about.
+#[derive(Clone, Copy, Debug)]
+pub struct Desk {
+    pub area: Rect,
+    pub page: Rect,
+    pub bar: Option<Rect>,
+    pub zoom: f32,
+    pub unit: f32,
+    pub window: Rect,
+    pub ground: Pos2,
+}
+
+/// The frame's input as the canonical ABI lays out `frame-input` (144 bytes): the time, the desk
+/// (its area, the page, the bar if it shows, the zoom, the size of things, the desk on the screen
+/// and the ground), and the carrier.
+pub fn input_bytes(time: f64, desk: &Desk, carried: Option<Carried>) -> [u8; INPUT_LEN] {
+    let Desk { area, page, bar, zoom, unit, window, ground } = *desk;
     let mut b = [0u8; INPUT_LEN];
     let mut put = |at: usize, v: f32| b[at..at + 4].copy_from_slice(&v.to_le_bytes());
     let rect = |put: &mut dyn FnMut(usize, f32), at: usize, r: Rect| {
@@ -182,17 +199,20 @@ pub fn input_bytes(time: f64, area: Rect, page: Rect, bar: Option<Rect>, zoom: f
     }
     put(60, zoom);
     put(64, unit);
+    rect(&mut put, 68, window);
+    put(84, ground.x);
+    put(88, ground.y);
     if let Some(c) = carried {
         let p = c.pose;
-        for (at, v) in [(72, p.enter), (76, p.run), (80, p.lower), (88, p.hook), (92, p.look), (96, p.t)] {
+        for (at, v) in [(96, p.enter), (100, p.run), (104, p.lower), (112, p.hook), (116, p.look), (120, p.t)] {
             put(at, v);
         }
-        rect(&mut put, 104, c.title);
+        rect(&mut put, 128, c.title);
     }
     b[0..8].copy_from_slice(&time.to_le_bytes());
     b[40] = u8::from(bar.is_some());
     if let Some(c) = carried {
-        (b[68], b[84], b[100]) = (1, u8::from(c.pose.hooked), u8::from(c.from_left));
+        (b[92], b[108], b[124]) = (1, u8::from(c.pose.hooked), u8::from(c.from_left));
     }
     b
 }
@@ -203,15 +223,18 @@ pub fn story_seed(story: &str) -> u64 {
     story.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3))
 }
 
-/// A frame's words read: its shapes as egui's, how many points, when it wants the next frame, the
-/// carried title's offset, and whether it asked to carry titles.
+/// A frame's words read: its shapes as egui's (on the desk, in the window, over the page), how
+/// many points, when it wants the next frame, the carried title's offset, whether it asked to carry
+/// titles, and how high its ground is above the foot of the desk, in units.
 #[derive(Clone, Debug, Default)]
 pub struct Drawn {
     pub desk: Vec<Shape>,
+    pub window: Vec<Shape>,
     pub over: Vec<Shape>,
     pub next: u32,
     pub offset: Vec2,
     pub asked: bool,
+    pub ground: f32,
     pub points: usize,
 }
 
@@ -234,13 +257,16 @@ pub fn read(w: &[u32]) -> Result<Drawn, Unread> {
         Color32::from_rgba_premultiplied(r, g, b, a)
     };
     let fine = |v: &[f32]| v.iter().all(|x| x.is_finite());
-    let (desk_n, over_n) = (get(0)? as usize, get(1)? as usize);
-    let mut d = Drawn { next: get(2)?, offset: vec2(f(3)?, f(4)?), asked: get(5)? == 1, ..Drawn::default() };
+    let (desk_n, window_n, over_n) = (get(0)? as usize, get(1)? as usize, get(2)? as usize);
+    let mut d = Drawn { next: get(3)?, offset: vec2(f(4)?, f(5)?), asked: get(6)? == 1, ground: f(7)?, ..Drawn::default() };
     if !fine(&[d.offset.x, d.offset.y]) {
         d.offset = Vec2::ZERO;
     }
+    if !d.ground.is_finite() {
+        d.ground = 0.0;
+    }
     let mut i = HEAD;
-    for k in 0..desk_n + over_n {
+    for k in 0..desk_n + window_n + over_n {
         let kind = get(i)?;
         let shape = match kind {
             1 => {
@@ -277,24 +303,41 @@ pub fn read(w: &[u32]) -> Result<Drawn, Unread> {
                 let whole = ni % 3 == 0 && mesh.indices.iter().all(|&j| (j as usize) < nv) && mesh.vertices.iter().all(|v| v.pos.is_finite());
                 whole.then(|| Shape::mesh(mesh))
             }
+            5 => {
+                let (c, width, closed, n) = (get(i + 1)?, f(i + 2)?, get(i + 3)? == 1, get(i + 4)? as usize);
+                if w.len() < i + 5 + 2 * n {
+                    return Err(Unread::Bad("its output is cut short"));
+                }
+                let points: Vec<Pos2> = (0..n).map(|j| pos2(f32::from_bits(w[i + 5 + 2 * j]), f32::from_bits(w[i + 6 + 2 * j]))).collect();
+                (i, d.points) = (i + 5 + 2 * n, d.points + n);
+                let stroke = Stroke::new(width.max(0.0), color(c));
+                let drawn = n >= 2 && width.is_finite() && points.iter().all(|p| p.is_finite());
+                drawn.then(|| if closed { Shape::closed_line(points, stroke) } else { Shape::line(points, stroke) })
+            }
             _ => return Err(Unread::Bad("a shape of no kind")),
         };
         if d.points > MOST_POINTS {
             return Err(Unread::Over(d.points));
         }
         if let Some(s) = shape {
-            if k < desk_n { d.desk.push(s) } else { d.over.push(s) }
+            match k {
+                _ if k < desk_n => d.desk.push(s),
+                _ if k < desk_n + window_n => d.window.push(s),
+                _ => d.over.push(s),
+            }
         }
     }
     Ok(d)
 }
 
-/// What a program theme drew last frame, for tests: the theme, how many shapes behind the page and
-/// over it, how many points, how many frames it has answered, and why it was stopped, if it was.
+/// What a program theme drew last frame, for tests: the theme, how many shapes on the desk, in the
+/// window and over the page, how many points, how many frames it has answered, and why it was
+/// stopped, if it was.
 #[derive(Clone, Debug, Default)]
 pub struct Seen {
     pub id: String,
     pub desk: usize,
+    pub window: usize,
     pub over: usize,
     pub points: usize,
     pub frames: usize,
@@ -437,9 +480,13 @@ impl App {
             return;
         }
 
-        // Laid out as at the fitting zoom, zoomed about the foot of the desk under the page's middle.
+        // Laid out as at the fitting zoom, zoomed about the theme's ground under the page's middle:
+        // as high above the foot of the desk (the bar's top, when the bar lies along it) as it last
+        // said, so what stands there stays where it is on the screen.
         let z = (self.zoom / self.fitting_zoom(area)).clamp(0.5, 4.0);
-        let anchor = pos2(page.center().x, area.bottom());
+        let unit = self.eggs.unit(&ctx, area, now);
+        let hidden = if self.bar.side == crate::ui::BarSide::Bottom { area.bottom() - self.bar_rect(area, self.bar.side).top() } else { 0.0 };
+        let anchor = pos2(page.center().x, area.bottom() - hidden - self.eggs.program.drawn.ground * unit);
         let unzoom = |r: Rect| Rect::from_min_max(anchor + (r.min - anchor) / z, anchor + (r.max - anchor) / z);
         let bar = Some(unzoom(self.bar_rect(area, self.bar.side)));
         let carried = self.eggs.lift.filter(|l| matches!(l.by, Carrier::Program { .. })).zip(self.eggs.place).map(|(lift, place)| {
@@ -456,12 +503,11 @@ impl App {
         if let Some(at) = clicked {
             self.eggs.program.events.push(Event::Clicked(anchor + (at - anchor) / z));
         }
-        let unit = self.eggs.unit(&ctx, area, now);
         let lift = self.eggs.odds.is_none_or(|o| o > 0.0);
         let p = &mut self.eggs.program;
         p.zoom = egui::emath::TSTransform::new(anchor.to_vec2() * (1.0 - z), z);
         let ask = Ask {
-            input: input_bytes(now, unzoom(area), unzoom(page), bar, z, unit, carried),
+            input: input_bytes(now, &Desk { area: unzoom(area), page: unzoom(page), bar, zoom: z, unit, window: area, ground: anchor }, carried),
             events: event_bytes(&p.events),
             seed: story_seed(&self.story_id),
             garden: self.doc.garden.clone(),
@@ -476,13 +522,16 @@ impl App {
             p.events.clear();
         }
         let zoom = p.zoom;
-        ui.painter().extend(p.drawn.desk.iter().cloned().map(|mut s| {
+        let d = &p.drawn;
+        p.seen = Some(Seen { id: id.to_owned(), desk: d.desk.len(), window: d.window.len(), over: d.over.len(), points: d.points, frames: p.frames, stopped: None });
+        // The desk zoomed, then what is in the window as it is.
+        let drawn: Vec<Shape> = d.desk.iter().cloned().map(|mut s| {
             s.transform(zoom);
             s
-        }));
-        p.seen = Some(Seen { id: id.to_owned(), desk: p.drawn.desk.len(), over: p.drawn.over.len(), points: p.drawn.points, frames: p.frames, stopped: None });
-        // Its answer wakes the frame when it comes (`platform::Waker`); meanwhile, as it asks.
+        }).chain(d.window.iter().cloned()).collect();
         let next = if p.frames == 0 { 16 } else { u64::from(p.drawn.next).clamp(16, 1000) };
+        self.eggs.paint(ui.painter(), drawn);
+        // Its answer wakes the frame when it comes (`platform::Waker`); meanwhile, as it asks.
         ctx.request_repaint_after(std::time::Duration::from_millis(next));
     }
 }
@@ -561,7 +610,7 @@ mod tests {
 
     /// Words with `points` points in one polygon behind the page.
     fn polygon_words(points: usize) -> Words {
-        let mut w = vec![1, 0, 0, 0, 0, 0, 2, 0xff00_00ff, points as u32];
+        let mut w = vec![1, 0, 0, 0, 0, 0, 0, 0, 2, 0xff00_00ff, points as u32];
         w.extend((0..points).flat_map(|k| [(k as f32).to_bits(), 1f32.to_bits()]));
         w
     }
@@ -575,14 +624,18 @@ mod tests {
     #[test]
     fn what_cannot_be_drawn_is_left_out_and_words_cut_short_are_refused() {
         let nan = f32::NAN.to_bits();
-        // A circle at no place, a mesh with an index beyond it, a polygon of two points; and a line.
-        let mut w = vec![4, 0, 0, 0, 0, 0, 1, 0, nan, 0, 0];
+        // A circle at no place, a mesh with an index beyond it, a polygon of two points, a path of
+        // one, a path as wide as no number; and a line; and a ground at no height.
+        let mut w = vec![6, 0, 0, 0, 0, 0, 0, nan, 1, 0, nan, 0, 0];
         w.extend([4, 1, 3, 0, 0, 0, 0, 0, 7]);
         w.extend([2, 0, 2, 0, 0, 0, 0]);
+        w.extend([5, 0, 1f32.to_bits(), 1, 1, 0, 0]);
+        w.extend([5, 0, nan, 0, 2, 0, 0, 0, 0]);
         w.extend([3, 0, 1f32.to_bits(), 0, 0, 0, 0]);
         let d = read(&w).unwrap();
         assert_eq!(d.desk.len(), 1, "only the line");
         assert!(matches!(d.desk[0], Shape::LineSegment { .. }));
+        assert_eq!(d.ground, 0.0, "the ground at the foot");
         assert_eq!(read(&w[..w.len() - 1]).unwrap_err(), Unread::Bad("its output is cut short"));
     }
 
@@ -592,8 +645,12 @@ mod tests {
         let pose = Pose { enter: 1.0, run: 0.25, lower: 0.5, hooked: true, hook: 0.75, done: false, look: 2.0, t: 3.5 };
         let carried = Carried { pose, from_left: true, title: r(300.0, 120.0, 380.0, 140.0) };
         let events = [Event::Fresh, Event::Grown { chapter: 2, pages: 9 }, Event::Begun(3), Event::Clicked(pos2(4.5, 6.5))];
+        let desk = Desk {
+            area: r(0.0, 40.0, 1400.0, 900.0), page: r(450.0, 60.0, 950.0, 880.0), bar: Some(r(200.0, 860.0, 1200.0, 890.0)), zoom: 1.5, unit: 0.8,
+            window: r(-350.0, -180.0, 1750.0, 1110.0), ground: pos2(700.0, 850.0),
+        };
         Ask {
-            input: input_bytes(12.5, r(0.0, 40.0, 1400.0, 900.0), r(450.0, 60.0, 950.0, 880.0), Some(r(200.0, 860.0, 1200.0, 890.0)), 1.5, 0.8, Some(carried)),
+            input: input_bytes(12.5, &desk, Some(carried)),
             events: event_bytes(&events),
             seed: 0x0000_1234_0000_5678,
             garden: vec![3, 5, 9],
@@ -613,9 +670,10 @@ mod tests {
     #[test]
     fn a_theme_is_told_every_field_of_its_input_and_each_event_as_written() {
         let d = read(&run_once(ECHO, &echo_ask())).unwrap();
-        let circles: Vec<(u8, Pos2, f32)> = d.desk.iter().chain(&d.over).map(|s| match s {
-            Shape::Circle(c) => (c.fill.r(), c.center, c.radius),
-            _ => panic!("only circles"),
+        let circles: Vec<(u8, Pos2, f32)> = d.desk.iter().chain(&d.window).chain(&d.over).filter_map(|s| match s {
+            Shape::Circle(c) => Some((c.fill.r(), c.center, c.radius)),
+            Shape::Path(_) => None,
+            _ => panic!("only circles and a path"),
         }).collect();
         let at = |k: u8| circles.iter().filter(|c| c.0 == k).map(|c| (c.1, c.2)).collect::<Vec<_>>();
         assert_eq!(at(1), [(pos2(0.0, 40.0), 1400.0)], "the desk");
@@ -623,6 +681,18 @@ mod tests {
         assert_eq!(at(3), [(pos2(1.5, 0.8), 1.0)], "the zoom and the size of things");
         assert_eq!(at(4), [(pos2(200.0, 860.0), 1000.0)], "the bar");
         assert_eq!(at(5), [(Pos2::ZERO, 12.5)], "the time");
+        assert_eq!(at(14), [(pos2(-350.0, -180.0), 2100.0)], "the desk on the screen");
+        assert_eq!(at(15), [(pos2(700.0, 850.0), 1.0)], "the ground");
+        assert_eq!(d.window.len(), 1, "in the window");
+        assert_eq!(at(30), [(pos2(700.0, 850.0), 1.0)], "in the window, at the ground");
+        let path = d.desk.iter().find_map(|s| match s {
+            Shape::Path(p) => Some(p.clone()),
+            _ => None,
+        }).expect("a path");
+        assert_eq!(path.points, [pos2(450.0, 60.0), pos2(950.0, 60.0), pos2(950.0, 880.0), pos2(450.0, 880.0)], "round the page");
+        assert!(path.closed && path.fill == Color32::TRANSPARENT, "a line closed, not a fill");
+        assert_eq!(path.stroke.width, 1.5, "as wide as the zoom");
+        assert_eq!(d.ground, 3.0, "its ground");
         assert_eq!(at(6), [(pos2(0x5678 as f32, 0x1234 as f32), 1.0)], "the seed");
         assert_eq!(at(7), [(pos2(17.0, 3.0), 1.0)], "its pages and the garden's chapters");
         assert_eq!(at(8), [(pos2(0.0, 3.0), 1.0), (pos2(1.0, 5.0), 1.0), (pos2(2.0, 9.0), 1.0)], "the garden");
@@ -681,6 +751,15 @@ mod tests {
         let (mut ours, mut sdk) = (super::super::Seeds(0x5EED_1234), theme_sdk::Seeds::from_state(0x5EED_1234));
         for _ in 0..1000 {
             assert_eq!(ours.next(-3.0, 7.0), sdk.next(-3.0, 7.0));
+        }
+        // A built-in theme's numbers for a story are a program's for that story's seed.
+        for story in ["a story", "", "Ünïcode ✓", "0f3c9a1e-7b2d-4c55-9e10-2a6b8d4f1c37"] {
+            for k in [0, 1, 99_000, 135_000 + 9, usize::from(u16::MAX) * 70_000] {
+                let (mut ours, mut sdk) = (super::super::Seeds::of(story, k), theme_sdk::Seeds::of(story_seed(story), k));
+                for _ in 0..20 {
+                    assert_eq!(ours.next(0.0, 1.0), sdk.next(0.0, 1.0), "{story} {k}");
+                }
+            }
         }
         let (mut ours, mut sdk) = (super::super::Tended::default(), theme_sdk::Tended::default());
         let gardens: [&[u32]; 6] = [&[2], &[3], &[3], &[3, 1], &[3, 2], &[3, 2, 7]];

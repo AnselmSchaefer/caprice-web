@@ -49,7 +49,10 @@ impl Theme for Fireflies {
         sky.triangle(a, b, c);
         sky.triangle(a, c, d);
         out.desk.mesh(sky);
-        let ground = input.bar.map_or(area.bottom(), |bar| bar.top().min(area.bottom())) - 30.0 * u;
+        // The meadow's edge is its ground: 30 units above the foot of the desk, where Caprice zooms
+        // about, so it stays where it is on the screen.
+        out.ground = 30.0;
+        let ground = input.ground.y;
         out.desk.polygon(vec![pt(area.left(), ground), pt(area.right(), ground - 8.0 * u), area.max, pt(area.left(), area.bottom())], MEADOW);
 
         // A jar a chapter, beside the page, taking turns left and right and out from it.

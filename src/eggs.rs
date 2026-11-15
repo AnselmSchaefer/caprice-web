@@ -27,7 +27,6 @@
 //! shown is a function of the story and of time, so a test can look at any moment of it.
 
 use std::f32::consts::PI;
-use std::hash::{Hash, Hasher};
 
 use eframe::egui::{self, Color32, Pos2, Rect, Shape, Stroke, Vec2, pos2, vec2};
 
@@ -297,6 +296,10 @@ pub struct Eggs {
     pub own: own::Shown,
     /// The program theme shown, if one is (R36).
     pub program: program::Shown,
+    /// What the Magic Snow or a program theme painted last frame, when a test asks to keep it
+    /// (`Some`): for the test that the Snow ported to a program draws as the built-in one does.
+    #[cfg(test)]
+    pub painted: Option<Vec<Shape>>,
 }
 
 /// What the Magic Snow keeps while a story is shown, as the reef does: the story and the chapter
@@ -386,7 +389,9 @@ impl Default for Eggs {
             built_for: None, built: 0.0, built_at: 0.0, order: Vec::new(), scale: None, houses: Vec::new(), light: None, sailed_for: None, berths: Vec::new(), rigged: 0.0, rigged_at: 0.0,
             launch: None, ships: Vec::new(), forest_for: None, flowed: 0, born: Vec::new(), merge: None, forest: None,
             reef_for: None, beds: Vec::new(), branched: 0.0, branched_at: 0.0, spawn: None, reef: None,
-            ice: Tended::default(), snow: None, vines: Tended::default(), vineyard: None, own: own::Shown::default(), program: program::Shown::default() }
+            ice: Tended::default(), snow: None, vines: Tended::default(), vineyard: None, own: own::Shown::default(), program: program::Shown::default(),
+            #[cfg(test)]
+            painted: None }
     }
 }
 
@@ -404,6 +409,15 @@ impl Eggs {
         }
         self.scale = Some((shown, now));
         shown
+    }
+
+    /// `shapes` painted on the desk, and kept if a test asked (`painted`).
+    fn paint(&mut self, painter: &egui::Painter, shapes: Vec<Shape>) {
+        #[cfg(test)]
+        if let Some(kept) = &mut self.painted {
+            kept.clone_from(&shapes);
+        }
+        painter.extend(shapes);
     }
 
     /// Each magic theme to show the garden as it stands at its next frame, as when it is picked.
@@ -434,10 +448,17 @@ pub fn height_of(pages: usize) -> f32 {
 struct Seeds(u64);
 
 impl Seeds {
+    /// The numbers for `k` of the story `story`: from the story's seed (`program::story_seed`), as a
+    /// theme program's are (the SDK's `Seeds::of`), so they are the same on every machine and with
+    /// every Rust. (The standard library's hasher they once came from differs between 32- and
+    /// 64-bit and may change between releases.) Fixed for good: changing it moves every writer's
+    /// garden, houses, ships and igloos.
     fn of(story: &str, k: usize) -> Seeds {
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        (story, k).hash(&mut h);
-        Seeds(h.finish() | 1)
+        // splitmix64: every seed and number gives a number of its own.
+        let mut z = program::story_seed(story) ^ (k as u64).wrapping_add(1).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        Seeds((z ^ (z >> 31)) | 1)
     }
 
     /// A number from `lo` to `hi`.
@@ -2447,6 +2468,19 @@ mod tests {
     /// The desk the tests' pages lie on: a wide window.
     fn desk() -> Rect {
         Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 900.0))
+    }
+
+    #[test]
+    fn a_story_s_magic_themes_are_laid_out_the_same_everywhere_for_good() {
+        // Fixed numbers, not worked out here: they must not change with the machine, the Rust or
+        // anything else, or every writer's garden, houses and igloos move.
+        let numbers = |story: &str, k: usize| {
+            let mut s = Seeds::of(story, k);
+            (0..3).map(|_| s.next(0.0, 10_000.0) as u32).collect::<Vec<_>>()
+        };
+        assert_eq!(numbers("a story", 0), [6104, 9659, 2332]);
+        assert_eq!(numbers("a story", 99_000), [2060, 946, 4101]);
+        assert_eq!(numbers("0f3c9a1e-7b2d-4c55-9e10-2a6b8d4f1c37", 135_009), [6230, 2463, 4500]);
     }
 
     #[test]

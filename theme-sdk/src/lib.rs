@@ -4,9 +4,12 @@
 //! (`Theme::frame`); it answers with shapes, behind the pages and, while a title is carried, over
 //! the page. It may ask Caprice a few things (`host`), never change anything.
 //!
-//! What it draws are egui's shapes, built as egui builds them: circles, convex polygons, lines and
-//! meshes of coloured triangles. No text, no pictures. It lays everything out for the desk at the
-//! fitting zoom (`Input::area`, `Input::page`); Caprice zooms it all at once.
+//! What it draws are egui's shapes, built as egui builds them: circles, convex polygons, lines,
+//! paths and meshes of coloured triangles. No text, no pictures. It lays everything out for the
+//! desk at the fitting zoom (`Input::area`, `Input::page`); Caprice zooms it all at once, about the
+//! theme's ground (`Out::ground`), which stays where it is on the screen. What is in the window
+//! rather than on the desk (snow falling) goes in `Out::window`, laid out on `Input::window` and
+//! never zoomed.
 //!
 //! Polygons cost the most to draw (egui smooths every edge, doubling its points): a gradient or a
 //! field of many small fills is cheaper as one mesh. A frame may hold 40 000 points (a polygon's
@@ -23,9 +26,10 @@ pub mod bindings;
 #[doc(hidden)]
 pub mod rt;
 
-use std::ops::{Add, Mul, Sub};
+use std::f32::consts::PI;
+use std::ops::{Add, Mul, Neg, Sub};
 
-pub use bindings::caprice::theme::types::{Carrier, Circle, Event, Line, Mesh, Pages, Point, Polygon, Pose, Rect, Shape, Vertex};
+pub use bindings::caprice::theme::types::{Carrier, Circle, Event, Line, Mesh, Pages, Path, Point, Polygon, Pose, Rect, Shape, Vertex};
 
 /// What a theme may ask of Caprice, at any time.
 pub mod host {
@@ -104,17 +108,20 @@ impl<T: Theme> Running<T> {
         let input = Input::from(input);
         let out = &mut self.out;
         out.desk.0.clear();
+        out.window.0.clear();
         out.over.0.clear();
-        (out.next, out.title_offset) = (0, Point::ZERO);
+        (out.next, out.title_offset, out.ground) = (0, Point::ZERO, 0.0);
         let theme = self.theme.get_or_insert_with(T::new);
         theme.frame(&input, &mut self.out);
         let out = &mut self.out;
         // The lists go to Caprice, which reads them and has them freed after (`cabi_post_frame`).
         bindings::FrameOutput {
             desk: std::mem::take(&mut out.desk.0),
+            window: std::mem::take(&mut out.window.0),
             over: std::mem::take(&mut out.over.0),
             next: out.next,
             title_offset: out.title_offset,
+            ground: out.ground,
         }
     }
 }
@@ -130,28 +137,40 @@ pub struct Input {
     /// The page bar, if it shows: anything growing up from the desk's foot keeps above it.
     pub bar: Option<Rect>,
     /// How far the writer has zoomed in on the page (1 at the fitting zoom). Caprice zooms what is
-    /// drawn itself, about the foot of the desk under the page's middle: a theme lays out as at 1.
+    /// drawn itself, about `ground`: a theme lays out as at 1.
     pub zoom: f32,
     /// The size of things: 1 on a desk 900 high, followed over a moment when the window changes.
     pub unit: f32,
+    /// The desk as it lies on the screen, at every zoom: what `Out::window` is laid out on.
+    pub window: Rect,
+    /// The point Caprice zooms about: under the page's middle, as high as the theme's ground
+    /// (`Out::ground`). It stays where it is on the screen, so what stands there stays too.
+    pub ground: Point,
     pub carrier: Option<Carrier>,
 }
 
 impl From<bindings::FrameInput> for Input {
     fn from(i: bindings::FrameInput) -> Input {
-        Input { time: i.time, area: i.desk.area, page: i.desk.page, bar: i.desk.bar, zoom: i.desk.zoom, unit: i.desk.unit, carrier: i.carrier }
+        let d = i.desk;
+        Input { time: i.time, area: d.area, page: d.page, bar: d.bar, zoom: d.zoom, unit: d.unit, window: d.window, ground: d.ground, carrier: i.carrier }
     }
 }
 
-/// What a frame draws: shapes behind every page, shapes over the settled page while a title is
-/// carried, when the next frame is wanted, and how far the carried title is from its place.
+/// What a frame draws: shapes behind every page (on the desk, zoomed; then in the window, not),
+/// shapes over the settled page while a title is carried, when the next frame is wanted, how far
+/// the carried title is from its place, and where the theme's ground is.
 #[derive(Clone, Debug, Default)]
 pub struct Out {
     pub desk: Layer,
+    pub window: Layer,
     pub over: Layer,
     /// Milliseconds until the next frame is wanted: 0 (the default) while anything moves.
     pub next: u32,
     pub title_offset: Point,
+    /// How far above the foot of the desk (the top of the page bar when it lies along it) the
+    /// theme's ground is, in units (0, the default, is the foot itself). Caprice zooms about it
+    /// from the next frame on, and says where it is in `Input::ground`.
+    pub ground: f32,
 }
 
 /// Shapes in the order they are drawn, the first furthest back.
@@ -170,6 +189,90 @@ impl Layer {
 
     pub fn line(&mut self, a: Point, b: Point, width: f32, color: Color) {
         self.0.push(Shape::Line(Line { a, b, width, color: color.0 }));
+    }
+
+    /// A line through `points`, joined where it bends, and back to the first if `closed`: unlike
+    /// lines one after another, it shows no knots where they meet when it is see-through.
+    pub fn path(&mut self, points: Vec<Point>, closed: bool, width: f32, color: Color) {
+        self.0.push(Shape::Path(Path { points, closed, width, color: color.0 }));
+    }
+
+    /// A filled convex shape that egui draws cleanly, as Caprice's own themes fill one. egui
+    /// pushes a shape's soft edge out along each corner, the further the sharper the corner: a
+    /// corner folded nearly flat draws a spike right across the window. So points on top of each
+    /// other are merged, corners sharper than about 25 degrees cut by a hair, and a sliver too thin
+    /// to see is left out.
+    pub fn solid(&mut self, points: Vec<Point>, color: Color) {
+        let mut ps: Vec<Point> = Vec::new();
+        for p in points {
+            if ps.last().is_none_or(|q| q.distance(p) > 0.05) {
+                ps.push(p);
+            }
+        }
+        while ps.len() > 1 && ps[0].distance(ps[ps.len() - 1]) <= 0.05 {
+            ps.pop();
+        }
+        let n = ps.len();
+        if n < 3 {
+            return;
+        }
+        let area = (0..n).map(|i| ps[i].y * ps[(i + 1) % n].x + -ps[i].x * ps[(i + 1) % n].y).sum::<f32>().abs() / 2.0;
+        let longest = (0..n).map(|i| ps[i].distance(ps[(i + 1) % n])).fold(0.0, f32::max);
+        if area / longest < 0.3 {
+            return;
+        }
+        let mut out = Vec::with_capacity(2 * n);
+        for i in 0..n {
+            let (before, p, after) = (ps[(i + n - 1) % n], ps[i], ps[(i + 1) % n]);
+            let (a, b) = ((before - p).normalized(), (after - p).normalized());
+            if a.dot(b) > 0.9 {
+                let cut = 0.4f32.min(p.distance(before) * 0.3).min(p.distance(after) * 0.3);
+                out.extend([p + a * cut, p + b * cut]);
+            } else {
+                out.push(p);
+            }
+        }
+        self.polygon(out, color);
+    }
+
+    /// An oval around `c`, `a` long along `along` (a way of length 1) and `b` across it.
+    pub fn oval(&mut self, c: Point, along: Point, a: f32, b: f32, color: Color) {
+        let across = pt(-along.y, along.x);
+        let points = (0..20).map(|k| {
+            let r = k as f32 / 20.0 * 2.0 * PI;
+            c + along * a * r.cos() + across * b * r.sin()
+        });
+        self.solid(points.collect(), color);
+    }
+
+    /// Light about `at`, `r` across and `h` high, `alpha` at its middle and fading smoothly to
+    /// nothing at its edge: one mesh, so it shows no rings (Caprice's own themes' glow).
+    pub fn radial(&mut self, at: Point, r: f32, h: f32, color: Color, alpha: f32) {
+        let mut mesh = Mesh::new();
+        mesh.vertex(at, color.see_through(alpha));
+        let rings = [(0.35, 0.55), (0.7, 0.18), (1.0, 0.0)];
+        let n = 32;
+        for &(f, a) in &rings {
+            for i in 0..n {
+                let ang = i as f32 / n as f32 * 2.0 * PI;
+                mesh.vertex(at + pt(ang.cos() * r * f, ang.sin() * h * f), color.see_through(alpha * a));
+            }
+        }
+        for i in 0..n {
+            let j = (i + 1) % n;
+            mesh.triangle(0, 1 + i, 1 + j);
+            for ring in 0..rings.len() as u32 - 1 {
+                let (a, b) = (1 + ring * n, 1 + (ring + 1) * n);
+                mesh.triangle(a + i, b + i, a + j);
+                mesh.triangle(a + j, b + i, b + j);
+            }
+        }
+        self.mesh(mesh);
+    }
+
+    /// Another layer's shapes after this one's.
+    pub fn append(&mut self, other: Layer) {
+        self.0.extend(other.0);
     }
 
     pub fn mesh(&mut self, mesh: Mesh) {
@@ -221,6 +324,20 @@ impl Point {
         self.x.hypot(self.y)
     }
 
+    pub fn distance(self, to: Point) -> f32 {
+        (self - to).length()
+    }
+
+    /// The same way, of length 1 (unless it is none).
+    pub fn normalized(self) -> Point {
+        let len = self.length();
+        if len <= 0.0 { self } else { pt(self.x / len, self.y / len) }
+    }
+
+    pub fn dot(self, o: Point) -> f32 {
+        self.x * o.x + self.y * o.y
+    }
+
     /// The way `angle` radians round from the right, clockwise on the screen (egui's `Vec2::angled`).
     pub fn angled(angle: f32) -> Point {
         let (sin, cos) = angle.sin_cos();
@@ -255,6 +372,13 @@ impl Sub for Point {
     type Output = Point;
     fn sub(self, o: Point) -> Point {
         pt(self.x - o.x, self.y - o.y)
+    }
+}
+
+impl Neg for Point {
+    type Output = Point;
+    fn neg(self) -> Point {
+        pt(-self.x, -self.y)
     }
 }
 
@@ -294,6 +418,17 @@ impl Rect {
     pub fn contains(&self, p: Point) -> bool {
         p.x >= self.min.x && p.x <= self.max.x && p.y >= self.min.y && p.y <= self.max.y
     }
+    pub fn contains_rect(&self, r: Rect) -> bool {
+        self.contains(r.min) && self.contains(r.max)
+    }
+    /// Whether the two overlap across (their spans of x meet).
+    pub fn overlaps_across(&self, r: Rect) -> bool {
+        self.min.x <= r.max.x && r.min.x <= self.max.x
+    }
+    /// Its four corners, round from the top left: to fill it as a polygon.
+    pub fn corners(&self) -> Vec<Point> {
+        vec![self.min, pt(self.max.x, self.min.y), self.max, pt(self.min.x, self.max.y)]
+    }
 }
 
 /// A colour as egui keeps it: sRGB, premultiplied by its alpha, red in the lowest byte.
@@ -327,11 +462,27 @@ impl Color {
         Color::premultiplied(m(r), m(g), m(b), m(a))
     }
 
-    /// From this to `to`, `t` of the way.
+    /// From this to `to`, `t` of the way (egui's `lerp_to_gamma`, which Caprice's own themes mix with).
     pub fn lerp(self, to: Color, t: f32) -> Color {
         let (a, b, t) = (self.parts(), to.parts(), t.clamp(0.0, 1.0));
-        let m = |i: usize| (a[i] as f32 + (b[i] as f32 - a[i] as f32) * t + 0.5) as u8;
+        let m = |i: usize| ((1.0 - t) * a[i] as f32 + t * b[i] as f32 + 0.5) as u8;
         Color::premultiplied(m(0), m(1), m(2), m(3))
+    }
+
+    /// This colour, made see-through by `alpha` (0 to 1) however see-through it was: as Caprice's
+    /// own themes make their glows and shadows (egui's `from_rgba_unmultiplied`).
+    pub fn see_through(self, alpha: f32) -> Color {
+        let [r, g, b, _] = self.parts();
+        let a = (alpha.clamp(0.0, 1.0) * 255.0) as u8;
+        let m = |c: u8| {
+            let p = c as u16 * a as u16 + 128;
+            ((p + (p >> 8)) >> 8) as u8
+        };
+        match a {
+            0 => Color::TRANSPARENT,
+            255 => Color::rgb(r, g, b),
+            a => Color::premultiplied(m(r), m(g), m(b), a),
+        }
     }
 }
 
@@ -354,6 +505,12 @@ impl Seeds {
     #[doc(hidden)]
     pub fn from_state(state: u64) -> Seeds {
         Seeds(state)
+    }
+
+    /// The generator's state: for the tests that seed Caprice's own themes as a ported one is.
+    #[doc(hidden)]
+    pub fn state(&self) -> u64 {
+        self.0
     }
 
     /// A number from `lo` to `hi`.
