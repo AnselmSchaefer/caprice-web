@@ -2536,11 +2536,21 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   and points shown against `gallery::BUDGET`. "Publish it" is offered only then, and sends the hash
   of what was built. "Use" fetches the file, checks the gallery's signature over its module before
   anything is kept, and adds it with that signature; one already on the shelf is chosen instead.
-  Yours shows the themes from the gallery, those made with Claude and the drawings apart, in that
-  order. Tests: `a_theme_made_with_claude_is_sent_built_again_by_the_owner_published_and_used_from_the_gallery`,
+  A theme is on the shelf once: if the writer's own program is the module taken, byte for byte (the
+  one they made and sent), it is given the signature and becomes the gallery's, source and `sent`
+  kept (`Shelf::sign`); a shelf read that holds both, from before, keeps the gallery's
+  (`Shelf::join_doubles`). Yours shows the themes from the gallery, those made with Claude and the
+  drawings apart, in that order; the themes' menu is two tiles wide whichever it shows
+  (`THEMES_WIDE`: a menu never narrows again, so nothing in it may be wider). The Gallery window
+  and the one that sends are no wider than the screen (`ui::window_width`, its themes one to three
+  to a row), and close with the story (`Gallery::close` in `leave`): they are not drawn over the
+  welcome page, and would wait there for the next story. Tests: `a_theme_made_with_claude_is_sent_built_again_by_the_owner_published_and_used_from_the_gallery`,
   `the_owner_refuses_a_theme_that_is_not_built_again_the_same_and_says_why`,
   `only_the_owner_is_shown_the_themes_waiting_and_the_gallery_is_for_writers_signed_in`,
-  `yours_shows_the_themes_from_the_gallery_those_made_with_claude_and_the_drawings_apart_and_sends_each_once`.
+  `yours_shows_the_themes_from_the_gallery_those_made_with_claude_and_the_drawings_apart_and_sends_each_once`,
+  `a_shelf_holding_a_theme_as_made_and_as_taken_from_the_gallery_keeps_the_gallery_s_alone`,
+  `the_themes_menu_is_as_wide_as_its_two_tiles_whichever_themes_it_shows`,
+  `the_gallery_window_fits_a_phone_s_screen_and_goes_when_the_story_is_closed`.
 - **A theme is built from its source in the writer's tab, by one fixed toolchain** (`web/compiler/`,
   `platform::compiler`, the plan's step 4): rustc and wasm-ld built as WebAssembly (the
   investigation's release, `1.99.1-6c798e2613f0`), rustup's std for `wasm32-unknown-unknown`

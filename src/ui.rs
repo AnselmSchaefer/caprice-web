@@ -303,6 +303,9 @@ pub fn theme_tile(ui: &mut egui::Ui, name: &str, about: &str, c: crate::theme::P
     resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
 }
 
+/// How wide the themes' menu is: two tiles and the gap between them.
+const THEMES_WIDE: f32 = 2.0 * 150.0 + 12.0;
+
 /// The themes: the classic ones, of colours alone, the magic ones, or the writer's own, as the
 /// switch at the top says (first those of the theme in use, then as last switched); the one clicked
 /// becomes `theme`, and what is asked for among the writer's own is given back.
@@ -312,6 +315,9 @@ fn theme_gallery(ui: &mut egui::Ui, theme: &mut Theme, yours: &Yours) -> Option<
     let first = if *theme == Theme::Own { 2u8 } else { u8::from(theme.magic()) };
     let mut shown = ui.data(|d| d.get_temp::<u8>(id)).unwrap_or(first);
     let mut ask = None;
+    // As wide as its two tiles, whichever it shows: a menu keeps the width of the widest thing it
+    // ever held, so a long line under Yours would leave Classic and Magic wide and half empty.
+    ui.set_width(THEMES_WIDE);
     ui.horizontal(|ui| {
         ui.selectable_value(&mut shown, 0, "Classic").on_hover_text("Colours around the page");
         ui.selectable_value(&mut shown, 1, "Magic").on_hover_text("Themes that hide things to find");
@@ -325,7 +331,7 @@ fn theme_gallery(ui: &mut egui::Ui, theme: &mut Theme, yours: &Yours) -> Option<
     ui.data_mut(|d| d.insert_temp(id, shown));
     ui.separator();
     if shown == 2 {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if yours.importing {
                 ui.spinner();
                 ui.label("Reading the theme\u{2026}");

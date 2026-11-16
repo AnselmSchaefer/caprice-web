@@ -7318,6 +7318,9 @@ mod tests {
         assert!(!labels.contains("more than the"), "within the points a frame is asked to keep within: {labels}");
         h.click_widget("Publish it");
         h.frames_until("published", |a| a.gallery.review_is_none());
+        h.frames(2, vec![], Modifiers::NONE);
+        let labels = h.labels();
+        assert!(labels.contains("is published: it is in the gallery now") && !labels.contains("refused"), "a yes is told as a yes: {labels}");
         let signed = {
             let o = server.0.borrow();
             let t = &o.gallery[0];
@@ -7339,15 +7342,103 @@ mod tests {
         // With the gallery's key, it goes on the shelf as the gallery's, and is played.
         h.app.themes.own.gallery_key = cloud::stand_in::gallery_key();
         h.click_widget("Use");
-        h.frames_until("taken", |a| a.themes.own.entries.len() == 2);
-        let taken = h.app.themes.own_id.clone().unwrap();
-        assert_ne!(taken, made, "the theme taken is the one in use");
-        let entry = h.app.themes.own.get(&taken).unwrap();
+        h.frames_until("taken", |a| !a.gallery.busy() && a.themes.own.entries.iter().any(|e| e.from_gallery));
+        // The writer's own theme is that very program: it becomes the gallery's, and is not there twice.
+        assert_eq!(h.app.themes.own.entries.len(), 1, "not beside itself");
+        assert_eq!(h.app.themes.own_id.as_deref(), Some(made.as_str()), "the theme taken is the one in use");
+        let entry = h.app.themes.own.get(&made).unwrap();
         assert!(entry.from_gallery && entry.shown_name() == "Fireflies at dusk" && entry.gallery.as_ref() == Some(&signed), "{entry:?}");
+        assert!(entry.sent.is_some() && h.app.themes.own.source(&made).is_some(), "still sent, with its source");
         h.frames_until("the program's first frame", |a| a.eggs.program.seen.as_ref().is_some_and(|s| s.frames > 0));
         h.frames(2, vec![], Modifiers::NONE);
         assert!(h.painted_at("On your shelf").is_some(), "the gallery says it is taken");
+        h.click_widget("Page");
+        h.click_widget(&format!("{} \u{23f5}", h.app.themes.name()));
+        h.click_widget("Yours");
+        assert!(h.painted_at("From Gallery").is_some() && h.painted_at("Made with Claude").is_none(), "shown once, as the gallery's");
+    }
 
+    #[test]
+    fn a_shelf_holding_a_theme_as_made_and_as_taken_from_the_gallery_keeps_the_gallery_s_alone() {
+        let dir = std::env::temp_dir().join(format!("caprice-gallery-double-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let key = ed25519_compact::KeyPair::from_seed(ed25519_compact::Seed::new([7; 32]));
+        let mut signed = own::Signed { name: "Fireflies of the gallery".into(), source: "ab".repeat(32), toolchain: "1.99.1-6c798e2613f0".into(), signature: String::new() };
+        signed.signature = {
+            use base64::Engine;
+            base64::engine::general_purpose::STANDARD.encode(*key.sk.sign(signed.message(FIREFLIES), None))
+        };
+        // As an earlier Caprice left it: the theme made and sent, and the same taken, side by side.
+        let mut shelf = own::Shelf::kept_in(Some(dir.clone()));
+        shelf.gallery_key = *key.pk;
+        let made = shelf.add_program("Mine", "", Default::default(), FIREFLIES, None).unwrap();
+        shelf.set_sent(&made, "0000000000000009");
+        let other = shelf.add_program("Snow", "", Default::default(), &bundle::open(SNOW_FILE, "snow").unwrap().bundle.module, None).unwrap();
+        let taken = shelf.add_program("Mine", "", Default::default(), FIREFLIES, Some(signed.clone())).unwrap();
+        shelf.join_doubles();
+        let ids: Vec<_> = shelf.entries.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(ids, [other.as_str(), taken.as_str()], "the gallery's stays, and any other program");
+        let entry = shelf.get(&taken).unwrap();
+        assert!(entry.from_gallery && entry.sent.as_deref() == Some("0000000000000009"), "{entry:?}");
+        assert!(!dir.join(format!("{made}.wasm")).exists(), "its files go with it");
+
+        // Taken now, the writer's own becomes the gallery's; a program that is another is left alone.
+        shelf.remove(&taken);
+        let made = shelf.add_program("Mine", "", Default::default(), FIREFLIES, None).unwrap();
+        assert_eq!(shelf.sign(&signed, FIREFLIES), Some(made.clone()));
+        assert!(shelf.get(&made).unwrap().from_gallery && !shelf.get(&other).unwrap().from_gallery && shelf.entries.len() == 2);
+        assert_eq!(shelf.sign(&signed, FIREFLIES), None, "the gallery's own is not signed again");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_themes_menu_is_as_wide_as_its_two_tiles_whichever_themes_it_shows() {
+        let mut h = Harness::new();
+        h.click_widget("Page");
+        h.click_widget(&format!("{} \u{23f5}", h.app.themes.name()));
+        let wide = |h: &mut Harness, tab: &str| {
+            h.click_widget(tab);
+            h.frames(3, vec![], Modifiers::NONE);
+            let at = h.painted_at(tab).unwrap_or_else(|| panic!("no {tab:?}"));
+            let menu = h.ctx.memory(|m| m.layer_id_at(at).and_then(|l| m.area_rect(l.id))).expect("the menu");
+            menu.width()
+        };
+        // Yours first, whose words about making a theme are long.
+        let (yours, magic, classic) = (wide(&mut h, "Yours"), wide(&mut h, "Magic"), wide(&mut h, "Classic"));
+        assert!(magic < 340.0, "two tiles and the frame, no wider: {magic}");
+        assert!(yours == magic && magic == classic, "{yours} {magic} {classic}");
+    }
+
+    #[test]
+    fn the_gallery_window_fits_a_phone_s_screen_and_goes_when_the_story_is_closed() {
+        let mut h = Harness::new();
+        h.width = 340.0;
+        let dir = with_shelf(&mut h, "gallery-phone");
+        let server = online(&mut h, &dir, true);
+        h.frames(12, vec![], Modifiers::NONE);
+        let public = |id: &str| {
+            let b = bundle::open(SNOW_FILE, "snow").unwrap().bundle;
+            cloud::stand_in::Sent { id: id.into(), user: "bea".into(), file: bundle::write(&b).unwrap(), manifest: b.manifest, module: b.module,
+                source: String::new(), state: "public".into(), why: String::new(), signature: String::new() }
+        };
+        server.0.borrow_mut().gallery = vec![public("00000000000000a1"), public("00000000000000a2"), public("00000000000000a3")];
+        let ctx = h.ctx.clone();
+        h.app.open_gallery(&ctx);
+        h.frames_until("the gallery listed", |a| !a.gallery.busy());
+        h.frames(4, vec![], Modifiers::NONE);
+        let window = h.ctx.memory(|m| m.area_rect(egui::Id::new("theme_gallery_window"))).unwrap();
+        assert!(h.ctx.content_rect().contains_rect(window), "all of it on the screen: {window:?}");
+        let uses: Vec<_> = h.painted.iter().filter_map(|cs| match &cs.shape {
+            egui::Shape::Text(t) if t.galley.job.text == "Use" => Some(t.pos),
+            _ => None,
+        }).collect();
+        assert!(uses.len() == 3 && uses.iter().all(|p| window.contains(*p)), "each theme's button in it: {uses:?}");
+
+        // Back at the welcome page, and in the next story, it is gone.
+        h.app.leave(&ctx, fileio::Leaving::Home);
+        h.frames(3, vec![], Modifiers::NONE);
+        assert!(h.app.start.open && !h.app.gallery.open, "closed with the story");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -7358,7 +7449,7 @@ mod tests {
         server.0.borrow_mut().owner = true;
         h.frames(12, vec![], Modifiers::NONE);
         h.app.themes.own.gallery_key = cloud::stand_in::gallery_key();
-        // Fireflies made with Claude and sent; the same published and taken; and a drawing.
+        // Snow made with Claude and sent; fireflies taken from the gallery; and a drawing.
         let file = |toolchain: &str| {
             let mut b = bundle::open(SNOW_FILE, "snow").unwrap().bundle;
             b.manifest.toolchain = toolchain.into();
@@ -7367,7 +7458,8 @@ mod tests {
             b.manifest.name = "Fireflies".into();
             b
         };
-        let made = h.app.themes.own.add_bundle(&file("the tests' stand-in"), None).unwrap();
+        let snow = bundle::open(SNOW_FILE, "snow").unwrap().bundle;
+        let made = h.app.themes.own.add_bundle(&snow, None).unwrap();
         h.app.themes.own.set_sent(&made, "0000000000000009");
         let module = include_bytes!("../tests/fixtures/fireflies.wasm");
         let signed = {
@@ -7428,6 +7520,8 @@ mod tests {
         h.type_text("Built by an older Caprice");
         h.click_widget("Refuse it");
         h.frames_until("refused", |a| a.gallery.review_is_none());
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.labels().contains("is refused: its writer reads why"), "{}", h.labels());
         {
             let o = server.0.borrow();
             assert_eq!((o.gallery[0].state.as_str(), o.gallery[0].why.as_str()), ("refused", "Built by an older Caprice"));
