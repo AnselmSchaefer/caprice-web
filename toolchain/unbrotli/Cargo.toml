@@ -1,0 +1,23 @@
+# Brotli decoding in the writer's tab (web/compiler/toolchain.js): the toolchain is served as
+# brotli files cut in pieces under Workers' 25 MiB a file, as plain static files, and Chromium's
+# DecompressionStream has no brotli. Built by toolchain/pack.mjs for wasm32-unknown-unknown, apart
+# from Caprice's own build (its own workspace), importing nothing.
+[package]
+name = "unbrotli"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+brotli-decompressor = { version = "=5.0.3", default-features = false, features = ["std"] }
+
+[workspace]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"

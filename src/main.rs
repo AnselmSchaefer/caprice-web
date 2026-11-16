@@ -7068,6 +7068,94 @@ mod tests {
         assert!(h.painted_at("Theme not added").is_some());
     }
 
+    /// A theme program's source, imported as a writer would from a `.rs` file of that name.
+    fn import_source(h: &mut Harness, name: &str, source: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("caprice-theme-source-{}-{}", std::process::id(), name.len()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join(format!("{name}.rs"));
+        std::fs::write(&file, source).unwrap();
+        h.app.themes = theme::Themes::kept_in(Some(dir.join("theme.json")));
+        h.frames(3, vec![], Modifiers::NONE);
+        let ctx = h.ctx.clone();
+        h.app.import_theme(&ctx, &file);
+        dir
+    }
+
+    #[test]
+    fn a_theme_s_source_imported_is_built_kept_with_its_source_and_toolchain_and_played() {
+        // The Snow's source alone: built (by the tests' stand-in, to the module the toolchain
+        // builds from it), on the shelf, chosen and playing; with no palette of its own.
+        let source = include_str!("../themes/snow/theme.rs");
+        let mut h = Harness::new();
+        let dir = import_source(&mut h, "Night_snow", source);
+        h.frames_until("the theme", |a| a.themes.theme == theme::Theme::Own);
+        let report = h.app.workshop.report.as_ref().expect("a report");
+        assert!(report.added && report.name == "Night snow", "named after its file: {:?}", report.problems);
+        assert!(report.found.iter().any(|f| f.starts_with("Built in this browser")), "{:?}", report.found);
+        assert!(report.notes.iter().any(|n| n.contains("no palette of its own")), "{:?}", report.notes);
+        assert!(h.app.workshop.building.is_none(), "the compiler is ended once it has built it");
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.painted_at("Theme added").is_some());
+        h.click_widget("OK");
+        h.frames_until("the program's first frame", |a| a.eggs.program.seen.as_ref().is_some_and(|s| s.frames > 0));
+        assert!(program_seen(&h).stopped.is_none() && program_seen(&h).window == 140, "the Snow falling: {:?}", program_seen(&h));
+        let id = h.app.themes.own_id.clone().unwrap();
+        let entry = h.app.themes.own.get(&id).unwrap();
+        assert!(entry.program && entry.toolchain == "the tests' stand-in", "kept with the toolchain that built it: {entry:?}");
+        assert_eq!(h.app.themes.own.source(&id).as_deref(), Some(source), "its source kept, to be built again");
+        // Exported, it is a theme file of its module and its source.
+        let out = dir.join("given.caprice-theme");
+        h.app.export_theme_to(&id, &out);
+        let given = bundle::open(&std::fs::read(&out).unwrap(), "given").unwrap_or_else(|e| panic!("{e:?}"));
+        assert!(given.bundle.module == include_bytes!("../tests/fixtures/snow.wasm") && given.bundle.source.as_deref() == Some(source));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_theme_s_source_with_mistakes_is_not_added_and_the_window_shows_what_the_compiler_said() {
+        use platform::compiler::{Built, stand_in};
+        let source = "fn frame( {";
+        let said = "error: this file contains an unclosed delimiter\n --> /theme/theme.rs:1:11";
+        stand_in(source, Ok(Built::Errors(said.into())));
+        let mut h = Harness::new();
+        let dir = import_source(&mut h, "Broken", source);
+        h.frames_until("a report", |a| a.workshop.report.is_some());
+        let report = h.app.workshop.report.as_ref().unwrap();
+        assert!(!report.added && report.problems.iter().any(|p| p.contains("did not build")), "{:?}", report.problems);
+        assert!(h.app.themes.own.entries.is_empty() && h.app.themes.theme == theme::Theme::Midnight, "nothing on the shelf");
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.painted_at("Theme not added").is_some());
+        let shown = h.painted.iter().any(|cs| matches!(&cs.shape, egui::Shape::Text(t) if t.galley.job.text.contains("unclosed delimiter")));
+        assert!(shown, "the compiler's words, in the window");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_theme_being_built_says_how_far_the_compiler_has_loaded_and_can_be_stopped() {
+        use platform::compiler::{State, stand_in};
+        let source = "// a theme the compiler is still loading for";
+        stand_in(source, Err(State::Loading { fetched: 12 << 20, of: 52 << 20 }));
+        let mut h = Harness::new();
+        let dir = import_source(&mut h, "Slow", source);
+        h.frames_until("the build", |a| a.workshop.building.is_some());
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.painted_at("Building a theme").is_some(), "a window while it is built");
+        assert!(h.painted_at("Loading the compiler: 12 of 52 MB").is_some() && h.painted_at("Only this once: then this browser keeps it.").is_some());
+        h.click_widget("Stop");
+        assert!(h.app.workshop.building.is_none() && h.app.workshop.report.is_none() && h.app.themes.own.entries.is_empty(), "stopped, nothing kept");
+        assert!(h.app.shown_status.contains("not built"), "{}", h.app.shown_status);
+        // A browser that cannot build says so, and nothing is kept.
+        let other = "// a theme in a browser that cannot build";
+        stand_in(other, Err(State::Failed { why: "Making a theme needs Chrome or Edge on a computer.".into(), unsupported: true }));
+        let ctx = h.ctx.clone();
+        std::fs::write(dir.join("Other.rs"), other).unwrap();
+        h.app.import_theme(&ctx, &dir.join("Other.rs"));
+        h.frames_until("a report", |a| a.workshop.report.is_some());
+        assert_eq!(h.app.workshop.report.as_ref().unwrap().problems, ["Making a theme needs Chrome or Edge on a computer."]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn a_program_theme_that_fails_or_draws_more_than_it_may_is_stopped_with_a_word_why() {
         use platform::program::{Stand, stand_in};

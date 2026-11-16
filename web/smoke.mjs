@@ -343,6 +343,41 @@ check("a theme file imported goes on the shelf, its source with it, and plays at
   imported.some(k => k.endsWith(".wasm")) && imported.some(k => k.endsWith(".rs")) && page.workers().some(w => w.url().endsWith("/theme-worker.js"))
     && snowy[2] > 200 && snowy[2] >= snowy[0], `${imported.join(" ")}; ${snowy.join(",")}`);
 
+// A theme program's source (R36, the plan's step 4): the Magic Snow's theme.rs alone, imported
+// through the picker from the menu still open, built in this tab by the compiler in workers of its
+// own (fetched the first time, 52 MiB), and kept. The module it built is the fixture, byte for byte:
+// the toolchain makes the same bytes in every browser and natively, so a theme kept as its source
+// can always be built again. The compiler is ended once it has built it.
+const compiler = await fetch(new URL("compiler/toolchain.json", url)).then(r => r.ok ? r.json() : null, () => null);
+if (!compiler) {
+  console.log("- this build has no compiler for themes (web/build.sh found no toolchain): building a source is not checked");
+} else {
+  const keptBytes = path => page.evaluate(path => new Promise((done, failed) => {
+    const r = indexedDB.open("caprice", 1);
+    r.onsuccess = () => {
+      const req = r.result.transaction("files", "readonly").objectStore("files").get(path);
+      req.onsuccess = () => done(req.result ? Array.from(new Uint8Array(req.result.bytes)) : []);
+      req.onerror = () => failed(req.error);
+    };
+    r.onerror = () => failed(r.error);
+  }), path);
+  const before = new Set(await kept());
+  const t0 = Date.now();
+  await upload(path.join(path.dirname(fileURLToPath(import.meta.url)), "../themes/snow/theme.rs"), [928, 165]);
+  await page.screenshot({ path: `${out}/12-theme-building.png` });
+  let built;
+  while (!built && Date.now() - t0 < 180000) {
+    built = (await kept()).find(k => !before.has(k) && k.startsWith("/caprice/themes/") && k.endsWith(".wasm"));
+    if (!built) await page.waitForTimeout(500);
+  }
+  const seconds = ((Date.now() - t0) / 1000).toFixed(1);
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path: `${out}/12-theme-built.png` });
+  const same = built !== undefined && Buffer.from(await keptBytes(built)).equals(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../tests/fixtures/snow.wasm")));
+  check("a theme's source is built in the tab, to the very module the toolchain builds anywhere", same, `${built ?? "nothing built"} in ${seconds} s, toolchain ${compiler.id}`);
+  check("and the compiler is ended once it has built it", !page.workers().some(w => w.url().endsWith("/compiler/compiler.js")));
+}
+
 await keptAndOpened([["/caprice/theme.json", '{"own":"smoketheme"}'], ["/caprice/themes/index.json", JSON.stringify(shelf)], ["/caprice/themes/smoketheme.svg", template]], 6000);
 await page.screenshot({ path: `${out}/12-own-theme.png` });
 // The cottage and the pines, not the plain desk.

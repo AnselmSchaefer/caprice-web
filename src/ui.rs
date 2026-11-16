@@ -324,7 +324,7 @@ fn theme_gallery(ui: &mut egui::Ui, theme: &mut Theme, yours: &Yours) -> Option<
             if yours.importing {
                 ui.spinner();
                 ui.label("Reading the theme\u{2026}");
-            } else if ui.button("Import a theme\u{2026}").on_hover_text("A drawing (SVG) made for Caprice, or a Caprice theme file: from a file").clicked() {
+            } else if ui.button("Import a theme\u{2026}").on_hover_text("A drawing (SVG) made for Caprice, a Caprice theme file, or a theme program's source (.rs): from a file").clicked() {
                 ask = Some(Ask::Import);
             }
             if ui.button("How to make one").clicked() {

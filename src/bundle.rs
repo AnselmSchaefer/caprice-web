@@ -4,7 +4,8 @@
 //! `theme.wasm`, `theme.rs` if its source comes with it, and `preview.png`, its picture for the
 //! gallery. Imported as a drawing is (`own::Workshop`), checked here and by `eggs::program::check`,
 //! with the reasons in words when it is refused; written again by "Export…", so a theme on the
-//! shelf can be given to someone as it came.
+//! shelf can be given to someone as it came. A file with a source and no module, or a source alone
+//! (`from_source`), is built in the browser (`platform::compiler`) before it goes on the shelf.
 //!
 //! Unsigned modules are welcome on one's own shelf: the sandbox is what keeps them harmless. Only
 //! the gallery's are signed (`own::Signed`), and a file never carries a signature.
@@ -25,7 +26,7 @@ pub const WORLD: &str = "caprice:theme@1.0.0";
 /// The largest file taken, and the most of its source and its picture: a module is at most
 /// `eggs::program::MOST_BYTES`.
 pub const MOST_FILE: usize = 4 << 20;
-const MOST_SOURCE: usize = 512 << 10;
+const MOST_SOURCE: usize = crate::platform::compiler::MOST_SOURCE;
 const MOST_PREVIEW: usize = 2 << 20;
 /// How wide the gallery's picture of it is kept, in pixels, as a drawing's is.
 const PREVIEW_WIDTH: u32 = 320;
@@ -56,7 +57,8 @@ pub struct Bundle {
     pub preview: Option<ColorImage>,
 }
 
-/// A theme file read and checked: its parts, what was found in it and what is worth knowing.
+/// A theme file read and checked: its parts, what was found in it and what is worth knowing. Its
+/// module is empty if it is still to be built from its source.
 pub struct Opened {
     pub bundle: Bundle,
     pub found: Vec<String>,
@@ -105,10 +107,25 @@ pub fn open(bytes: &[u8], name: &str) -> Result<Opened, Vec<String>> {
         let made = if manifest.world.is_empty() { "for no world its manifest names".to_string() } else { format!("for {}", manifest.world) };
         problems.push(format!("It was made {made}; this Caprice plays themes made for {WORLD}."));
     }
+    let source = match part(&mut zip, "theme.rs", MOST_SOURCE) {
+        Ok(Some(s)) => match String::from_utf8(s) {
+            Ok(s) => Some(s),
+            Err(_) => {
+                notes.push("Its theme.rs is not text, and is left out.".into());
+                None
+            }
+        },
+        Ok(None) => None,
+        Err(why) => {
+            notes.push(format!("{why} It is left out."));
+            None
+        }
+    };
     let module = match part(&mut zip, "theme.wasm", crate::eggs::program::MOST_BYTES) {
         Ok(Some(m)) => m,
+        Ok(None) if source.is_some() => Vec::new(),
         Ok(None) => {
-            problems.push("It has no theme.wasm, the theme's program.".into());
+            problems.push("It has no theme.wasm, the theme's program, nor a theme.rs to build it from.".into());
             Vec::new()
         }
         Err(why) => {
@@ -121,6 +138,11 @@ pub fn open(bytes: &[u8], name: &str) -> Result<Opened, Vec<String>> {
             Ok(()) => found.push(format!("A program for {WORLD}, {} KB.", module.len().div_ceil(1024))),
             Err(why) => problems.extend(why.into_iter().map(|w| format!("Its program cannot be played: {w}."))),
         }
+    }
+    match (&source, module.is_empty()) {
+        (Some(s), false) => found.push(format!("Its source, {} lines.", s.lines().count())),
+        (Some(s), true) => found.push(format!("Its source, {} lines, to build its program from.", s.lines().count())),
+        (None, _) => {}
     }
     if !problems.is_empty() {
         return Err(problems);
@@ -140,23 +162,6 @@ pub fn open(bytes: &[u8], name: &str) -> Result<Opened, Vec<String>> {
         notes.push(format!("These colours could not be read, and are Midnight's: {}.", unread.join(", ")));
         manifest.colours.retain(|k, _| !unread.contains(k));
     }
-    let source = match part(&mut zip, "theme.rs", MOST_SOURCE) {
-        Ok(Some(s)) => match String::from_utf8(s) {
-            Ok(s) => {
-                found.push(format!("Its source, {} lines.", s.lines().count()));
-                Some(s)
-            }
-            Err(_) => {
-                notes.push("Its theme.rs is not text, and is left out.".into());
-                None
-            }
-        },
-        Ok(None) => None,
-        Err(why) => {
-            notes.push(format!("{why} It is left out."));
-            None
-        }
-    };
     let preview = match part(&mut zip, "preview.png", MOST_PREVIEW) {
         Ok(Some(png)) => match image::load_from_memory_with_format(&png, image::ImageFormat::Png) {
             Ok(img) => {
@@ -187,6 +192,22 @@ pub fn open(bytes: &[u8], name: &str) -> Result<Opened, Vec<String>> {
         notes.push("Themes that are programs play in Caprice in the browser only: here the usual desk shows.".into());
     }
     Ok(Opened { bundle: Bundle { manifest, module, source, preview }, found, notes })
+}
+
+/// A theme program's source alone, as a theme to build (`platform::compiler`): named after its
+/// file, with no palette or picture of its own.
+pub fn from_source(bytes: &[u8], name: &str) -> Result<Opened, Vec<String>> {
+    if bytes.len() > MOST_SOURCE {
+        return Err(vec![format!("It is {} KB, more than the {} KB a theme's source may be.", bytes.len() >> 10, MOST_SOURCE >> 10)]);
+    }
+    let source = String::from_utf8(bytes.to_vec()).map_err(|_| vec!["It is not text, as a theme's source (a .rs file) is.".to_string()])?;
+    let manifest = Manifest { world: WORLD.into(), name: name.to_owned(), ..Manifest::default() };
+    let found = vec![format!("Its source, {} lines, to build its program from.", source.lines().count())];
+    let notes = vec![
+        "It has no palette of its own: the toolbar and the desk under it take Midnight's colours.".into(),
+        "It has no picture for the gallery: the gallery shows its colours instead.".into(),
+    ];
+    Ok(Opened { bundle: Bundle { manifest, module: Vec::new(), source: Some(source), preview: None }, found, notes })
 }
 
 /// A theme file written: its manifest, module, source and picture, the same bytes for the same
@@ -282,6 +303,20 @@ mod tests {
         // One that says it is small and unpacks to more than a module may be.
         let big = vec![0u8; crate::eggs::program::MOST_BYTES + 1];
         assert!(refused(&zipped(&[("manifest.json", Some(world)), ("theme.wasm", Some(&big))])).contains("more than the 1024 KB"));
+    }
+
+    #[test]
+    fn a_theme_file_or_a_source_with_no_module_is_taken_to_be_built_from_its_source() {
+        let world = br#"{"world": "caprice:theme@1.0.0", "name": "Tide"}"#;
+        let o = open(&zipped(&[("manifest.json", Some(world)), ("theme.rs", Some(b"// the tide\n"))]), "file").unwrap_or_else(|e| panic!("{e:?}"));
+        assert!(o.bundle.module.is_empty() && o.bundle.source.as_deref() == Some("// the tide\n") && o.bundle.manifest.name == "Tide");
+        assert!(o.found.contains(&"Its source, 1 lines, to build its program from.".to_string()), "{:?}", o.found);
+        let o = from_source(b"// the tide\n// at dusk\n", "Tide").unwrap_or_else(|e| panic!("{e:?}"));
+        assert!(o.bundle.module.is_empty() && o.bundle.manifest.world == WORLD && o.bundle.manifest.name == "Tide");
+        assert!(o.notes.iter().any(|n| n.contains("no palette")), "{:?}", o.notes);
+        let refused = |bytes: &[u8]| from_source(bytes, "x").err().expect("refused").join(" ");
+        assert!(refused(&[0xff, 0xfe]).contains("not text"));
+        assert!(refused(&vec![b' '; MOST_SOURCE + 1]).contains("more than the 512 KB"));
     }
 
     #[test]

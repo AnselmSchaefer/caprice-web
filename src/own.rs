@@ -1190,12 +1190,21 @@ fn write_png(path: &Path, picture: &ColorImage) {
 // ---- In the app ------------------------------------------------------------------------------
 
 /// What a drawing imported came to, for its window.
+#[derive(Default)]
 pub struct Report {
     pub name: String,
     pub added: bool,
     pub found: Vec<String>,
     pub notes: Vec<String>,
     pub problems: Vec<String>,
+    /// What the compiler said of a source that did not build, as it said it.
+    pub details: Option<String>,
+}
+
+impl Report {
+    fn refused(name: String, problems: Vec<String>) -> Report {
+        Report { name, problems, ..Report::default() }
+    }
 }
 
 /// A theme read and checked, ready for the shelf: a drawing, or a theme file's program.
@@ -1207,11 +1216,21 @@ pub enum Prepared {
 /// A theme being checked off the frame: its name, and what it comes to.
 type Importing = (String, Receiver<Result<Prepared, Vec<String>>>);
 
+/// A theme program being built from its source in this browser (`platform::compiler`) before it
+/// goes on the shelf. The compiler is ended with it, which gives back the memory it holds.
+pub struct Building {
+    pub name: String,
+    opened: crate::bundle::Opened,
+    compiler: crate::platform::compiler::Compiler,
+    pub state: crate::platform::compiler::State,
+}
+
 /// Making and keeping themes of one's own: the import on its way, its report, the guide, the
 /// gallery's pictures.
 #[derive(Default)]
 pub struct Workshop {
     importing: Option<Importing>,
+    pub building: Option<Building>,
     pub report: Option<Report>,
     pub guide: bool,
     pub deleting: Option<String>,
@@ -1221,7 +1240,7 @@ pub struct Workshop {
 
 impl Workshop {
     pub fn importing(&self) -> bool {
-        self.importing.is_some()
+        self.importing.is_some() || self.building.is_some()
     }
 }
 
@@ -1236,19 +1255,25 @@ pub enum Ask {
 }
 
 impl App {
-    /// Ask for a theme to import: a drawing, or a theme file.
+    /// Ask for a theme to import: a drawing, a theme file, or a theme program's source.
     pub fn choose_theme_file(&mut self, ctx: &egui::Context) {
-        let dialog = crate::platform::Dialog::new().add_filter("Theme (SVG drawing or Caprice theme file)", &["svg", crate::bundle::EXTENSION]);
+        let dialog = crate::platform::Dialog::new().add_filter("Theme (SVG drawing, Caprice theme file, or a program's source)", &["svg", crate::bundle::EXTENSION, "rs"]);
         self.ask_path(ctx, crate::fileio::DialogFor::ImportTheme, dialog);
     }
 
-    /// Import the theme at `path`: a theme file (a zip) or a drawing, whatever its name says.
+    /// Import the theme at `path`: a theme file (a zip), a program's source (named `.rs`) or a
+    /// drawing.
     pub fn import_theme(&mut self, ctx: &egui::Context, path: &Path) {
         let name = path.file_stem().map_or("My theme".to_owned(), |s| s.to_string_lossy().replace(['_', '-'], " "));
+        let source = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("rs"));
         match fs::read(path) {
             Ok(bytes) if crate::bundle::is_bundle(&bytes) => self.import_theme_file(ctx, bytes, name),
+            Ok(bytes) if source => {
+                let named = name.clone();
+                self.prepare_theme(ctx, name, move || crate::bundle::from_source(&bytes, &named).map(Prepared::Program));
+            }
             Ok(bytes) => self.import_theme_svg(ctx, String::from_utf8_lossy(&bytes).into_owned(), name),
-            Err(e) => self.workshop.report = Some(Report { name, added: false, found: Vec::new(), notes: Vec::new(), problems: vec![format!("The file could not be read: {e}.")] }),
+            Err(e) => self.workshop.report = Some(Report::refused(name, vec![format!("The file could not be read: {e}.")])),
         }
     }
 
@@ -1272,10 +1297,13 @@ impl App {
             wake.wake();
         });
         self.workshop.importing = Some((name, rx));
+        // The window of the theme before is closed: the next says what this one came to.
+        self.workshop.report = None;
         self.status = "- reading the theme…".into();
     }
 
-    /// Once a frame: a theme imported goes on the shelf and is chosen; the gallery's pictures load.
+    /// Once a frame: a theme imported goes on the shelf and is chosen, or is built first if it is a
+    /// program's source; the gallery's pictures load.
     pub fn tend_workshop(&mut self, ctx: &egui::Context) {
         if let Some((name, rx)) = &self.workshop.importing {
             let got = match rx.try_recv() {
@@ -1286,28 +1314,17 @@ impl App {
             if let Some(got) = got {
                 let name = name.clone();
                 self.workshop.importing = None;
-                self.workshop.report = Some(match got {
-                    Ok(prepared) => {
-                        let (added, named, found, notes) = match prepared {
-                            Prepared::Drawing(ready) => (self.themes.own.add(&ready), ready.checked.pack.meta.name, ready.checked.found, ready.checked.notes),
-                            Prepared::Program(o) => (self.themes.own.add_bundle(&o.bundle), o.bundle.manifest.name, o.found, o.notes),
-                        };
-                        match added {
-                            Ok(id) => {
-                                self.themes.choose_own(ctx, &id);
-                                self.status = format!("- theme \u{201c}{named}\u{201d} added");
-                                Report { name: named, added: true, found, notes, problems: Vec::new() }
-                            }
-                            Err(e) => Report { name, added: false, found: Vec::new(), notes: Vec::new(), problems: vec![format!("The theme could not be kept: {e}.")] },
-                        }
-                    }
+                match got {
+                    Ok(Prepared::Program(opened)) if opened.bundle.module.is_empty() => self.build_theme(ctx, name, opened),
+                    Ok(prepared) => self.workshop.report = Some(self.keep_theme(ctx, name, prepared)),
                     Err(problems) => {
                         self.status = "- the theme was not added".into();
-                        Report { name, added: false, found: Vec::new(), notes: Vec::new(), problems }
+                        self.workshop.report = Some(Report::refused(name, problems));
                     }
-                });
+                }
             }
         }
+        self.tend_building(ctx);
         if self.workshop.thumbs_for != Some(self.themes.own.version) {
             self.workshop.thumbs_for = Some(self.themes.own.version);
             let ids: Vec<String> = self.themes.own.entries.iter().map(|e| e.id.clone()).collect();
@@ -1320,6 +1337,68 @@ impl App {
                 }
             }
         }
+    }
+
+    /// A theme read and checked put on the shelf and chosen: what its window says of it.
+    fn keep_theme(&mut self, ctx: &egui::Context, name: String, prepared: Prepared) -> Report {
+        let (added, named, found, notes) = match prepared {
+            Prepared::Drawing(ready) => (self.themes.own.add(&ready), ready.checked.pack.meta.name, ready.checked.found, ready.checked.notes),
+            Prepared::Program(o) => (self.themes.own.add_bundle(&o.bundle), o.bundle.manifest.name, o.found, o.notes),
+        };
+        match added {
+            Ok(id) => {
+                self.themes.choose_own(ctx, &id);
+                self.status = format!("- theme \u{201c}{named}\u{201d} added");
+                Report { name: named, added: true, found, notes, ..Report::default() }
+            }
+            Err(e) => Report::refused(name, vec![format!("The theme could not be kept: {e}.")]),
+        }
+    }
+
+    /// Build the program of a theme that came as its source, in this browser, before it is kept.
+    fn build_theme(&mut self, ctx: &egui::Context, name: String, opened: crate::bundle::Opened) {
+        let mut compiler = crate::platform::compiler::Compiler::start(crate::platform::Waker::new(ctx));
+        compiler.build(opened.bundle.source.as_deref().unwrap_or_default());
+        let state = compiler.state(ctx.input(|i| i.time));
+        self.workshop.building = Some(Building { name, opened, compiler, state });
+        self.status = "- building the theme…".into();
+    }
+
+    /// Once a frame while a theme is built: its module checked and kept, or why it was not.
+    fn tend_building(&mut self, ctx: &egui::Context) {
+        use crate::platform::compiler::{Built, State};
+        let Some(b) = &mut self.workshop.building else { return };
+        b.state = b.compiler.state(ctx.input(|i| i.time));
+        let (name, built, state) = (b.name.clone(), b.compiler.take(), b.state.clone());
+        let report = match (built, state) {
+            (Some(Built::Module { module, toolchain, ms }), _) => match crate::eggs::program::check(&module) {
+                Ok(()) => {
+                    let Some(Building { mut opened, .. }) = self.workshop.building.take() else { return };
+                    opened.found.insert(0, format!("Built in this browser in {:.1} s: a program for {}, {} KB.", ms as f32 / 1000.0, crate::bundle::WORLD, module.len().div_ceil(1024)));
+                    opened.bundle.module = module;
+                    opened.bundle.manifest.toolchain = toolchain;
+                    self.keep_theme(ctx, name, Prepared::Program(opened))
+                }
+                Err(why) => Report::refused(name.clone(), why.into_iter().map(|w| format!("It built, but its program cannot be played: {w}.")).collect()),
+            },
+            (Some(Built::Errors(said)), _) => {
+                let mut r = Report::refused(name.clone(), vec!["It did not build: the compiler found mistakes in its source.".into()]);
+                r.details = Some(said);
+                r
+            }
+            (None, State::Failed { why, unsupported: true }) => Report::refused(name, vec![why]),
+            (None, State::Failed { why, .. }) => Report::refused(name.clone(), vec![format!("It could not be built: {why}.")]),
+            // Loading or building: looked at again soon, so a build that never ends is ended.
+            (None, _) => {
+                ctx.request_repaint_after(std::time::Duration::from_millis(250));
+                return;
+            }
+        };
+        if !report.added {
+            self.status = "- the theme was not added".into();
+        }
+        self.workshop.building = None;
+        self.workshop.report = Some(report);
     }
 
     /// Do what was asked for in the gallery.
@@ -1375,9 +1454,38 @@ impl App {
         self.themes.own.remove(id);
     }
 
-    /// The import's report, the guide to making a theme, and the question before deleting one.
+    /// The import's report, a theme being built, the guide to making a theme, and the question
+    /// before deleting one.
     pub fn workshop_windows(&mut self, ctx: &egui::Context) {
         let mut ask = None;
+        if let Some(b) = &self.workshop.building {
+            use crate::platform::compiler::State;
+            let (doing, once) = match b.state {
+                State::Loading { fetched, of } if of > 0 => {
+                    (format!("Loading the compiler: {} of {} MB", fetched.div_ceil(1 << 20), of.div_ceil(1 << 20)), true)
+                }
+                State::Loading { .. } => ("Opening the compiler\u{2026}".to_owned(), false),
+                _ => ("Building its program\u{2026}".to_owned(), false),
+            };
+            let mut stop = false;
+            egui::Window::new("Building a theme").id(egui::Id::new("theme_building")).collapsible(false).resizable(false).default_width(380.0).anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0)).show(ctx, |ui| {
+                ui.set_max_width(400.0);
+                ui.label(egui::RichText::new(&b.name).strong().size(16.0));
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(doing);
+                });
+                if once {
+                    ui.label(egui::RichText::new("Only this once: then this browser keeps it.").color(pal().text_dim));
+                }
+                ui.add_space(4.0);
+                stop = ui.button("Stop").clicked();
+            });
+            if stop {
+                self.workshop.building = None;
+                self.status = "- the theme was not built".into();
+            }
+        }
         if let Some(report) = &self.workshop.report {
             let mut open = true;
             let mut close = false;
@@ -1400,6 +1508,13 @@ impl App {
                             ui.label(line);
                         });
                     }
+                }
+                // The compiler's own words, as it wrote them, lined up as it lines them up.
+                if let Some(details) = &report.details {
+                    ui.add_space(4.0);
+                    egui::ScrollArea::both().max_height(260.0).show(ui, |ui| {
+                        ui.label(egui::RichText::new(details).monospace().size(12.0));
+                    });
                 }
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {

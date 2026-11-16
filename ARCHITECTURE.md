@@ -89,7 +89,7 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `backdrop.rs` | Scenes Claude paints (SVG), pinned to the story, faintly behind the pages; the Scene menu and list |
 | `motion.rs` | Scenes that move a little: the parts Claude marks by id (drift, wing, sway, smoke, flicker, shimmer), rendered apart from the still picture and moved every frame; and the kinds a theme of one's own may use besides (float, twinkle, pulse, wander, spin, and areas of snow, rain, fireflies, leaves, bubbles or embers that Caprice fills) |
 | `own.rs` | Themes of the writer's own (R35): one SVG drawing read into its desk, pieces and carrier (`Pack`), checked on import with the reasons in plain words (`check`), its palette taken from its picture (`palette_of`); the shelf of them in the data folder (`Shelf`); importing, exporting, deleting, the template, the guide and the import's report (`Workshop`) |
-| `bundle.rs` | A theme that is a program as one file (R36): a `.caprice-theme`, a zip of `manifest.json` (name, words, author, palette, the world, the toolchain), `theme.wasm`, `theme.rs` and `preview.png`; read and checked on import with the reasons in words (`open`), written again by Export (`write`), the same bytes for the same parts |
+| `bundle.rs` | A theme that is a program as one file (R36): a `.caprice-theme`, a zip of `manifest.json` (name, words, author, palette, the world, the toolchain), `theme.wasm`, `theme.rs` and `preview.png`; read and checked on import with the reasons in words (`open`; a file with a source and no module, or a source alone, `from_source`, to be built), written again by Export (`write`), the same bytes for the same parts |
 | `cast.rs` | The cast: people found by name in what is painted, their looks and model sheets in the scene's prompt; the Cast window and its example |
 | `start.rs` | The welcome page when Caprice opens without a file: kinds of new story (`Kind`), the stories last opened with what they hold, the sheet flying to the desk; the list of stories last opened, kept in the data folder |
 | `peek.rs` | The cast peeking out from behind the page: the puppet asked of Claude, cut into parts, who peeks when, where they look, the peek drawn |
@@ -100,9 +100,12 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `theme.rs` | The themes (`Theme`, `Palette`): colours and egui visuals around the page, the palette in use (`pal`), fading from one to the next, the choice kept in the data folder (a theme's name, or one of the writer's own by its id); the page's own `PAPER` and `INK` |
 | `eggs.rs` | What is hidden in the magic themes: in the Magic Garden a plant a chapter growing on the desk and a balloon flying in each new chapter title; in the Magic City a street of houses a chapter, a floor a page, and a dragon flying a new title in held in its feet; in the Magic Sea a ship a chapter, built in a yard a part a page and launched into the bay when the next chapter begins; in the Magic Forest (`eggs/forest.rs`) an old forest at night with a swarm of lanterns, a lantern a page, each chapter's swarm becoming a big lantern on a branch near the page; in the Magic Reef (`eggs/reef.rs`) a sunlit sea with a coral a chapter, a branch a page, spawning and taking in a shoal of fish when the next chapter begins, and an octopus swimming down from above with each new title; in the Magic Snow (`eggs/snow.rs`) a frozen lake at the foot of a snowy hillside and an igloo a chapter spread about the hillside, a brick a page cut out of the lake and floated onto it, the igloo finished and lit inside when the next chapter begins; in the Magic Vineyard (`eggs/vineyard.rs`) a vineyard on rolling hills on a golden afternoon, a stretch of vines a chapter, a bunch of grapes a page, the stretch before turning gold and red and dropping its leaves when the next chapter begins, and now and then a murmuration of starlings; the country it lies in is `eggs/country.rs`; and a theme of the writer's own (`eggs/own.rs`, R35): its picture covering the desk and moving, a piece a chapter, a stage a page, finished when the next chapter begins, its carrier bringing new titles; or one that is a program (`eggs/program.rs`, R36) |
 | `eggs/program.rs` | Themes that are programs (R36): the check on every load, the input and events written as the canonical ABI lays them out, the frame's words read into egui's shapes (at most 450 000 points), drawn on the desk zoomed about the theme's ground and in the window unzoomed; what the program is told; its carrier |
+| `platform/compiler.rs` | Where a theme program is built from its source (R36): in the browser rustc and wasm-ld as WebAssembly in a worker of their own (`web/compiler/`), ended when dropped; on the desktop not yet; under `cargo test` a stand-in (the sources of `themes/` build to their fixtures, anything else to what a test says) |
 | `platform/program.rs` | Where a theme program runs (R36): in the browser a worker of its own (`web/theme-worker.js`), ended when it does not answer; on the desktop not at all; under `cargo test` none, each module standing for its theme's source played natively (`played`: the input read out of Caprice's bytes, the output made into the same words) or for what a test says (`stand_in`) |
 | `theme-sdk/` | What theme programs are written against (R36): the WIT world `caprice:theme@1.0.0`, its bindings made ahead of time with a runtime of its own, shapes (and Caprice's own soft lights, ovals and clean fills), colours, `Seeds`, `Tended`, easing, the `theme!` macro; no dependencies |
-| `themes/` | Theme programs Caprice carries: `fireflies` (an example, and the tests' theme), `echo` (draws back what it is told, for the layouts' tests), `snow` and `vineyard` (the Magic Snow and the Magic Vineyard ported, shape for shape, R36); `build.sh` builds them into `tests/fixtures/` as the writer's tab will; `played` builds them for the machine, for the tests to play in place of their modules |
+| `themes/` | Theme programs Caprice carries: `fireflies` (an example, and the tests' theme), `echo` (draws back what it is told, for the layouts' tests), `snow` and `vineyard` (the Magic Snow and the Magic Vineyard ported, shape for shape, R36); `build.sh` builds them into `tests/fixtures/` as the writer's tab does; `played` builds them for the machine, for the tests to play in place of their modules |
+| `web/compiler/` | The theme compiler's worker (R36): the investigation's toolchain glue (its VFS, WASI, process runner, orchestrator) made JavaScript, loading the toolchain in pieces into Cache Storage (`toolchain.js`) and building one theme at a time (`compiler.js`) |
+| `toolchain/` | Packing the toolchain Caprice serves (`pack.mjs`, run by `web/build.sh`): the investigation's rustc and wasm-ld, rustup's std for `wasm32-unknown-unknown` without what no theme reaches, the SDK as one rlib, the flags, cut into brotli pieces under 25 MiB named by their hash; the brotli decoder the tab uses (`unbrotli/`) |
 | `platform.rs` | What the desktop and the browser do differently: background work (`spawn`, `Waker`, `keep_awake`), the time and time zone, the run's id, the data folder, file dialogs (`Dialog`), uploads and downloads, requests to Caprice's server (`send`, `go_to`) (R31, R33) |
 | `platform/fs.rs` | Files: the system's on the desktop; in the browser, kept in memory by path and mirrored to IndexedDB (R31) |
 | `platform/worker.rs` | In the browser, a Web Worker for each piece of background work, started from `web/worker.js` with nothing evaluated (R31) |
@@ -2407,8 +2410,9 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   `<id>.rs`) and `preview.png` (the gallery's picture, made 320 wide). "Import a theme…" in Yours
   takes it or a drawing, told apart by the file's first bytes (`bundle::is_bundle`), read off the
   frame like a drawing (`own::Prepared`) and reported in the same window: refused with reasons in
-  words when it is not a zip, has no manifest or module, names another world, or its module fails
-  `eggs::program::check`; and what it lacks or holds besides (no palette, colours not read, no
+  words when it is not a zip, has no manifest, neither a module nor a source, names another world,
+  or its module fails `eggs::program::check`; a file with a source and no module is built first
+  (below); and what it lacks or holds besides (no palette, colours not read, no
   picture, other files) is worth knowing, never a refusal. Every part is read to at most its size,
   whatever the zip says (`MOST_FILE`, the module's `MOST_BYTES`). Unsigned modules are welcome on
   one's own shelf (the sandbox keeps them harmless); a file never carries the gallery's signature.
@@ -2433,9 +2437,51 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   gallery's name (`Entry::shown_name`). Changed by a byte, or signed by another key, it is the
   writer's own under its own name. Until the gallery has its key `GALLERY_KEY` is none, so nothing is
   taken for the gallery's. Test: `a_gallery_theme_is_shown_under_the_gallery_s_name_until_a_byte_of_it_changes`.
-- **The themes in `themes/` are built as the writer's tab will build them** (`themes/build.sh`):
+- **A theme is built from its source in the writer's tab, by one fixed toolchain** (`web/compiler/`,
+  `platform::compiler`, the plan's step 4): rustc and wasm-ld built as WebAssembly (the
+  investigation's release, `1.99.1-6c798e2613f0`), rustup's std for `wasm32-unknown-unknown`
+  without `test`, `getopts` and `proc_macro`, the SDK as one rlib and the flags, packed by
+  `toolchain/pack.mjs` into `web/dist/toolchain/<id>/` (brotli pieces under Workers' 25 MiB a file,
+  named by their hash, kept for good in `_headers`) and named in `web/dist/compiler/toolchain.json`
+  (asked about each time). **The id names everything a build depends on** (the compiler's
+  `RUSTC_ID`, then a hash of the std, the SDK, the flags, the decoder and the VFS): change any of
+  them and it is a new toolchain, new files, the old ones untouched. "Import a theme…" takes a
+  program's source (a `.rs`, `bundle::from_source`) or a theme file with a source and no module;
+  `Workshop::build_theme` starts a compiler (52 MiB fetched the first time, then from Cache
+  Storage, its pieces' hashes checked once, when fetched), a window says how far it has loaded and
+  can stop it, and the module it builds is checked like any other and kept with its source and the
+  toolchain's id (`Manifest::toolchain`). **The compiler is ended as soon as it has answered**
+  (dropped with `Building`): it holds about a gigabyte while it lives (step 0d). Mistakes come back
+  as the compiler wrote them (`Report::details`); a build over `BUILD_SECONDS` (counted only while
+  Caprice hears, `Waiting`) ends it. It runs in workers of its own from 'self', so the CSP needs
+  nothing new; it needs threads and shared memory, and is built for Chromium on a computer: elsewhere
+  the worker says so before fetching anything (`unsupported`), and a build with no toolchain says
+  that. On the desktop the compiler says themes are built in the browser for now; under `cargo test`
+  a stand-in builds the sources of `themes/` to their fixtures and anything else to what the test
+  says (`compiler::stand_in`). Tests:
+  `a_theme_s_source_imported_is_built_kept_with_its_source_and_toolchain_and_played`,
+  `a_theme_s_source_with_mistakes_is_not_added_and_the_window_shows_what_the_compiler_said`,
+  `a_theme_being_built_says_how_far_the_compiler_has_loaded_and_can_be_stopped`,
+  `a_theme_file_or_a_source_with_no_module_is_taken_to_be_built_from_its_source`; in the browser
+  `smoke.mjs`, "a theme's source is built in the tab, to the very module the toolchain builds
+  anywhere" (the Snow's `theme.rs`, its module compared with the fixture byte for byte) and "and the
+  compiler is ended once it has built it". **The release is pinned**: `toolchain/release.json` names
+  the investigation's GitHub release (`1.99.1-6c798e2613f0`, with its licences) and each file's
+  sha256; `toolchain/fetch.mjs` fetches it (CI does, before `web/build.sh`, keeping what brotli made
+  in a cache), and `pack.mjs` checks every file against its pin wherever it found it, so CI, a
+  deploy and this machine pack the same toolchain, the same id. `web/build.sh` fails if it cannot
+  pack it (`CAPRICE_TOOLCHAIN=0` leaves it out; `smoke.mjs` then skips the build, saying so).
+- **The themes in `themes/` are built as the writer's tab builds them** (`themes/build.sh`):
   rustc 1.99.1, the SDK as one rlib, one file, the flags Caprice fixes (`--max-memory` among them),
-  the output always named `theme.wasm`; the same rustc gives the same bytes. Their modules are the
+  the output always named `theme.wasm`, and **every path as the tab has it**: the SDK's files as
+  `/sdk/…` and the theme as `/theme/theme.rs`, wherever it was written (absolute paths, remapped: a
+  path is in the module, where a panic would say it happened; until 2026-11-16 the paths were
+  relative and the remapping never applied, so the fixtures carried `themes/vineyard//theme.rs`).
+  The same rustc gives the same bytes, natively or in the tab: `toolchain/pack.mjs` builds every
+  theme with exactly what it packs (the pruned std, the SDK's rlib, the manifest's flags) and packs
+  nothing unless each is its fixture byte for byte, and `smoke.mjs` holds the tab's build of the
+  Snow to its fixture. So a change to the flags is made in `themes/build.sh` and `pack.mjs`
+  together. Their modules are the
   tests' fixtures (`tests/fixtures/*.wasm`, checked in), and stand in the tests for the same files
   built for the machine (`themes/played`, which `build.sh` passes over: it has no `theme.rs`). So
   nothing in `cargo test` sees a module that is not its source built: change a theme or the SDK,
@@ -2477,6 +2523,15 @@ bindings made again (`theme-sdk/tests/bindings.rs` says how), the browser's host
 `bundle::Manifest` with `#[serde(default)]`, read in `bundle::open` and written in `bundle::write`. A change to the Magic Snow (`eggs/snow.rs`) or the Magic Vineyard
 (`eggs/vineyard.rs`, `eggs/country.rs`) is made in its port (`themes/snow`, `themes/vineyard`) too,
 and the fixtures built again.
+
+**A new toolchain for theme programs** (a new Rust, the SDK or the flags changed, R36): the SDK
+and the flags change in `themes/build.sh` and `toolchain/pack.mjs` together; `themes/build.sh`,
+then `web/build.sh` (which packs it, and fails to pack unless every fixture is its source built with
+what is packed); `smoke.mjs` builds the Snow in the tab. A new Rust is a new release of the
+investigation's toolchain, published as a GitHub release of its repository with the licence texts
+and pinned in `toolchain/release.json` (tag, URL, each file's sha256), and a new `rustc +<version>`
+in both scripts and in CI. Old themes keep their modules; old releases stay published, for
+rebuilding them.
 
 **A new paragraph attribute** (like line spacing or chapter title): `ParaAttrs` → `run_format` /
 `paragraph_job` → the toolbar (`ui.rs`) → file format default (R9) → Word mapping (R10) → whether
@@ -2566,6 +2621,8 @@ result sent back, a stand-in answer in `api.test.mjs` and in `cloud::stand_in` (
   natively (`themes/played`), or for what the test says (`platform::program::stand_in`);
   `node --test web/theme-worker.test.mjs` checks that the browser's host makes the same words of the
   real modules; `themes/build.sh` makes those modules, and CI checks they are what is checked in.
+  No test runs the compiler either: `platform::compiler::stand_in`, and the sources of `themes/`
+  build to their fixtures.
 - `cargo mutants` (config in `.cargo/mutants.toml`) finds untested code. `/tmp` is a small tmpfs
   here: run it with `TMPDIR` on disk.
 
@@ -2879,5 +2936,17 @@ result sent back, a stand-in answer in `api.test.mjs` and in `cloud::stand_in` (
   it is made (step 5). A limit by the window's area was weighed and dropped: a theme's points grow
   with the land it shows, not the window's size, so it would have stopped themes in small windows
   zoomed out; drawing fewer leaves when they are small would have made them change while zooming.
+- **2026-11-16 — The toolchain is packed and served by Caprice itself, and ended after each build.**
+  The plan had the investigation's release gain the theme std and the SDK; packing them in Caprice
+  (`toolchain/pack.mjs`) instead keeps the SDK where it is written and lets the packing check every
+  fixture against what it packs, and the toolchain's id covers all of it. It is served as Caprice's
+  own static assets (free, no R2 read counted), in brotli pieces decoded in the tab, packed from the
+  investigation's GitHub release (free to keep and fetch for good, unlike CI's caches and artifacts,
+  which expire, or Git LFS, whose free bandwidth CI would use up in a month), and the page
+  names the current toolchain in `compiler/toolchain.json`, outside `/toolchain/*`, whose rule keeps
+  files for good (rules add their headers together). Its glue is the investigation's TypeScript made
+  JavaScript once and kept beside `theme-worker.js`, so the web build needs no bundler. The compiler
+  holds a gigabyte while it lives, so it is ended as soon as a build has answered: loading it again
+  from Cache Storage costs under two seconds.
 - **No `.docx` import.** Export only.
 - **Contents heading is "Contents"** (English), in the app and in Word.

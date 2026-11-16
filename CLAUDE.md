@@ -30,6 +30,10 @@ behaviour**: its rules (§4) say what depends on what, and which tests guard eac
   `tests/fixtures/` (rustc 1.99.1, `-t wasm32-unknown-unknown`; the tests play the sources, so run
   it after changing a theme or the SDK); `node --test web/theme-worker.test.mjs`
   checks the browser's host against the tests' (`CAPRICE_FIXTURES=1 cargo test` keeps its words).
+  The compiler the tab builds themes with is packed by `web/build.sh` (`toolchain/pack.mjs`, into
+  `web/dist/toolchain`) from the investigation's GitHub release that `toolchain/release.json` pins:
+  `node toolchain/fetch.mjs` once (or the checkout in `~/Projects/rust-compiler-wasm-investigation`).
+  It needs rustup's 1.99.1 and `brotli`; `CAPRICE_TOOLCHAIN=0 web/build.sh` leaves it out.
 - `cargo mutants` for untested code. `/tmp` is a small tmpfs here: set `TMPDIR` to a dir on disk.
 - Word output check: `CAPRICE_SAMPLE_OUT=out.docx cargo test sample_docx`, then
   `soffice --headless --convert-to pdf out.docx`
@@ -124,7 +128,8 @@ Full list with reasons and tests in `ARCHITECTURE.md` §4.
     `platform::spawn` with a `platform::Waker`, never a `Context` or a lock shared with the frame;
     files are `platform::fs` (IndexedDB in the browser); file dialogs are a `platform::Dialog` to
     `ask_path` (in the browser: the shelf, the page's picker, or a download); the time is
-    `platform::since_epoch`; requests to Caprice's own server are `platform::send`, through
+    `platform::since_epoch`; a theme program is run by `platform::program` and built by
+    `platform::compiler`; requests to Caprice's own server are `platform::send`, through
     `cloud::Server` (a stand-in in tests). What must happen while the page is hidden goes in `App::logic`.
     `clippy.toml` flags the `std` calls that panic or fail in the browser. The browser's
     Content-Security-Policy forbids evaluating code: no library may (`web/csp.mjs`).
@@ -143,14 +148,19 @@ Full list with reasons and tests in `ARCHITECTURE.md` §4.
     test says (`stand_in`). `caprice:theme@1.0.0` is never edited once published: a change is a new
     version, taught to the browser's host (`web/theme-worker.js`), the tests' player and the reader,
     with `themes/echo` and the fixtures made again (CI fails if a fixture is not its source built).
-    It zooms about the ground the theme names; what it puts in the window is never zoomed. The Magic
+    It zooms about the ground the theme names; what it puts in the window is never zoomed. It is
+    built in the writer's tab by one toolchain whose id names all a build depends on
+    (`toolchain/pack.mjs`, `web/compiler/`), every path as the tab has it (`/theme/theme.rs`), so a
+    source is the same bytes everywhere: flags change in `themes/build.sh` and `pack.mjs` together.
+    The compiler is ended once it has answered (it holds a gigabyte). The Magic
     Snow and the Magic Vineyard have twins, `themes/snow` and `themes/vineyard`: a change to
     `eggs/snow.rs`, `eggs/vineyard.rs` or `eggs/country.rs` is made there too (a test compares them
     frame by frame).
 
 ## Files
 
-- Tracked: `README.md`, `ARCHITECTURE.md`, `CLAUDE.md`; `theme-sdk/`, `themes/` and `tests/fixtures/` (R36).
+- Tracked: `README.md`, `ARCHITECTURE.md`, `CLAUDE.md`; `theme-sdk/`, `themes/`, `tests/fixtures/`, `toolchain/`
+  and `web/compiler/` (R36).
 - Local, untracked planning notes: `TECHNICAL_DESCRIPTION.md` (older, superseded by
   `ARCHITECTURE.md`), `FORK_REQUIREMENTS.md` (when to fork egui), `CHAPTERS_PLAN.md`, `WEB_PLAN.md`,
   `THEME_PROGRAMS_PLAN.md` (themes Claude writes as sandboxed WebAssembly programs, for the gallery).
