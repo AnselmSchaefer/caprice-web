@@ -49,6 +49,11 @@ const mib = (n) => (n / 2 ** 20).toFixed(1);
 const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { stdio: ["ignore", "pipe", "inherit"], maxBuffer: 2 ** 30, ...opts });
 const env = { ...process.env, PATH: `${path.join(os.homedir(), ".cargo/bin")}:${process.env.PATH}` };
 const rustc = (args, opts = {}) => run("rustc", [`+${RUSTC}`, ...args], { env, ...opts });
+// Where this checkout and the crates' sources lie is in what rustc makes (the working directory in
+// an rlib's metadata, a crate's file in a panic's message): named alike on every machine, so the
+// toolchain packed in CI and here is the same, the same id. (The last remapping that matches wins.)
+const REMAP_CHECKOUT = ["--remap-path-prefix", `${root}=/caprice`];
+const CRATES = path.join(process.env.CARGO_HOME ?? path.join(os.homedir(), ".cargo"), "registry/src");
 
 // Where each file of the release is: the folder given, the one fetch.mjs fills, or the checkout.
 const investigation = path.join(os.homedir(), "Projects/rust-compiler-wasm-investigation");
@@ -68,7 +73,7 @@ const tmp = fs.mkdtempSync(path.join(work, "pack-"));
 try {
   // The SDK, as themes/build.sh builds it.
   rustc(["--edition", "2024", "--target", TARGET, "-O", "-C", "codegen-units=1", "-C", "panic=abort", "-C", "strip=debuginfo",
-    "--crate-type", "rlib", "--crate-name", "theme_sdk", "--remap-path-prefix", `${root}/theme-sdk=/sdk`,
+    "--crate-type", "rlib", "--crate-name", "theme_sdk", ...REMAP_CHECKOUT, "--remap-path-prefix", `${root}/theme-sdk=/sdk`,
     path.join(root, "theme-sdk/src/lib.rs"), "-o", path.join(tmp, "libtheme_sdk.rlib")]);
   const sdk = fs.readFileSync(path.join(tmp, "libtheme_sdk.rlib"));
 
@@ -114,7 +119,7 @@ try {
 
   // The decoder.
   run("cargo", [`+${RUSTC}`, "build", "--offline", "--locked", "--release", "--target", TARGET, "-q"],
-    { cwd: path.join(root, "toolchain/unbrotli"), env: { ...env, RUSTFLAGS: "", CARGO_TARGET_DIR: path.join(work, "unbrotli") } });
+    { cwd: path.join(root, "toolchain/unbrotli"), env: { ...env, RUSTFLAGS: `--remap-path-prefix=${root}=/caprice --remap-path-prefix=${CRATES}=/crates`, CARGO_TARGET_DIR: path.join(work, "unbrotli") } });
   const unbrotli = fs.readFileSync(path.join(work, "unbrotli", TARGET, "release/unbrotli.wasm"));
 
   // The files, then the id from all of them.

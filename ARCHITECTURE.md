@@ -100,6 +100,7 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `theme.rs` | The themes (`Theme`, `Palette`): colours and egui visuals around the page, the palette in use (`pal`), fading from one to the next, the choice kept in the data folder (a theme's name, or one of the writer's own by its id); the page's own `PAPER` and `INK` |
 | `eggs.rs` | What is hidden in the magic themes: in the Magic Garden a plant a chapter growing on the desk and a balloon flying in each new chapter title; in the Magic City a street of houses a chapter, a floor a page, and a dragon flying a new title in held in its feet; in the Magic Sea a ship a chapter, built in a yard a part a page and launched into the bay when the next chapter begins; in the Magic Forest (`eggs/forest.rs`) an old forest at night with a swarm of lanterns, a lantern a page, each chapter's swarm becoming a big lantern on a branch near the page; in the Magic Reef (`eggs/reef.rs`) a sunlit sea with a coral a chapter, a branch a page, spawning and taking in a shoal of fish when the next chapter begins, and an octopus swimming down from above with each new title; in the Magic Snow (`eggs/snow.rs`) a frozen lake at the foot of a snowy hillside and an igloo a chapter spread about the hillside, a brick a page cut out of the lake and floated onto it, the igloo finished and lit inside when the next chapter begins; in the Magic Vineyard (`eggs/vineyard.rs`) a vineyard on rolling hills on a golden afternoon, a stretch of vines a chapter, a bunch of grapes a page, the stretch before turning gold and red and dropping its leaves when the next chapter begins, and now and then a murmuration of starlings; the country it lies in is `eggs/country.rs`; and a theme of the writer's own (`eggs/own.rs`, R35): its picture covering the desk and moving, a piece a chapter, a stage a page, finished when the next chapter begins, its carrier bringing new titles; or one that is a program (`eggs/program.rs`, R36) |
 | `eggs/program.rs` | Themes that are programs (R36): the check on every load, the input and events written as the canonical ABI lays them out, the frame's words read into egui's shapes (at most 450 000 points), drawn on the desk zoomed about the theme's ground and in the window unzoomed; what the program is told; its carrier |
+| `eggs/preview.rs` | A theme program's pictures, made off screen (R36): played through a short story (begun, three chapters written, a chapter finishing, a title carried) on the desk laid out as at the fitting zoom, tessellated by egui and filled in triangle by triangle; its points counted on a phone's desk and a computer's; the gallery's picture of a theme that came with none |
 | `platform/compiler.rs` | Where a theme program is built from its source (R36): in the browser rustc and wasm-ld as WebAssembly in a worker of their own (`web/compiler/`), ended when dropped; on the desktop not yet; under `cargo test` a stand-in (the sources of `themes/` build to their fixtures, anything else to what a test says) |
 | `platform/program.rs` | Where a theme program runs (R36): in the browser a worker of its own (`web/theme-worker.js`), ended when it does not answer; on the desktop not at all; under `cargo test` none, each module standing for its theme's source played natively (`played`: the input read out of Caprice's bytes, the output made into the same words) or for what a test says (`stand_in`) |
 | `theme-sdk/` | What theme programs are written against (R36): the WIT world `caprice:theme@1.0.0`, its bindings made ahead of time with a runtime of its own, shapes (and Caprice's own soft lights, ovals and clean fills), colours, `Seeds`, `Tended`, easing, the `theme!` macro; no dependencies |
@@ -2445,7 +2446,11 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   named by their hash, kept for good in `_headers`) and named in `web/dist/compiler/toolchain.json`
   (asked about each time). **The id names everything a build depends on** (the compiler's
   `RUSTC_ID`, then a hash of the std, the SDK, the flags, the decoder and the VFS): change any of
-  them and it is a new toolchain, new files, the old ones untouched. "Import a theme…" takes a
+  them and it is a new toolchain, new files, the old ones untouched. **It is the same on every
+  machine**: where the checkout and the crates' sources lie would be in what rustc makes (the
+  working directory in the SDK rlib's metadata, a crate's path in the decoder's panic messages), so
+  both are remapped (`/caprice`, `/crates`); before that, CI and this machine packed the same
+  compiler under two ids. "Import a theme…" takes a
   program's source (a `.rs`, `bundle::from_source`) or a theme file with a source and no module;
   `Workshop::build_theme` starts a compiler (52 MiB fetched the first time, then from Cache
   Storage, its pieces' hashes checked once, when fetched), a window says how far it has loaded and
@@ -2471,6 +2476,26 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   in a cache), and `pack.mjs` checks every file against its pin wherever it found it, so CI, a
   deploy and this machine pack the same toolchain, the same id. `web/build.sh` fails if it cannot
   pack it (`CAPRICE_TOOLCHAIN=0` leaves it out; `smoke.mjs` then skips the build, saying so).
+- **A theme is pictured by playing it off screen** (`eggs/preview.rs`): through the same
+  `platform::Program` and `program::read` as on the desk, told a short story at ten frames a second
+  (begun; three chapters written, shown afresh; the fourth begun, the third finishing; a title
+  carried, only if it asked to carry titles), each frame's desk laid out as Caprice lays it out at
+  the fitting zoom (`preview::layout`, from `view::fit` and the docks' sizes: change how the desk is
+  laid out and check it still agrees) and unzoomed about its ground as `draw_program` does. A
+  moment's last frame is drawn as the screen draws it: the desk in the palette's colours, the
+  program's desk and window shapes, the page with lines of text, what it draws over the page and
+  the carried title, the docks; tessellated by egui's own tessellator and filled triangle by
+  triangle (`rasterize`, premultiplied, each pixel on a shared edge in one triangle only). The
+  same story counts its points on a phone's desk (412×915) and a computer's (1920×1080, and zoomed
+  out to `view::LEAST`): the Vineyard 63 000 and 309 000, as measured on the screen. A program theme
+  kept without a picture (a theme file without `preview.png`, a source just built) is given one,
+  three chapters written, 320 wide (`Workshop::picture_theme`, `Shelf::set_picture`); one that
+  cannot be played keeps its colours. `tests/fixtures/snow.caprice-theme` and
+  `vineyard.caprice-theme` carry the pictures it makes. Tests:
+  `a_theme_is_shown_its_story_and_pictured_as_the_desk_looks_with_the_page_on_it`
+  (`CAPRICE_PREVIEW_OUT=dir` keeps the pictures to look at),
+  `a_program_theme_kept_with_no_picture_is_given_one_made_from_its_program`; in the browser
+  `smoke.mjs`, "and it is given a picture for the gallery, made from its program".
 - **The themes in `themes/` are built as the writer's tab builds them** (`themes/build.sh`):
   rustc 1.99.1, the SDK as one rlib, one file, the flags Caprice fixes (`--max-memory` among them),
   the output always named `theme.wasm`, and **every path as the tab has it**: the SDK's files as

@@ -35,6 +35,7 @@ use crate::theme::Theme;
 
 pub mod forest;
 pub mod own;
+pub mod preview;
 pub mod program;
 pub mod reef;
 pub mod snow;

@@ -14,7 +14,7 @@ trap 'rm -rf "$out"' EXIT
 # A path is in the module (where a panic would say it happened), so this is what makes the bytes
 # the same. The flags are toolchain/pack.mjs's, which checks the fixtures against them.
 fixed=(--edition 2024 --target wasm32-unknown-unknown -O -C codegen-units=1 -C panic=abort -C strip=debuginfo)
-rustc +1.99.1 "${fixed[@]}" --crate-type rlib --crate-name theme_sdk --remap-path-prefix "$PWD/theme-sdk=/sdk" \
+rustc +1.99.1 "${fixed[@]}" --crate-type rlib --crate-name theme_sdk --remap-path-prefix "$PWD=/caprice" --remap-path-prefix "$PWD/theme-sdk=/sdk" \
     "$PWD/theme-sdk/src/lib.rs" -o "$out/libtheme_sdk.rlib"
 for dir in themes/*/; do
     [ -f "$dir/theme.rs" ] || continue

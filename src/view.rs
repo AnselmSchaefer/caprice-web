@@ -16,9 +16,19 @@ const SWIPE_PAGE: f32 = 50.0;
 /// Narrower than this (a phone held upright), the whole page is too small to read: fitting fills
 /// the width with it instead, and it scrolls up and down. Not "taller than wide": a phone's
 /// keyboard takes half the height, and the page must not shrink when it comes up.
-const NARROW: f32 = 600.0;
+pub const NARROW: f32 = 600.0;
 /// Room kept between the caret and the top or bottom of the view, when the view follows it.
 const CARET_ROOM: f32 = 24.0;
+
+/// The zoom a page of `size` fits `view` at. Room is left on both sides for post-its sticking out of
+/// the page and the stacks; on a phone, the page's width is all there is room for.
+pub fn fit(view: Rect, size: Vec2) -> f32 {
+    if view.width() < NARROW {
+        ((view.width() - 16.0) / size.x).clamp(MIN_ZOOM, 3.0)
+    } else {
+        ((view.height() - 16.0) / size.y).min((view.width() - 48.0) / (size.x + 2.0 * crate::notes::NOTE_OUT)).clamp(MIN_ZOOM, 3.0)
+    }
+}
 
 impl App {
     /// The area between the docks: under the toolbar, and above the page bar or beside it.
@@ -134,15 +144,7 @@ impl App {
     /// Pinch / Ctrl+scroll to zoom around the pointer, two-finger scroll up and down to pan. Returns the page rectangle.
     /// The zoom at which the page fits the view in `area`, as "Fit" shows it.
     pub fn fitting_zoom(&self, area: Rect) -> f32 {
-        let view = self.view_area(area);
-        let size = self.doc.setup.size();
-        // Leave room on both sides for post-its sticking out of the page and the stacks; on a phone,
-        // the page's width is all there is room for.
-        if view.width() < NARROW {
-            ((view.width() - 16.0) / size.x).clamp(MIN_ZOOM, 3.0)
-        } else {
-            ((view.height() - 16.0) / size.y).min((view.width() - 48.0) / (size.x + 2.0 * crate::notes::NOTE_OUT)).clamp(MIN_ZOOM, 3.0)
-        }
+        fit(self.view_area(area), self.doc.setup.size())
     }
 
     pub fn page_rect(&mut self, ctx: &egui::Context, area: Rect) -> Rect {

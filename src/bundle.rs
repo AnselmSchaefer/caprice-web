@@ -29,7 +29,15 @@ pub const MOST_FILE: usize = 4 << 20;
 const MOST_SOURCE: usize = crate::platform::compiler::MOST_SOURCE;
 const MOST_PREVIEW: usize = 2 << 20;
 /// How wide the gallery's picture of it is kept, in pixels, as a drawing's is.
-const PREVIEW_WIDTH: u32 = 320;
+pub const PREVIEW_WIDTH: u32 = 320;
+
+/// Said of a theme that comes with no picture for the gallery: where programs play, Caprice makes
+/// it one (`eggs::preview`).
+const NO_PICTURE: &str = if cfg!(any(test, target_arch = "wasm32")) {
+    "It has no picture for the gallery (preview.png): Caprice makes it one from its program."
+} else {
+    "It has no picture for the gallery (preview.png): the gallery shows its colours instead."
+};
 
 /// What `manifest.json` says. Everything but the world may be left out.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -175,7 +183,7 @@ pub fn open(bytes: &[u8], name: &str) -> Result<Opened, Vec<String>> {
             }
         },
         Ok(None) => {
-            notes.push("It has no picture for the gallery (preview.png): the gallery shows its colours instead.".into());
+            notes.push(NO_PICTURE.into());
             None
         }
         Err(why) => {
@@ -205,7 +213,7 @@ pub fn from_source(bytes: &[u8], name: &str) -> Result<Opened, Vec<String>> {
     let found = vec![format!("Its source, {} lines, to build its program from.", source.lines().count())];
     let notes = vec![
         "It has no palette of its own: the toolbar and the desk under it take Midnight's colours.".into(),
-        "It has no picture for the gallery: the gallery shows its colours instead.".into(),
+        NO_PICTURE.into(),
     ];
     Ok(Opened { bundle: Bundle { manifest, module: Vec::new(), source: Some(source), preview: None }, found, notes })
 }
@@ -272,7 +280,11 @@ mod tests {
             assert_eq!(manifest.colours, crate::own::colours(&theme.palette()), "{name}: the built-in theme's palette, so its toolbar and desk agree");
             let module = std::fs::read(root().join(format!("tests/fixtures/{name}.wasm"))).unwrap();
             let source = std::fs::read_to_string(dir.join("theme.rs")).unwrap();
-            let made = write(&Bundle { manifest: manifest.clone(), module: module.clone(), source: Some(source.clone()), preview: None }).unwrap();
+            // Its picture for the gallery, as Caprice makes one from the program (`eggs::preview`).
+            let ctx = eframe::egui::Context::default();
+            let mut preview = crate::eggs::preview::Preview::start(&module, theme.palette(), crate::platform::Waker::new(&ctx), 0.0);
+            let picture = preview.tend(0.0).and_then(|done| done.ok()).and_then(|d| d.gallery_picture()).expect("a picture");
+            let made = write(&Bundle { manifest: manifest.clone(), module: module.clone(), source: Some(source.clone()), preview: Some(picture) }).unwrap();
             let file = root().join(format!("tests/fixtures/{name}.{EXTENSION}"));
             if std::env::var_os("CAPRICE_FIXTURES").is_some() {
                 std::fs::write(&file, &made).unwrap();
@@ -282,6 +294,7 @@ mod tests {
             assert!(opened.bundle.manifest == manifest && opened.bundle.module == module && opened.bundle.source == Some(source), "{name}: read as it was written");
             assert!(opened.found.iter().any(|f| f.contains("A program")) && opened.found.iter().any(|f| f.contains("source")), "{:?}", opened.found);
             assert!(opened.found.contains(&"Its palette, all 14 colours.".to_string()), "{:?}", opened.found);
+            assert_eq!(opened.bundle.preview.map(|p| p.size), Some([320, 200]), "{name}: its picture");
         }
     }
 

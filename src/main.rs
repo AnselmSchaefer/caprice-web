@@ -7030,7 +7030,7 @@ mod tests {
         let report = h.app.workshop.report.as_ref().expect("a report");
         assert!(report.added && report.problems.is_empty() && report.name == "Magic Snow", "named as its manifest says");
         assert!(report.found.iter().any(|f| f.contains("A program")) && report.found.iter().any(|f| f.contains("Its source")), "{:?}", report.found);
-        assert!(report.notes.iter().any(|n| n.contains("no picture for the gallery")), "{:?}", report.notes);
+        assert!(report.found.iter().any(|f| f == "A picture for the gallery."), "{:?}", report.found);
         h.frames(2, vec![], Modifiers::NONE);
         assert!(h.painted_at("Theme added").is_some(), "a window says so");
         h.click_widget("OK");
@@ -7066,6 +7066,30 @@ mod tests {
         assert!(h.app.themes.own.entries.is_empty() && h.app.themes.theme == theme::Theme::Midnight, "nothing on the shelf, the theme as it was");
         h.frames(2, vec![], Modifiers::NONE);
         assert!(h.painted_at("Theme not added").is_some());
+    }
+
+    #[test]
+    fn a_program_theme_kept_with_no_picture_is_given_one_made_from_its_program() {
+        // The fireflies as a theme file of a manifest and a module alone.
+        let manifest = bundle::Manifest { world: bundle::WORLD.into(), name: "Fireflies".into(), ..Default::default() };
+        let file = bundle::write(&bundle::Bundle { manifest, module: FIREFLIES.to_vec(), ..Default::default() }).unwrap();
+        let mut h = Harness::new();
+        h.frames(3, vec![], Modifiers::NONE);
+        let ctx = h.ctx.clone();
+        h.app.import_theme_file(&ctx, file, "Fireflies".into());
+        h.frames_until("the theme", |a| a.themes.theme == theme::Theme::Own);
+        let report = h.app.workshop.report.as_ref().unwrap();
+        assert!(report.notes.iter().any(|n| n.contains("Caprice makes it one from its program")), "{:?}", report.notes);
+        let id = h.app.themes.own_id.clone().unwrap();
+        h.frames_until("its picture", |a| a.themes.own.thumb(&id).is_some());
+        let picture = h.app.themes.own.thumb(&id).unwrap();
+        assert_eq!(picture.size, [320, 200], "as wide as the gallery keeps them");
+        // The night sky the fireflies fly in, and the page in the middle.
+        let at = |x: usize, y: usize| picture.pixels[y * 320 + x];
+        assert!(at(10, 60).b() > at(10, 60).r() && at(10, 60).r() < 40, "{:?}", at(10, 60));
+        assert!(at(160, 100).r() > 240, "the page: {:?}", at(160, 100));
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.app.workshop.thumbs.contains_key(&id), "the gallery shows it");
     }
 
     /// A theme program's source, imported as a writer would from a `.rs` file of that name.

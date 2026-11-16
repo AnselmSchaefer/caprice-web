@@ -376,6 +376,12 @@ if (!compiler) {
   const same = built !== undefined && Buffer.from(await keptBytes(built)).equals(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../tests/fixtures/snow.wasm")));
   check("a theme's source is built in the tab, to the very module the toolchain builds anywhere", same, `${built ?? "nothing built"} in ${seconds} s, toolchain ${compiler.id}`);
   check("and the compiler is ended once it has built it", !page.workers().some(w => w.url().endsWith("/compiler/compiler.js")));
+  // It came with no picture for the gallery: Caprice plays it off screen in a worker of its own and
+  // makes it one (eggs/preview.rs), kept beside it.
+  const picture = built?.replace(/\.wasm$/, ".png");
+  const t1 = Date.now();
+  while (picture && !(await kept()).includes(picture) && Date.now() - t1 < 30000) await page.waitForTimeout(500);
+  check("and it is given a picture for the gallery, made from its program", picture !== undefined && (await kept()).includes(picture), `${((Date.now() - t1) / 1000).toFixed(1)} s`);
 }
 
 await keptAndOpened([["/caprice/theme.json", '{"own":"smoketheme"}'], ["/caprice/themes/index.json", JSON.stringify(shelf)], ["/caprice/themes/smoketheme.svg", template]], 6000);
@@ -432,8 +438,12 @@ check("and its snow falls", !falling.equals(await leftOfPage()));
 await keptInBrowser([["/caprice/theme.json", '{"own":"smokevineyard"}']]);
 await keptAndOpened([], 3000);
 await page.screenshot({ path: `${out}/13-program-vineyard.png` });
-// The sky high on the right (the low sun lights the left).
-const [sky, slope] = [await pixelAt(1250, 110), await pixelAt(38, 790)];
+// The sky high on the right (the low sun lights the left): the bluest of a few points there, as its
+// clouds drift over one or another as time goes.
+const skies = [];
+for (const [x, y] of [[1250, 110], [1000, 150], [1150, 230], [950, 260], [1240, 280]]) skies.push(await pixelAt(x, y));
+const sky = skies.reduce((a, b) => (b[2] - b[0] > a[2] - a[0] ? b : a));
+const slope = await pixelAt(38, 790);
 check("the Magic Vineyard as a program draws its own sky and its slope", themeWorkers() === 1 && sky[2] > sky[0] + 30 && slope[0] > slope[2] + 30, `${themeWorkers()} workers, sky ${sky.join(",")}, slope ${slope.join(",")}`);
 await keptInBrowser([["/caprice/theme.json", '{"own":"smokespin"}']]);
 await keptAndOpened([], 4000);

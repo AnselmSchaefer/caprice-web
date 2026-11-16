@@ -1078,6 +1078,17 @@ impl Shelf {
         Ok(id)
     }
 
+    /// The gallery's picture of theme `id`, made for it (`eggs::preview`).
+    pub fn set_picture(&mut self, id: &str, picture: &ColorImage) {
+        match &self.dir {
+            Some(d) => write_png(&d.join(format!("{id}.png")), picture),
+            None => {
+                self.held.insert(id.to_owned(), (String::new(), picture.clone()));
+            }
+        }
+        self.version += 1;
+    }
+
     /// A program theme on the shelf as a theme file's parts, to give to someone as it came.
     pub fn bundle(&self, id: &str) -> Option<crate::bundle::Bundle> {
         let e = self.get(id).filter(|e| e.program)?;
@@ -1178,12 +1189,8 @@ impl Shelf {
 
 /// A picture for the gallery written as a PNG, if it can be: it is only ever a picture.
 fn write_png(path: &Path, picture: &ColorImage) {
-    let rgba: Vec<u8> = picture.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
-    if let Some(img) = image::RgbaImage::from_raw(picture.size[0] as u32, picture.size[1] as u32, rgba) {
-        let mut png = std::io::Cursor::new(Vec::new());
-        if img.write_to(&mut png, image::ImageFormat::Png).is_ok() {
-            let _ = fs::write(path, png.into_inner());
-        }
+    if let Some(png) = crate::eggs::preview::png(picture) {
+        let _ = fs::write(path, png);
     }
 }
 
@@ -1231,6 +1238,8 @@ pub struct Building {
 pub struct Workshop {
     importing: Option<Importing>,
     pub building: Option<Building>,
+    /// A program theme kept with no picture for the gallery, being played off screen to make it one.
+    picturing: Option<(String, crate::eggs::preview::Preview)>,
     pub report: Option<Report>,
     pub guide: bool,
     pub deleting: Option<String>,
@@ -1325,6 +1334,19 @@ impl App {
             }
         }
         self.tend_building(ctx);
+        if let Some((id, preview)) = &mut self.workshop.picturing {
+            match preview.tend(ctx.input(|i| i.time)) {
+                Some(done) => {
+                    // A theme that cannot be played off screen keeps its colours as its picture.
+                    if let Some(picture) = done.ok().and_then(|d| d.gallery_picture()) {
+                        let id = id.clone();
+                        self.themes.own.set_picture(&id, &picture);
+                    }
+                    self.workshop.picturing = None;
+                }
+                None => ctx.request_repaint_after(std::time::Duration::from_millis(50)),
+            }
+        }
         if self.workshop.thumbs_for != Some(self.themes.own.version) {
             self.workshop.thumbs_for = Some(self.themes.own.version);
             let ids: Vec<String> = self.themes.own.entries.iter().map(|e| e.id.clone()).collect();
@@ -1343,7 +1365,15 @@ impl App {
     fn keep_theme(&mut self, ctx: &egui::Context, name: String, prepared: Prepared) -> Report {
         let (added, named, found, notes) = match prepared {
             Prepared::Drawing(ready) => (self.themes.own.add(&ready), ready.checked.pack.meta.name, ready.checked.found, ready.checked.notes),
-            Prepared::Program(o) => (self.themes.own.add_bundle(&o.bundle), o.bundle.manifest.name, o.found, o.notes),
+            Prepared::Program(o) => {
+                let added = self.themes.own.add_bundle(&o.bundle);
+                if let Ok(id) = &added
+                    && o.bundle.preview.is_none()
+                {
+                    self.picture_theme(ctx, id);
+                }
+                (added, o.bundle.manifest.name, o.found, o.notes)
+            }
         };
         match added {
             Ok(id) => {
@@ -1353,6 +1383,14 @@ impl App {
             }
             Err(e) => Report::refused(name, vec![format!("The theme could not be kept: {e}.")]),
         }
+    }
+
+    /// Make a picture for the gallery of program theme `id`, which came with none, from its program.
+    fn picture_theme(&mut self, ctx: &egui::Context, id: &str) {
+        let (Some(entry), Some(module)) = (self.themes.own.get(id), self.themes.own.module(id)) else { return };
+        let palette = with_colours(Theme::Midnight.palette(), &entry.colours).0;
+        let preview = crate::eggs::preview::Preview::start(&module, palette, crate::platform::Waker::new(ctx), ctx.input(|i| i.time));
+        self.workshop.picturing = Some((id.to_owned(), preview));
     }
 
     /// Build the program of a theme that came as its source, in this browser, before it is kept.
