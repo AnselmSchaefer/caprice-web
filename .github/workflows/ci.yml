@@ -93,6 +93,21 @@ jobs:
       - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: trunk@0.22.1,wasm-bindgen@0.2.130
+      # The compiler theme programs are built with in the writer's tab (R36): the release of the
+      # investigation's toolchain that toolchain/release.json pins, each file checked against its
+      # pin; rustup's 1.99.1 for the std and the SDK it is packed with, and for the brotli decoder;
+      # brotli for the pieces. What brotli made (minutes, at its best) is kept between runs by what
+      # it was made of: a cache gone only makes the build slower.
+      - name: The compiler for theme programs (rustup 1.99.1, brotli, the pinned release)
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal --target wasm32-unknown-unknown
+          cargo +1.99.1 fetch --locked --manifest-path toolchain/unbrotli/Cargo.toml
+          sudo apt-get install -y --no-install-recommends brotli || { sudo apt-get update && sudo apt-get install -y --no-install-recommends brotli; }
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/toolchain
+          key: toolchain-${{ hashFiles('toolchain/**', 'theme-sdk/**') }}
+          restore-keys: toolchain-
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
@@ -117,12 +132,14 @@ jobs:
           echo "::warning::Chromium's extra packages could not be fetched; installing the browser alone"
           npx playwright-core install chromium
       - name: Build
-        run: ./web/build.sh
-      - name: The .wasm fits Cloudflare's 25 MiB a file
         run: |
-          size=$(stat -c %s web/dist/*_bg.wasm)
-          echo "$(( size / 1048576 )) MiB"
-          [ "$size" -lt $(( 25 * 1048576 )) ]
+          node toolchain/fetch.mjs
+          ./web/build.sh
+      - name: Every file fits Cloudflare's 25 MiB a file
+        run: |
+          echo "the .wasm: $(( $(stat -c %s web/dist/*_bg.wasm) / 1048576 )) MiB; all of it: $(du -sm web/dist | cut -f1) MiB"
+          big=$(find web/dist -type f -size +25599k)
+          [ -z "$big" ] || { echo "over 25 MiB: $big"; exit 1; }
       - name: Smoke test, served with the headers readers get
         run: |
           mkdir -p "$RUNNER_TEMP/smoke"
