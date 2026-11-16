@@ -7343,6 +7343,35 @@ mod tests {
     }
 
     #[test]
+    fn a_program_theme_zoomed_out_quickly_never_leaves_the_edges_of_the_window_bare() {
+        // Its frame comes a frame late, laid out for the desk as it was then: zoomed further out
+        // since, it is drawn at the zoom it was made for until the next comes, so its sky still
+        // reaches the window's edges. Zoomed in, it covers more than the window and follows at once.
+        let mut h = Harness::new();
+        in_program_theme(&mut h, FIREFLIES, 0.0);
+        h.wait(1.0);
+        let press = |key| egui::Event::Key { key, physical_key: Some(key), pressed: true, repeat: false, modifiers: Modifiers::COMMAND };
+        let mut seen = vec![program_seen(&h)];
+        for _ in 0..5 {
+            h.frames(1, vec![press(Key::Minus)], Modifiers::COMMAND);
+            seen.push(program_seen(&h));
+        }
+        assert!(seen.last().unwrap().view < seen[0].view - 0.2, "zoomed out: {} → {}", seen[0].view, seen.last().unwrap().view);
+        for w in seen.windows(2) {
+            assert!(w[1].zoom >= w[1].view - 1e-4, "never drawn further out than its frame reaches: {} {}", w[1].zoom, w[1].view);
+            assert!((w[1].zoom - w[0].view).abs() < 1e-4, "at the zoom its frame was asked at: {} {}", w[1].zoom, w[0].view);
+        }
+        h.wait(1.0);
+        let settled = program_seen(&h);
+        assert!((settled.zoom - settled.view).abs() < 1e-4, "then where the view is: {settled:?}");
+        for _ in 0..5 {
+            h.frames(1, vec![press(Key::Equals)], Modifiers::COMMAND);
+            let s = program_seen(&h);
+            assert!((s.zoom - s.view).abs() < 1e-4, "zoomed in, at once: {s:?}");
+        }
+    }
+
+    #[test]
     fn a_program_theme_that_fails_or_draws_more_than_it_may_is_stopped_with_a_word_why() {
         use platform::program::{Stand, stand_in};
         // Modules of the world's exports, written by hand, each standing for a program that
