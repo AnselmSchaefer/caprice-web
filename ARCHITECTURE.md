@@ -1997,6 +1997,45 @@ that costs money as it is asked:
 - The app reads `X-Caprice-Scenes-Left` (`platform::READ` names it, or the page cannot see it) and
   the Scene menu says how many are left today.
 
+**Theme programs are written by Claude through the Worker, a round at a time, and never as a way to
+ask Claude anything else** (`/api/theme-program`, `web/api/theme.js`, R36, the plan's step 5):
+
+- **The Worker writes the whole prompt** (`SYSTEM`): the guide written for Claude
+  (`theme-sdk/GUIDE.md`: what a theme is, R30's rules in plain words, laying out, drawing, the
+  budget of points, how to answer), the SDK's source, the WIT world, and the fireflies, the Snow
+  and the Vineyard as examples, imported as text from where they are written (wrangler's `rules`;
+  the tests' Miniflare loads them from the checkout's root). So **a change to the SDK, its world
+  or a ported theme changes the prompt too**: keep `GUIDE.md` true to it.
+- **A round is one of a few kinds, each capped in size and number**: begun (the writer's request,
+  `THEME_REQUEST_BYTES`), `errors` (the compiler's words, `THEME_ERRORS_BYTES`, at most
+  `THEME_ERRORS_ROUNDS` a theme), `frames` (the preview's PNGs as bytes, checked to be PNGs of a
+  desk's size, never decoded, made base64 here, with their moments and points; `THEME_FRAMES_BYTES`,
+  `THEME_FRAMES_ROUNDS`), `change` (the writer's words, `THEME_CHANGE_ROUNDS`). The writer's words
+  are one field in a sentence the Worker wrote. Anything else is refused before Claude is asked.
+- **The conversation is the Ledger's** (`theme_talks`, `theme_turns`, `themeRound`,
+  `themeAnswered`): each answer kept whole, so the browser cannot write Claude's side; pictures kept
+  as words only; one round of a theme at a time; forgotten after `THEME_DAYS`. A theme is the
+  writer's who began it: anyone else's round is 404.
+- **The Ledger counts every round before Claude is asked**: `SITE_THEME_ROUNDS_PER_DAY` for
+  everyone, `USER_THEMES_PER_DAY` begun and `USER_THEME_ROUNDS_PER_DAY` for one writer. A round
+  counts whether or not a theme comes of it. `THEME_TOKENS` is `max_tokens`; the prompt (about
+  40 000 tokens) is cached, and the conversation with it (`cache_control`).
+- **Only the program's source and its palette go back** (`read`): the last ```rust block (it
+  must name `theme!(`), and from the ```json block the name, a few words and the colours by the
+  palette's names as `#rrggbb`; never Claude's own words. A reply without a program is 502.
+- The model is named once (`WRITER`, `claude-opus-5-5`); thinking adaptive at `THEME_EFFORT`
+  (`high` unless set); a model's refusal goes on with the platform's fallback
+  (`server-side-fallback-2026-07-01`, `fallbacks: "default"`). Not streamed, as a scene is not.
+  `THEMES_OFF = "1"` stops it; without a key there is none.
+
+Tests: "a theme is begun from the writer's words, and only its source and palette come back", "the
+next round tells claude the compiler's words, with the whole conversation kept by the worker",
+"pictures go to claude as images, and are kept in the conversation as words only", "what is not one
+of its kinds, too big, or not pictures is refused before claude is asked", "rounds of each kind run
+out for a theme, and themes for a writer, and claude is not asked again", "the site's rounds for the
+day run out for everyone, and a round that fails still counts", "without a key, or switched off, no
+theme is made".
+
 Tests (`node --test web/api/api.test.mjs`): "without a session, or with a forged one,
 nothing is answered", "one writer cannot reach another's stories", "ids that could reach elsewhere
 are refused", "requests from another site are refused", "a sign-in not started here is refused",

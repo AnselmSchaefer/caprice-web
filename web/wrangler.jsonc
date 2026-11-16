@@ -16,6 +16,9 @@
   // Who has signed up, which version of each story is current, and every limit (api/ledger.js).
   // And each story's room, where the devices it is open on meet (api/room.js).
   "durable_objects": { "bindings": [{ "name": "LEDGER", "class_name": "Ledger" }, { "name": "ROOMS", "class_name": "StoryRoom" }] },
+  // The theme prompt (api/theme.js) is made of the theme SDK's guide and source and the ported
+  // themes, imported as text from where they are written.
+  "rules": [{ "type": "Text", "globs": ["**/*.md", "**/*.rs", "**/*.wit"], "fallthrough": false }],
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Ledger"] }, { "tag": "v2", "new_sqlite_classes": ["StoryRoom"] }],
   // Variables set in the dashboard stay across deploys: SYNC_OFF = "1" switches stories online off,
   // SCENES_OFF = "1" painting scenes, LIVE_OFF = "1" stories live on several devices.
@@ -43,6 +46,14 @@
     "SITE_SCENES_PER_DAY": "10",
     "SCENE_PROMPT_BYTES": "160000",
     "SCENE_TOKENS": "32000",
+    // Claude bills every round of making a theme program (api/theme.js): at most 12 rounds a day for
+    // everyone together for now, 2 themes and 12 rounds a day for one writer, and in one theme 3
+    // rounds of compiler errors, 2 of pictures and 3 changes; each round at most 64,000 tokens
+    // written, so a round costs at most about $1.60 with Opus 5.5 (the prompt, about 40,000 tokens,
+    // is cached after the first). THEMES_OFF = "1" switches it off.
+    "SITE_THEME_ROUNDS_PER_DAY": "12",
+    "USER_THEMES_PER_DAY": "2",
+    "USER_THEME_ROUNDS_PER_DAY": "12",
     // A story live on several devices: connections a day for the site, messages a day for one
     // story. Durable Objects on the free plan allow 100,000 requests a day for the whole site,
     // stories online included, and each message in is one: a writer sends at most one a second

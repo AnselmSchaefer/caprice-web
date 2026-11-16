@@ -25,7 +25,8 @@ behaviour**: its rules (§4) say what depends on what, and which tests guard eac
 - Stories API (`web/api`, R33): `cd web && node --test api/api.test.mjs` (Miniflare: the Workers runtime, R2 and
   the Durable Object in memory; about 16 s). Its limits are `vars` in `web/wrangler.jsonc`, among them the
   scenes a day (10 for now) Claude paints for the browser (`/api/scene`, with the secret `ANTHROPIC_API_KEY`; tests
-  answer with a stand-in Claude).
+  answer with a stand-in Claude), and the rounds a day of theme programs Claude writes (`/api/theme-program`,
+  `api/theme.js`, its prompt `theme-sdk/GUIDE.md` with the SDK and the ported themes).
 - Theme programs (R36): `themes/build.sh` builds `themes/*/theme.rs` against `theme-sdk/` into
   `tests/fixtures/` (rustc 1.99.1, `-t wasm32-unknown-unknown`; the tests play the sources, so run
   it after changing a theme or the SDK); `node --test web/theme-worker.test.mjs`

@@ -59,14 +59,21 @@ function providers(request) {
   return new Response("Not reachable from the test", { status: 502 });
 }
 
+// The files the theme prompt is made of (api/theme.js imports them as text, as wrangler bundles them).
+const PROMPT = ["theme-sdk/GUIDE.md", "theme-sdk/src/lib.rs", "theme-sdk/wit/theme.wit", "themes/fireflies/theme.rs", "themes/snow/theme.rs", "themes/vineyard/theme.rs"];
+
 // The rooms each test opened, each with the sockets of the devices that came in (`device`).
 const opened = new WeakMap();
 
 // With `down`, the Ledger is one that fails every request while told to (`ledger-down.mjs`).
 async function start(t, vars = {}, down = false) {
   const mf = new Miniflare(convertV4MiniflareOptions({
-    modulesRoot: fileURLToPath(new URL(".", import.meta.url)),
-    modules: [...(down ? ["ledger-down.mjs"] : []), "worker.js", "ledger.js", "room.js", "failure.js", "tally.js"].map(m => ({ type: "ESModule", path: fileURLToPath(new URL(m, import.meta.url)) })),
+    // From the checkout's root: the theme prompt's texts are the SDK's and the themes' own files.
+    modulesRoot: fileURLToPath(new URL("../..", import.meta.url)),
+    modules: [
+      ...[...(down ? ["ledger-down.mjs"] : []), "worker.js", "ledger.js", "room.js", "failure.js", "tally.js", "theme.js"].map(m => ({ type: "ESModule", path: fileURLToPath(new URL(m, import.meta.url)) })),
+      ...PROMPT.map(f => ({ type: "Text", path: fileURLToPath(new URL(`../../${f}`, import.meta.url)) })),
+    ],
     compatibilityDate: DATE,
     r2Buckets: ["STORIES"],
     durableObjects: { LEDGER: { className: down ? "DownLedger" : "Ledger", useSQLite: true }, ROOMS: { className: "StoryRoom", useSQLite: true } },
@@ -974,4 +981,151 @@ test("pictures waiting are few for each writer, and go with the stories online",
   assert.deepEqual(waiting.map(p => p.id), ["paint0002", "paint0003"], "the oldest went first");
   assert.equal((await ada("/api/stories", { method: "DELETE" })).status, 204);
   assert.deepEqual(await (await ada("/api/scenes?story=story-1")).json(), [], "deleting the stories online deletes them too");
+});
+
+// ---- Making a theme program with Claude (theme.js) ---------------------------------------------
+
+// What Claude writes for a theme: some words, which never reach the browser, the palette and the file.
+const THEME_REPLY = "Here is a lighthouse for you, I hope you like it!\n\n```json\n"
+  + JSON.stringify({ name: "Lighthouse", about: "A light on the cliff, a window a page", colours: { desk_top: "#102040", desk: "#305080", text: "not a colour", light: "no", sparkle: "#ffffff" } })
+  + "\n```\n\n```rust\nuse theme_sdk::*;\nstruct Light;\nimpl Theme for Light { fn new() -> Self { Light } fn frame(&mut self, _: &Input, _: &mut Out) {} }\ntheme!(Light);\n```\n\nEnjoy!";
+
+const begin = (api, said = "A lighthouse on a cliff, a window lit for each page") =>
+  api("/api/theme-program", { method: "POST", body: said });
+const round = (api, id, kind, body, headers = {}) =>
+  api(`/api/theme-program/${id}`, { method: "POST", body, headers: { "X-Caprice-Kind": kind, ...headers } });
+
+// A PNG's first bytes, enough for the Worker's check: its signature and a header of `w` by `h`.
+function png(w, h, fill = 0) {
+  const b = new Uint8Array(60).fill(fill);
+  b.set([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82]);
+  new DataView(b.buffer).setUint32(16, w);
+  new DataView(b.buffer).setUint32(20, h);
+  return b;
+}
+// Pictures as the browser sends them: a count, the lengths, the PNGs.
+function framed(pngs) {
+  const head = new Uint8Array(1 + 4 * pngs.length);
+  head[0] = pngs.length;
+  pngs.forEach((p, k) => new DataView(head.buffer).setUint32(1 + 4 * k, p.length, true));
+  return Buffer.concat([head, ...pngs]);
+}
+
+test("a theme is begun from the writer's words, and only its source and palette come back", async t => {
+  const mf = await start(t);
+  const api = await writer(mf, "1", "Ada");
+  claude.writes = THEME_REPLY;
+  const got = await begin(api);
+  assert.equal(got.status, 200);
+  const theme = await got.json();
+  assert.match(theme.theme, /^[0-9a-f]{16}$/);
+  assert.ok(theme.source.startsWith("use theme_sdk::*;") && theme.source.trim().endsWith("theme!(Light);"));
+  assert.deepEqual(theme.colours, { desk_top: "#102040", desk: "#305080", light: "no" }, "only colours by the palette's names, as colours");
+  assert.equal(theme.name, "Lighthouse");
+  assert.deepEqual(theme.left, { errors: 3, frames: 2, change: 3 });
+  assert.ok(!JSON.stringify(theme).includes("hope you like it") && !JSON.stringify(theme).includes("Enjoy"), "none of Claude's own words");
+
+  const [{ key, body }] = claude.asked;
+  assert.equal(key, "a test's key");
+  assert.equal(body.model, "claude-opus-5-5");
+  assert.equal(body.max_tokens, 64000, "the most a round can cost is the Worker's");
+  const system = body.system.map(b => b.text).join("");
+  for (const part of ["# Writing a magic theme for Caprice", "pub trait Theme", "package caprice:theme", "The Magic Snow, as a theme program", "theme!(Fireflies)"]) {
+    assert.ok(system.includes(part), `the prompt holds ${part}`);
+  }
+  assert.deepEqual(body.system.at(-1).cache_control, { type: "ephemeral" }, "and is cached");
+  assert.deepEqual(body.messages, [{ role: "user", content: "<request>\nA lighthouse on a cliff, a window lit for each page\n</request>\n\nWrite this theme. Answer as the guide says: the palette's json block, then the whole rust file." }]);
+});
+
+test("the next round tells claude the compiler's words, with the whole conversation kept by the worker", async t => {
+  const mf = await start(t);
+  const api = await writer(mf, "1", "Ada");
+  claude.writes = THEME_REPLY;
+  const { theme } = await (await begin(api)).json();
+  const fixed = await round(api, theme, "errors", "error[E0425]: cannot find value `x` in this scope");
+  assert.equal(fixed.status, 200);
+  assert.deepEqual((await fixed.json()).left, { errors: 2, frames: 2, change: 3 });
+  const { messages } = claude.asked[1].body;
+  assert.equal(messages.length, 3);
+  assert.equal(messages[1].role, "assistant");
+  assert.equal(messages[1].content, THEME_REPLY, "Claude's own answer, whole, as the Worker kept it: never the browser's");
+  assert.match(messages[2].content, /^It did not build\. The compiler said:\n\n```\nerror\[E0425\]/);
+  // A change asked for by the writer goes the same way.
+  assert.equal((await round(api, theme, "change", "Make the sea stormier")).status, 200);
+  assert.match(claude.asked[2].body.messages[4].content, /<change>\nMake the sea stormier\n<\/change>/);
+});
+
+test("pictures go to claude as images, and are kept in the conversation as words only", async t => {
+  const mf = await start(t);
+  const api = await writer(mf, "1", "Ada");
+  claude.writes = THEME_REPLY;
+  const { theme } = await (await begin(api)).json();
+  const pngs = [png(1280, 800, 1), png(1280, 800, 2)];
+  const looked = await round(api, theme, "frames", framed(pngs), { "X-Caprice-Moments": "begun,written", "X-Caprice-Points": "4949,9686" });
+  assert.equal(looked.status, 200);
+  const content = claude.asked[1].body.messages[2].content;
+  assert.equal(content.length, 3);
+  assert.deepEqual(content.slice(0, 2).map(c => c.source.data), pngs.map(p => Buffer.from(p).toString("base64")), "each picture as it came");
+  assert.match(content[2].text, /begun, written\. At most 4949 points a frame on a phone's desk, 9686 on a computer's/);
+  await round(api, theme, "change", "Brighter");
+  const kept = claude.asked[2].body.messages[2].content;
+  assert.ok(typeof kept === "string" && kept.startsWith("[2 pictures were shown here.]"), "later rounds see words in their place");
+});
+
+test("what is not one of its kinds, too big, or not pictures is refused before claude is asked", async t => {
+  const mf = await start(t);
+  const api = await writer(mf, "1", "Ada");
+  claude.writes = THEME_REPLY;
+  assert.equal((await begin(api, "x".repeat(2001))).status, 413);
+  assert.equal((await begin(api, "   ")).status, 400);
+  const { theme } = await (await begin(api)).json();
+  assert.equal((await round(api, theme, "chat", "What is the capital of France?")).status, 400, "no round of any other kind");
+  assert.equal((await round(api, theme, "errors", "e".repeat(20_001))).status, 413);
+  assert.equal((await round(api, theme, "frames", framed([png(20, 20)]), { "X-Caprice-Moments": "begun", "X-Caprice-Points": "1,2" })).status, 400, "too small to be a picture of a desk");
+  assert.equal((await round(api, theme, "frames", Buffer.from("not pictures at all"), { "X-Caprice-Moments": "begun", "X-Caprice-Points": "1,2" })).status, 400);
+  assert.equal((await round(api, theme, "frames", framed([png(800, 600)]), { "X-Caprice-Moments": "begun,written", "X-Caprice-Points": "1,2" })).status, 400, "a moment for each picture");
+  assert.equal((await api("/api/theme-program/not-an-id", { method: "POST", body: "x" })).status, 400);
+  assert.equal(claude.asked.length, 1, "only the theme begun reached Claude");
+});
+
+test("rounds of each kind run out for a theme, and themes for a writer, and claude is not asked again", async t => {
+  const mf = await start(t, { THEME_ERRORS_ROUNDS: "1", USER_THEMES_PER_DAY: "1" });
+  const ada = await writer(mf, "1", "Ada");
+  claude.writes = THEME_REPLY;
+  const { theme } = await (await begin(ada)).json();
+  assert.equal((await round(ada, theme, "errors", "error: one")).status, 200);
+  const again = await round(ada, theme, "errors", "error: two");
+  assert.equal(again.status, 429);
+  assert.match(await again.text(), /No more rounds of this kind/);
+  assert.equal((await round(ada, theme, "change", "Bluer")).status, 200, "the other kinds go on");
+  const another = await begin(ada);
+  assert.equal(another.status, 429);
+  assert.match(await another.text(), /1 themes a day/);
+  // Nobody else may go on with Ada's theme.
+  const bob = await writer(mf, "2", "Bob");
+  assert.equal((await round(bob, theme, "change", "Mine now")).status, 404);
+  assert.equal(claude.asked.length, 3);
+});
+
+test("the site's rounds for the day run out for everyone, and a round that fails still counts", async t => {
+  const mf = await start(t, { SITE_THEME_ROUNDS_PER_DAY: "2" });
+  const ada = await writer(mf, "1", "Ada");
+  claude.writes = "I would rather not write any code today.";
+  const nothing = await begin(ada);
+  assert.equal(nothing.status, 502, "a reply without a program gives nothing back");
+  claude.writes = THEME_REPLY;
+  assert.equal((await begin(ada)).status, 200);
+  const bob = await writer(mf, "2", "Bob");
+  const refused = await begin(bob);
+  assert.equal(refused.status, 503);
+  assert.match(await refused.text(), /no more themes today/);
+  assert.equal(claude.asked.length, 2);
+});
+
+test("without a key, or switched off, no theme is made", async t => {
+  const off = await start(t, { THEMES_OFF: "1" });
+  assert.equal((await begin(await writer(off, "1", "Ada"))).status, 503);
+  const keyless = await start(t, { ANTHROPIC_API_KEY: "" });
+  assert.equal((await begin(await writer(keyless, "1", "Ada"))).status, 503);
+  assert.equal(claude.asked.length, 0);
 });

@@ -30,6 +30,21 @@ const DEFAULTS = {
   // and what Claude writes, its thinking counted.
   SCENE_PROMPT_BYTES: 160_000,
   SCENE_TOKENS: 32_000,
+  // Making a theme program (theme.js): Claude bills every round, each far dearer than a scene. The
+  // rounds a day for everyone together, the themes a writer may begin in a day and the rounds they
+  // may ask for; in one theme, the rounds of each kind; what each may hold, and what Claude may
+  // write in one, its thinking counted. A conversation is kept this many days, then forgotten.
+  SITE_THEME_ROUNDS_PER_DAY: 12,
+  USER_THEMES_PER_DAY: 2,
+  USER_THEME_ROUNDS_PER_DAY: 12,
+  THEME_ERRORS_ROUNDS: 3,
+  THEME_FRAMES_ROUNDS: 2,
+  THEME_CHANGE_ROUNDS: 3,
+  THEME_REQUEST_BYTES: 2_000,
+  THEME_ERRORS_BYTES: 20_000,
+  THEME_FRAMES_BYTES: 4_000_000,
+  THEME_TOKENS: 64_000,
+  THEME_DAYS: 7,
   // How many days the scenes painted, by hashed id, are kept for /api/admin/scenes.
   SCENE_DAYS: 30,
   // A picture painted is kept until the app has it (a reload, another story opened meanwhile):
@@ -96,6 +111,9 @@ export class Ledger extends DurableObject {
       CREATE TABLE IF NOT EXISTS gone (user TEXT, id TEXT, version TEXT, at INTEGER, PRIMARY KEY (user, id));
       CREATE TABLE IF NOT EXISTS painted (user TEXT, id TEXT, story TEXT, at INTEGER, svg TEXT, made INTEGER,
         PRIMARY KEY (user, id));
+      CREATE TABLE IF NOT EXISTS theme_talks (id TEXT PRIMARY KEY, user TEXT, made INTEGER, errors INTEGER, frames INTEGER,
+        changes INTEGER, busy INTEGER);
+      CREATE TABLE IF NOT EXISTS theme_turns (id TEXT, n INTEGER, role TEXT, text TEXT, PRIMARY KEY (id, n));
     `);
   }
 
@@ -253,6 +271,61 @@ export class Ledger extends DurableObject {
     this.sql.exec("INSERT INTO scene_days VALUES (?, ?, 1) ON CONFLICT (day, user) DO UPDATE SET n = n + 1", day(now), user);
     this.sql.exec("INSERT INTO painting VALUES (?, ?)", user, now + 10 * MINUTE);
     return { ok: true, left: most - done - 1 };
+  }
+
+  // A round of making a theme (theme.js), counted before Claude is asked: whether it may be, the
+  // conversation so far, and what is left of each kind. `id` none begins a theme. One round of a
+  // theme at a time. It counts whether or not a theme comes of it, as Claude bills the asking.
+  themeRound(user, id, kind, now = Date.now()) {
+    if (!this.known(user)) return { error: 401, message: "Not signed in" };
+    const l = this.limits;
+    const old = this.rows("SELECT id FROM theme_talks WHERE made <= ?", now - l.THEME_DAYS * DAY);
+    for (const o of old) this.sql.exec("DELETE FROM theme_turns WHERE id = ?", o.id);
+    this.sql.exec("DELETE FROM theme_talks WHERE made <= ?", now - l.THEME_DAYS * DAY);
+    const most = { errors: l.THEME_ERRORS_ROUNDS, frames: l.THEME_FRAMES_ROUNDS, change: l.THEME_CHANGE_ROUNDS };
+    const column = { errors: "errors", frames: "frames", change: "changes" };
+    let talk = null;
+    if (id !== null) {
+      talk = this.rows("SELECT * FROM theme_talks WHERE id = ? AND user = ?", id, user)[0];
+      if (!talk) return { error: 404, message: "That theme is no longer being made: begin it again" };
+      if (talk.busy > now) return { error: 409, message: "Claude is working on this theme already", retry: 30 };
+      if (talk[column[kind]] >= most[kind]) return { error: 429, message: `No more rounds of this kind for this theme (${most[kind]})` };
+    } else if (this.count(now, `themes:${user}`) >= l.USER_THEMES_PER_DAY) {
+      return { error: 429, message: `You can begin ${l.USER_THEMES_PER_DAY} themes a day. More tomorrow.`, retry: untilTomorrow(now) };
+    }
+    if (this.count(now, "theme_rounds") >= l.SITE_THEME_ROUNDS_PER_DAY) {
+      return { error: 503, message: "Claude makes no more themes today for anyone. More tomorrow.", retry: untilTomorrow(now) };
+    }
+    if (this.count(now, `theme_rounds:${user}`) >= l.USER_THEME_ROUNDS_PER_DAY) {
+      return { error: 429, message: "You have asked Claude for as much as a day allows. More tomorrow.", retry: untilTomorrow(now) };
+    }
+    this.bump(now, "theme_rounds");
+    this.bump(now, `theme_rounds:${user}`);
+    if (talk === null) {
+      this.bump(now, `themes:${user}`);
+      id = [...crypto.getRandomValues(new Uint8Array(8))].map(b => b.toString(16).padStart(2, "0")).join("");
+      this.sql.exec("INSERT INTO theme_talks VALUES (?, ?, ?, 0, 0, 0, 0)", id, user, now);
+    } else {
+      this.sql.exec(`UPDATE theme_talks SET ${column[kind]} = ${column[kind]} + 1 WHERE id = ?`, id);
+    }
+    this.sql.exec("UPDATE theme_talks SET busy = ? WHERE id = ?", now + 15 * MINUTE, id);
+    const talked = this.rows("SELECT * FROM theme_talks WHERE id = ?", id)[0];
+    const left = { errors: most.errors - talked.errors, frames: most.frames - talked.frames, change: most.change - talked.changes };
+    return { ok: true, id, turns: this.rows("SELECT role, text FROM theme_turns WHERE id = ? ORDER BY n", id), left };
+  }
+
+  // A round done: what was asked and what Claude answered kept, whole, if it answered; the theme
+  // free for its next round either way.
+  themeAnswered(user, id, answered) {
+    const talk = this.rows("SELECT 1 FROM theme_talks WHERE id = ? AND user = ?", id, user)[0];
+    if (!talk) return { ok: true };
+    if (answered) {
+      const n = this.rows("SELECT COUNT(*) AS n FROM theme_turns WHERE id = ?", id)[0].n;
+      this.sql.exec("INSERT INTO theme_turns VALUES (?, ?, 'user', ?)", id, n, answered.asked);
+      this.sql.exec("INSERT INTO theme_turns VALUES (?, ?, 'assistant', ?)", id, n + 1, answered.answer);
+    }
+    this.sql.exec("UPDATE theme_talks SET busy = 0 WHERE id = ?", id);
+    return { ok: true };
   }
 
   // The scenes of the days kept, newest first: each day's total, how many writers, and each
