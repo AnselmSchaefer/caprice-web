@@ -46,12 +46,16 @@
     "SITE_SCENES_PER_DAY": "10",
     "SCENE_PROMPT_BYTES": "160000",
     "SCENE_TOKENS": "32000",
-    // Claude bills every round of making a theme program (api/theme.js): at most 12 rounds a day for
+    // Claude bills every round of making a theme program (api/theme.js): at most 11 rounds a day for
     // everyone together for now, 2 themes and 12 rounds a day for one writer, and in one theme 3
     // rounds of compiler errors, 2 of pictures and 3 changes; each round at most 64,000 tokens
     // written, so a round costs at most about $1.60 with Opus 5.5 (the prompt, about 40,000 tokens,
-    // is cached after the first). THEMES_OFF = "1" switches it off.
-    "SITE_THEME_ROUNDS_PER_DAY": "12",
+    // is cached after the first), and a day at most about $18, the owner's limit (2026-11-16).
+    // Thinking at effort medium: measured, a theme took 46,000 tokens of the 64,000 (high, not
+    // measured, might think past them and pay for a round that gives nothing; usually $1.20 a
+    // round). THEMES_OFF = "1" switches it off.
+    "SITE_THEME_ROUNDS_PER_DAY": "11",
+    "THEME_EFFORT": "medium",
     "USER_THEMES_PER_DAY": "2",
     "USER_THEME_ROUNDS_PER_DAY": "12",
     // A story live on several devices: connections a day for the site, messages a day for one

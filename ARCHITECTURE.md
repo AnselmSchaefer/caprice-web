@@ -2025,7 +2025,7 @@ ask Claude anything else** (`/api/theme-program`, `web/api/theme.js`, R36, the p
   must name `theme!(`), and from the ```json block the name, a few words and the colours by the
   palette's names as `#rrggbb`; never Claude's own words. A reply without a program is 502.
 - The model is named once (`WRITER`, `claude-opus-5-5`); thinking adaptive at `THEME_EFFORT`
-  (`high` unless set); a model's refusal goes on with the platform's fallback
+  (`medium` in `wrangler.jsonc`, measured to fit `THEME_TOKENS`; `high` unless set); a model's refusal goes on with the platform's fallback
   (`server-side-fallback-2026-07-01`, `fallbacks: "default"`). Not streamed, as a scene is not.
   `THEMES_OFF = "1"` stops it; without a key there is none.
 
