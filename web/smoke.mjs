@@ -30,24 +30,24 @@ page.on("request", r => { if (new URL(r.url()).pathname.startsWith("/api/")) ask
 await page.route("**/api/providers", r => r.fulfill({ status: 200, contentType: "application/json", body: '["google"]' }));
 
 // egui opens a menu on a press and a release in different frames, which an instant click is not.
-async function click(x, y) {
-  await page.mouse.move(x, y);
-  await page.waitForTimeout(150);
-  await page.mouse.down();
-  await page.waitForTimeout(100);
-  await page.mouse.up();
-  await page.waitForTimeout(800);
+async function click(x, y, on = page) {
+  await on.mouse.move(x, y);
+  await on.waitForTimeout(150);
+  await on.mouse.down();
+  await on.waitForTimeout(100);
+  await on.mouse.up();
+  await on.waitForTimeout(800);
 }
 
 // The app has started once the page's "Caprice is opening…" is gone (it may first download several
 // MB from far away), and drawn its first frames a moment later.
-async function started() {
-  await page.waitForSelector("#loading", { state: "detached", timeout: 120000 });
-  await page.waitForTimeout(2500);
+async function started(on = page) {
+  await on.waitForSelector("#loading", { state: "detached", timeout: 120000 });
+  await on.waitForTimeout(2500);
 }
 
 // The paths of the files the browser keeps for Caprice (IndexedDB).
-const kept = () => page.evaluate(() => new Promise((done, failed) => {
+const kept = (on = page) => on.evaluate(() => new Promise((done, failed) => {
   const r = indexedDB.open("caprice", 1);
   r.onsuccess = () => {
     const req = r.result.transaction("files", "readonly").objectStore("files").getAllKeys();
@@ -327,62 +327,24 @@ const pixelAt = async (x, y) => {
     return Array.from(g.getImageData(0, 0, 1, 1).data);
   }, shot);
 };
-// A theme file (bundle.rs, the plan's step 3), imported from the gallery's Yours through the page's
-// picker, as a writer would: the Magic Snow as a program, its module, source and palette. It goes on
-// the shelf, kept in the browser, and plays at once in a worker of its own, in the Snow's colours.
-// (Page → Theme → Yours → Import a theme…, where they are while Midnight Ink is in use.)
+// Theme programs never come from files (bundle.rs; the owner's decision, 2026-11-16): they are made
+// with Claude or taken from the gallery. The picker in the gallery's Yours offers drawings only, and
+// a theme file given it anyway is not added. (Page → Theme → Yours → Import a theme…, where they are
+// while Midnight Ink is in use.)
 await click(280, 340);
 await page.waitForTimeout(1500);
-const snowFile = path.join(path.dirname(fileURLToPath(import.meta.url)), "../tests/fixtures/snow.caprice-theme");
-await upload(snowFile, [737, 38], [810, 113], [992, 113], [930, 165]);
+const themesBefore = (await kept()).filter(k => k.startsWith("/caprice/themes/"));
+const [chooser] = await Promise.all([
+  page.waitForEvent("filechooser", { timeout: 5000 }),
+  (async () => { for (const [x, y] of [[737, 38], [810, 113], [992, 113], [930, 165]]) await click(x, y); })(),
+]);
+const accept = await chooser.element().getAttribute("accept");
+await chooser.setFiles(path.join(path.dirname(fileURLToPath(import.meta.url)), "../tests/fixtures/snow.caprice-theme"));
 await page.waitForTimeout(3000);
-await page.screenshot({ path: `${out}/12-theme-file.png` });
-const imported = (await kept()).filter(k => k.startsWith("/caprice/themes/"));
-const snowy = await pixelAt(38, 700);
-check("a theme file imported goes on the shelf, its source with it, and plays at once",
-  imported.some(k => k.endsWith(".wasm")) && imported.some(k => k.endsWith(".rs")) && page.workers().some(w => w.url().endsWith("/theme-worker.js"))
-    && snowy[2] > 200 && snowy[2] >= snowy[0], `${imported.join(" ")}; ${snowy.join(",")}`);
-
-// A theme program's source (R36, the plan's step 4): the Magic Snow's theme.rs alone, imported
-// through the picker from the menu still open, built in this tab by the compiler in workers of its
-// own (fetched the first time, 52 MiB), and kept. The module it built is the fixture, byte for byte:
-// the toolchain makes the same bytes in every browser and natively, so a theme kept as its source
-// can always be built again. The compiler is ended once it has built it.
-const compiler = await fetch(new URL("compiler/toolchain.json", url)).then(r => r.ok ? r.json() : null, () => null);
-if (!compiler) {
-  console.log("- this build has no compiler for themes (web/build.sh found no toolchain): building a source is not checked");
-} else {
-  const keptBytes = path => page.evaluate(path => new Promise((done, failed) => {
-    const r = indexedDB.open("caprice", 1);
-    r.onsuccess = () => {
-      const req = r.result.transaction("files", "readonly").objectStore("files").get(path);
-      req.onsuccess = () => done(req.result ? Array.from(new Uint8Array(req.result.bytes)) : []);
-      req.onerror = () => failed(req.error);
-    };
-    r.onerror = () => failed(r.error);
-  }), path);
-  const before = new Set(await kept());
-  const t0 = Date.now();
-  await upload(path.join(path.dirname(fileURLToPath(import.meta.url)), "../themes/snow/theme.rs"), [928, 165]);
-  await page.screenshot({ path: `${out}/12-theme-building.png` });
-  let built;
-  while (!built && Date.now() - t0 < 180000) {
-    built = (await kept()).find(k => !before.has(k) && k.startsWith("/caprice/themes/") && k.endsWith(".wasm"));
-    if (!built) await page.waitForTimeout(500);
-  }
-  const seconds = ((Date.now() - t0) / 1000).toFixed(1);
-  await page.waitForTimeout(1500);
-  await page.screenshot({ path: `${out}/12-theme-built.png` });
-  const same = built !== undefined && Buffer.from(await keptBytes(built)).equals(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../tests/fixtures/snow.wasm")));
-  check("a theme's source is built in the tab, to the very module the toolchain builds anywhere", same, `${built ?? "nothing built"} in ${seconds} s, toolchain ${compiler.id}`);
-  check("and the compiler is ended once it has built it", !page.workers().some(w => w.url().endsWith("/compiler/compiler.js")));
-  // It came with no picture for the gallery: Caprice plays it off screen in a worker of its own and
-  // makes it one (eggs/preview.rs), kept beside it.
-  const picture = built?.replace(/\.wasm$/, ".png");
-  const t1 = Date.now();
-  while (picture && !(await kept()).includes(picture) && Date.now() - t1 < 30000) await page.waitForTimeout(500);
-  check("and it is given a picture for the gallery, made from its program", picture !== undefined && (await kept()).includes(picture), `${((Date.now() - t1) / 1000).toFixed(1)} s`);
-}
+await page.screenshot({ path: `${out}/12-theme-file-refused.png` });
+const taken = (await kept()).filter(k => k.startsWith("/caprice/themes/") && !themesBefore.includes(k));
+check("the gallery's import offers drawings only, and a theme file given it anyway is not added",
+  accept === ".svg" && taken.length === 0 && !page.workers().some(w => w.url().endsWith("/theme-worker.js")), `accept ${accept}; ${taken.join(" ")}`);
 
 await keptAndOpened([["/caprice/theme.json", '{"own":"smoketheme"}'], ["/caprice/themes/index.json", JSON.stringify(shelf)], ["/caprice/themes/smoketheme.svg", template]], 6000);
 await page.screenshot({ path: `${out}/12-own-theme.png` });
@@ -450,6 +412,98 @@ await keptAndOpened([], 4000);
 await page.screenshot({ path: `${out}/14-program-stopped.png` });
 const usual = await pixelAt(38, 258);
 check("a program theme that never answers is ended, and the usual desk shows", themeWorkers() === 0 && Math.abs(usual[2] - usual[0]) < 15, `${themeWorkers()} workers, ${usual.join(",")}`);
+
+// A theme made with Claude (R36, the plan's step 5), in a browser of its own, signed in. Caprice's
+// server is a stand-in here (web/serve.mjs has none), and Claude answers every round with the Magic
+// Snow's source and palette. The tab builds it with the compiler in workers of its own (fetched the
+// first time, 52 MiB) to the very module the toolchain builds anywhere (the fixture, byte for byte),
+// plays it off screen and shows Claude its pictures once; kept, it is on the shelf with a picture
+// and plays. The compiler is ended once there is nothing more to build.
+const compiler = await fetch(new URL("compiler/toolchain.json", url)).then(r => r.ok ? r.json() : null, () => null);
+if (!compiler) {
+  console.log("- this build has no compiler for themes (web/build.sh found no toolchain): making a theme is not checked");
+} else {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+  const maker = await context.newPage();
+  maker.on("pageerror", e => errors.push(e.message.split("\n")[0]));
+  maker.on("console", m => { if (m.type() === "error") errors.push(m.text().split("\n")[0]); });
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const snow = { source: fs.readFileSync(path.join(here, "../themes/snow/theme.rs"), "utf8"), ...JSON.parse(fs.readFileSync(path.join(here, "../themes/snow/manifest.json"), "utf8")) };
+  const rounds = [];
+  const json = (r, v) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(v) });
+  await maker.route("**/api/**", r => {
+    const at = new URL(r.request().url());
+    if (at.pathname === "/api/providers") return json(r, ["google"]);
+    if (at.pathname === "/api/me") return json(r, { name: "Ada", provider: "google", user: "smoke" });
+    if (at.pathname.startsWith("/api/theme-program")) {
+      const body = r.request().postDataBuffer() ?? Buffer.alloc(0);
+      rounds.push({ path: at.pathname, kind: r.request().headers()["x-caprice-kind"] ?? "begin", body });
+      return json(r, { theme: "0123456789abcdef", source: snow.source, name: "Snow made with Claude", about: snow.about, colours: snow.colours, left: 9 });
+    }
+    if (at.pathname.startsWith("/api/stories")) return json(r, r.request().method() === "PUT" ? { version: "v1" } : at.search.includes("gone") ? { stories: [], gone: [] } : []);
+    return r.fulfill({ status: 404, body: "" });
+  });
+  await maker.goto(url);
+  await started(maker);
+  await maker.evaluate(() => new Promise((done, failed) => {
+    const r = indexedDB.open("caprice", 1);
+    r.onsuccess = () => {
+      const t = r.result.transaction("files", "readwrite");
+      t.objectStore("files").put({ bytes: new TextEncoder().encode('{"user":"smoke","name":"Ada","provider":"google"}'), modified: 0 }, "/caprice/cloud.json");
+      t.oncomplete = done;
+      t.onerror = () => failed(t.error);
+    };
+    r.onerror = () => failed(r.error);
+  }));
+  await maker.reload();
+  await started(maker);
+  await click(280, 340, maker);
+  await maker.waitForTimeout(3000);
+  // Page → Theme → Yours → Make one with Claude…, the request, Make it.
+  for (const [x, y] of [[737, 38], [810, 113], [992, 113], [1064, 165]]) await click(x, y, maker);
+  await maker.screenshot({ path: `${out}/14-theme-asked.png` });
+  await click(640, 425, maker);
+  await maker.keyboard.type("Snow falling on igloos by a frozen lake");
+  await click(423, 512, maker);
+  const t0 = Date.now();
+  const compiling = () => maker.workers().some(w => w.url().endsWith("/compiler/compiler.js"));
+  while (rounds.length < 2 && Date.now() - t0 < 240000) await maker.waitForTimeout(500);
+  const seconds = ((Date.now() - t0) / 1000).toFixed(1);
+  // Claude's better version built and played too: then the compiler is ended.
+  while (compiling() && Date.now() - t0 < 300000) await maker.waitForTimeout(500);
+  await maker.waitForTimeout(2000);
+  await maker.screenshot({ path: `${out}/14-theme-made.png` });
+  const [begun, looked] = rounds;
+  check("a theme is asked of Claude with the writer's words", begun?.path === "/api/theme-program" && begun.body.toString() === "Snow falling on igloos by a frozen lake", begun?.body.toString());
+  check("its source is built in the tab, and Claude is shown its pictures once",
+    looked?.kind === "frames" && looked.path === "/api/theme-program/0123456789abcdef" && looked.body[0] >= 3 && rounds.length === 2, `${rounds.map(r => r.kind).join(", ")} in ${seconds} s, toolchain ${compiler.id}`);
+  check("and the compiler is ended once there is nothing more to build", !compiling(), `${((Date.now() - t0) / 1000).toFixed(1)} s`);
+  const before = new Set(await kept(maker));
+  await click(421, 635, maker);
+  let built;
+  const t1 = Date.now();
+  while (!built && Date.now() - t1 < 15000) {
+    built = (await kept(maker)).find(k => !before.has(k) && k.startsWith("/caprice/themes/") && k.endsWith(".wasm"));
+    if (!built) await maker.waitForTimeout(500);
+  }
+  await maker.waitForTimeout(3000);
+  await maker.screenshot({ path: `${out}/14-theme-kept.png` });
+  const bytes = built && await maker.evaluate(path => new Promise((done, failed) => {
+    const r = indexedDB.open("caprice", 1);
+    r.onsuccess = () => {
+      const req = r.result.transaction("files", "readonly").objectStore("files").get(path);
+      req.onsuccess = () => done(req.result ? Array.from(new Uint8Array(req.result.bytes)) : []);
+      req.onerror = () => failed(req.error);
+    };
+    r.onerror = () => failed(r.error);
+  }), built);
+  const all = await kept(maker);
+  check("kept, it is the very module the toolchain builds anywhere, with its source and a picture, and it plays",
+    bytes && Buffer.from(bytes).equals(fs.readFileSync(path.join(here, "../tests/fixtures/snow.wasm")))
+      && all.includes(built.replace(/\.wasm$/, ".rs")) && all.includes(built.replace(/\.wasm$/, ".png")) && maker.workers().some(w => w.url().endsWith("/theme-worker.js")),
+    built ?? "nothing kept");
+  await context.close();
+}
 
 check("no errors on the page", errors.length === 0, [...new Set(errors)].slice(0, 8).join("\n  "));
 

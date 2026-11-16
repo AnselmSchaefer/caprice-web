@@ -1089,7 +1089,7 @@ impl Shelf {
         self.version += 1;
     }
 
-    /// A program theme on the shelf as a theme file's parts, to give to someone as it came.
+    /// A program theme on the shelf as a theme file's parts, as it came: what goes to the gallery.
     pub fn bundle(&self, id: &str) -> Option<crate::bundle::Bundle> {
         let e = self.get(id).filter(|e| e.program)?;
         let manifest = crate::bundle::Manifest {
@@ -1253,10 +1253,22 @@ impl Workshop {
     }
 }
 
+/// What a writer is offered to import: a drawing. A theme that is a program never comes from a
+/// file, nor goes to one: it is made with Claude in Caprice, or taken from the gallery, where it is
+/// rebuilt from its source and checked before anyone else plays it (R36).
+fn import_dialog() -> crate::platform::Dialog {
+    crate::platform::Dialog::new().add_filter("Theme drawing (SVG)", &["svg"])
+}
+
+/// Why a program picked as a file anyway is not added.
+pub const NO_PROGRAM_FILES: &str = "Themes that are programs are not taken from files: they are made with Claude in Caprice, or taken from the gallery.";
+
 /// Something asked for in the gallery's "Yours".
 pub enum Ask {
     Use(String),
     Import,
+    /// The "Make a theme with Claude" window (`making.rs`).
+    Make,
     Template,
     Guide,
     Export(String),
@@ -1264,22 +1276,20 @@ pub enum Ask {
 }
 
 impl App {
-    /// Ask for a theme to import: a drawing, a theme file, or a theme program's source.
+    /// Ask for a theme to import: a drawing (`import_dialog`).
     pub fn choose_theme_file(&mut self, ctx: &egui::Context) {
-        let dialog = crate::platform::Dialog::new().add_filter("Theme (SVG drawing, Caprice theme file, or a program's source)", &["svg", crate::bundle::EXTENSION, "rs"]);
-        self.ask_path(ctx, crate::fileio::DialogFor::ImportTheme, dialog);
+        self.ask_path(ctx, crate::fileio::DialogFor::ImportTheme, import_dialog());
     }
 
-    /// Import the theme at `path`: a theme file (a zip), a program's source (named `.rs`) or a
-    /// drawing.
+    /// Import the drawing at `path` as a theme. A theme file (a zip) or a program's source (a
+    /// `.rs`) picked anyway is refused, saying where programs come from.
     pub fn import_theme(&mut self, ctx: &egui::Context, path: &Path) {
         let name = path.file_stem().map_or("My theme".to_owned(), |s| s.to_string_lossy().replace(['_', '-'], " "));
         let source = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("rs"));
         match fs::read(path) {
-            Ok(bytes) if crate::bundle::is_bundle(&bytes) => self.import_theme_file(ctx, bytes, name),
-            Ok(bytes) if source => {
-                let named = name.clone();
-                self.prepare_theme(ctx, name, move || crate::bundle::from_source(&bytes, &named).map(Prepared::Program));
+            Ok(bytes) if source || crate::bundle::is_bundle(&bytes) => {
+                self.workshop.report = Some(Report::refused(name, vec![NO_PROGRAM_FILES.into()]));
+                self.status = "- the theme was not added".into();
             }
             Ok(bytes) => self.import_theme_svg(ctx, String::from_utf8_lossy(&bytes).into_owned(), name),
             Err(e) => self.workshop.report = Some(Report::refused(name, vec![format!("The file could not be read: {e}.")])),
@@ -1292,10 +1302,21 @@ impl App {
         self.prepare_theme(ctx, name, move || prepare(&svg, &named).map(Prepared::Drawing));
     }
 
-    /// Import a theme file (`bundle`), checked off the frame; it is chosen once it is on the shelf.
-    pub fn import_theme_file(&mut self, ctx: &egui::Context, bytes: Vec<u8>, name: String) {
+    /// A theme program as it travels (a theme file, `bundle`) put on the shelf, checked off the
+    /// frame, and chosen: what the gallery's "Use" hands it (the plan's step 6), never a file the
+    /// writer picks.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn take_theme_file(&mut self, ctx: &egui::Context, bytes: Vec<u8>, name: String) {
         let named = name.clone();
         self.prepare_theme(ctx, name, move || crate::bundle::open(&bytes, &named).map(Prepared::Program));
+    }
+
+    /// A theme program's source built in this browser, then put on the shelf and chosen: what
+    /// Claude writes (the plan's step 5).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn build_theme_source(&mut self, ctx: &egui::Context, source: String, name: String) {
+        let named = name.clone();
+        self.prepare_theme(ctx, name, move || crate::bundle::from_source(source.as_bytes(), &named).map(Prepared::Program));
     }
 
     fn prepare_theme(&mut self, ctx: &egui::Context, name: String, read: impl FnOnce() -> Result<Prepared, Vec<String>> + Send + 'static) {
@@ -1362,7 +1383,7 @@ impl App {
     }
 
     /// A theme read and checked put on the shelf and chosen: what its window says of it.
-    fn keep_theme(&mut self, ctx: &egui::Context, name: String, prepared: Prepared) -> Report {
+    pub fn keep_theme(&mut self, ctx: &egui::Context, name: String, prepared: Prepared) -> Report {
         let (added, named, found, notes) = match prepared {
             Prepared::Drawing(ready) => (self.themes.own.add(&ready), ready.checked.pack.meta.name, ready.checked.found, ready.checked.notes),
             Prepared::Program(o) => {
@@ -1444,33 +1465,27 @@ impl App {
         match ask {
             Ask::Use(id) => self.themes.choose_own(ctx, &id),
             Ask::Import => self.choose_theme_file(ctx),
+            Ask::Make => self.make_theme(),
             Ask::Template => {
                 let dialog = crate::platform::Dialog::new().add_filter("Theme drawing (SVG)", &["svg"]).set_file_name("Caprice theme template.svg");
                 self.ask_path(ctx, crate::fileio::DialogFor::ThemeTemplate, dialog);
             }
             Ask::Guide => self.workshop.guide = true,
+            // Only a drawing is written to a file: a program goes to the gallery, never to a file.
             Ask::Export(id) => {
-                let (name, program) = self.themes.own.get(&id).map_or(("Theme".to_owned(), false), |e| (e.name.clone(), e.program));
-                let ext = crate::bundle::EXTENSION;
-                let dialog = match program {
-                    true => crate::platform::Dialog::new().add_filter("Caprice theme file", &[ext]).set_file_name(format!("{name}.{ext}")),
-                    false => crate::platform::Dialog::new().add_filter("Theme drawing (SVG)", &["svg"]).set_file_name(format!("{name}.svg")),
-                };
+                let Some(e) = self.themes.own.get(&id).filter(|e| !e.program) else { return };
+                let dialog = crate::platform::Dialog::new().add_filter("Theme drawing (SVG)", &["svg"]).set_file_name(format!("{}.svg", e.name));
                 self.ask_path(ctx, crate::fileio::DialogFor::ExportTheme(id), dialog);
             }
             Ask::Delete(id) => self.workshop.deleting = Some(id),
         }
     }
 
-    /// Write the theme `id` to `path`, to keep, change or give to someone: its drawing, or, for a
-    /// program, a theme file as it came.
+    /// Write the drawing of theme `id` to `path`, to keep, change or give to someone. A program
+    /// is never written to a file.
     pub fn export_theme_to(&mut self, id: &str, path: &Path) {
-        let own = &self.themes.own;
-        let bytes = match own.get(id).is_some_and(|e| e.program) {
-            true => own.bundle(id).map(|b| crate::bundle::write(&b)),
-            false => own.svg(id).map(|svg| Ok(svg.into_bytes())),
-        };
-        self.status = match bytes.map(|b| b.and_then(|b| fs::write(path, b).map_err(|e| e.to_string()))) {
+        let svg = self.themes.own.get(id).filter(|e| !e.program).and_then(|_| self.themes.own.svg(id));
+        self.status = match svg.map(|svg| fs::write(path, svg).map_err(|e| e.to_string())) {
             Some(Ok(())) => format!("- theme saved as {}", path.file_name().map_or(String::new(), |n| n.to_string_lossy().into_owned())),
             Some(Err(e)) => format!("- theme not saved: {e}"),
             None => "- the theme is no longer there".into(),
@@ -1593,10 +1608,11 @@ impl App {
             self.workshop.guide &= open;
         }
         if let Some(id) = self.workshop.deleting.clone() {
-            let name = self.themes.own.get(&id).map_or(String::new(), |e| e.name.clone());
+            let (name, program) = self.themes.own.get(&id).map_or((String::new(), false), |e| (e.name.clone(), e.program));
             let mut answer = None;
             egui::Window::new("Delete theme?").id(egui::Id::new("theme_delete")).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0)).show(ctx, |ui| {
-                ui.label(format!("\u{201c}{name}\u{201d} will be gone from this device. Export it first to keep a copy."));
+                let keep = if program { "" } else { " Export it first to keep a copy." };
+                ui.label(format!("\u{201c}{name}\u{201d} will be gone from this device.{keep}"));
                 ui.horizontal(|ui| {
                     if ui.button("Delete").clicked() {
                         answer = Some(true);
@@ -1705,6 +1721,12 @@ mod tests {
             <circle id="hook" cx="300" cy="330" r="3" fill="#000"/>
         </g>
     </svg>"##;
+
+    #[test]
+    fn a_writer_is_offered_only_drawings_to_import_never_a_program() {
+        let offered: Vec<String> = import_dialog().filters.into_iter().flat_map(|(_, exts)| exts).collect();
+        assert_eq!(offered, ["svg"]);
+    }
 
     #[test]
     fn names_from_inkscape_illustrator_and_figma_are_read_alike() {

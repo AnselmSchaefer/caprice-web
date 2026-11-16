@@ -1,14 +1,16 @@
-//! A theme that is a program, as one file to give and take (R36, the plan's step 3): a
-//! `.caprice-theme`, a zip of `manifest.json` (what the shelf shows of it: its name, a few words,
-//! who made it, its palette; the world it is built for and the toolchain that built it),
-//! `theme.wasm`, `theme.rs` if its source comes with it, and `preview.png`, its picture for the
-//! gallery. Imported as a drawing is (`own::Workshop`), checked here and by `eggs::program::check`,
-//! with the reasons in words when it is refused; written again by "Export…", so a theme on the
-//! shelf can be given to someone as it came. A file with a source and no module, or a source alone
-//! (`from_source`), is built in the browser (`platform::compiler`) before it goes on the shelf.
+//! A theme that is a program, as it travels (R36, the plan's step 3): a `.caprice-theme`, a zip of
+//! `manifest.json` (what the shelf shows of it: its name, a few words, who made it, its palette;
+//! the world it is built for and the toolchain that built it), `theme.wasm`, `theme.rs` if its
+//! source comes with it, and `preview.png`, its picture for the gallery. Read and checked here and
+//! by `eggs::program::check`, with the reasons in words when it is refused (`own::Workshop`). One
+//! with a source and no module, or a source alone (`from_source`: what Claude writes), is built in
+//! the browser (`platform::compiler`) before it goes on the shelf.
 //!
-//! Unsigned modules are welcome on one's own shelf: the sandbox is what keeps them harmless. Only
-//! the gallery's are signed (`own::Signed`), and a file never carries a signature.
+//! It is never a file a writer picks or saves (the owner's decision, 2026-11-16): programs are made
+//! with Claude in Caprice, or taken from the gallery, which rebuilds each from its source and
+//! checks it before anyone else plays it. A theme file is how one goes to the gallery and comes
+//! back (step 6), and how Caprice's own ports are kept (`tests/fixtures/`). Only the gallery's
+//! are signed (`own::Signed`), and a file never carries a signature.
 
 use std::collections::BTreeMap;
 use std::io::{Cursor, Read, Write};
@@ -19,7 +21,8 @@ use serde::{Deserialize, Serialize};
 use crate::own::{NAMES, with_colours};
 use crate::theme::Theme;
 
-/// What a theme file is called after.
+/// What a theme file is called after: in `tests/fixtures/`, and by the gallery (step 6).
+#[cfg_attr(not(test), allow(dead_code))]
 pub const EXTENSION: &str = "caprice-theme";
 /// The world the themes Caprice plays are built for.
 pub const WORLD: &str = "caprice:theme@1.0.0";
@@ -219,7 +222,8 @@ pub fn from_source(bytes: &[u8], name: &str) -> Result<Opened, Vec<String>> {
 }
 
 /// A theme file written: its manifest, module, source and picture, the same bytes for the same
-/// parts (no time is written into it).
+/// parts (no time is written into it). To be sent to the gallery when a theme is published (step 6).
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn write(b: &Bundle) -> Result<Vec<u8>, String> {
     let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
     let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated).last_modified_time(zip::DateTime::default());

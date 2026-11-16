@@ -1268,7 +1268,7 @@ fn story_name(path: &Path) -> String {
 #[cfg(test)]
 pub mod stand_in {
     use std::cell::RefCell;
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, VecDeque};
     use std::rc::Rc;
     use std::sync::mpsc::Sender;
 
@@ -1311,8 +1311,16 @@ pub mod stand_in {
         /// A slow network: requests wait unanswered until `answer_held`.
         pub slow: bool,
         held: Vec<(Request, Sender<Answer>)>,
+        /// Claude's answers to the rounds of a theme being made (`/api/theme-program`), in turn;
+        /// with none left, Claude is busy.
+        pub theme_answers: VecDeque<Answer>,
+        pub theme_rounds: Vec<Round>,
         versions: u32,
     }
+
+    /// A round of a theme being made, as asked: the path, its kind (none to begin), its body and
+    /// its other headers.
+    pub type Round = (String, Option<String>, Vec<u8>, Vec<(String, String)>);
 
     #[derive(Default)]
     pub struct StandIn(pub RefCell<Online>);
@@ -1378,6 +1386,12 @@ pub mod stand_in {
                     return Answer::default();
                 }
                 return Answer { status: 200, headers: vec![("X-Caprice-Scenes-Left".into(), (50 - o.painted).to_string())], body: svg.into() };
+            }
+            if r.path.starts_with("/api/theme-program") {
+                let kind = header("X-Caprice-Kind");
+                let others = r.headers.iter().filter(|(n, _)| *n != "X-Caprice-Kind").map(|(n, v)| ((*n).to_owned(), v.clone())).collect();
+                o.theme_rounds.push((r.path.clone(), kind, r.body.clone().unwrap_or_default(), others));
+                return o.theme_answers.pop_front().unwrap_or(Answer { status: 503, headers: Vec::new(), body: b"Claude is busy: try again in a minute".to_vec() });
             }
             if let Some(story) = r.path.strip_prefix("/api/scenes?story=") {
                 let waiting: Vec<_> = o.kept.iter().filter(|k| k.1 == story).map(|k| serde_json::json!({ "id": k.0, "at": k.2, "svg": k.3 })).collect();

@@ -153,7 +153,9 @@ Full list with reasons and tests in `ARCHITECTURE.md` §4.
     built in the writer's tab by one toolchain whose id names all a build depends on
     (`toolchain/pack.mjs`, `web/compiler/`), every path as the tab has it (`/theme/theme.rs`), so a
     source is the same bytes everywhere: flags change in `themes/build.sh` and `pack.mjs` together.
-    The compiler is ended once it has answered (it holds a gigabyte). The Magic
+    The compiler is ended once it has answered (it holds a gigabyte). A writer never imports or
+    exports a program: it is made with Claude (`making.rs`: the compiler's words go back to Claude,
+    never to the writer, and a version that worked is never lost) or taken from the gallery. The Magic
     Snow and the Magic Vineyard have twins, `themes/snow` and `themes/vineyard`: a change to
     `eggs/snow.rs`, `eggs/vineyard.rs` or `eggs/country.rs` is made there too (a test compares them
     frame by frame).

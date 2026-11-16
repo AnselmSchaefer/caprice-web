@@ -88,7 +88,8 @@ Answer with exactly two fenced blocks and nothing else of length:
    `text_hot`, `accent`, `on_accent`, `caret`, `thumb`, and `light`: `"yes"` if the toolbar is light
    with dark text, else `"no"`. The text must read clearly on the dock, and `on_accent` on `accent`.
 2. a ```rust block: the whole theme, one file, starting `use theme_sdk::*;` and ending with
-   `theme!(YourTheme);`. Always the whole file, never a part of it or a change to it.
+   `theme!(YourTheme);`. Always the whole file, never a part of it or a change to it. Its comments
+   are `//` ones: a `//!` after the `use` does not build.
 
 It is built with Rust 1.99 (edition 2024): `rustc --crate-type cdylib --target
 wasm32-unknown-unknown -O` against the SDK. If it does not build, you are shown the compiler's

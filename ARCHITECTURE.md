@@ -88,8 +88,9 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `claude.rs` | Pen loop or cursor selection → passage → `claude -p` → streamed answer panel, a conversation; story notes |
 | `backdrop.rs` | Scenes Claude paints (SVG), pinned to the story, faintly behind the pages; the Scene menu and list |
 | `motion.rs` | Scenes that move a little: the parts Claude marks by id (drift, wing, sway, smoke, flicker, shimmer), rendered apart from the still picture and moved every frame; and the kinds a theme of one's own may use besides (float, twinkle, pulse, wander, spin, and areas of snow, rain, fireflies, leaves, bubbles or embers that Caprice fills) |
-| `own.rs` | Themes of the writer's own (R35): one SVG drawing read into its desk, pieces and carrier (`Pack`), checked on import with the reasons in plain words (`check`), its palette taken from its picture (`palette_of`); the shelf of them in the data folder (`Shelf`); importing, exporting, deleting, the template, the guide and the import's report (`Workshop`) |
-| `bundle.rs` | A theme that is a program as one file (R36): a `.caprice-theme`, a zip of `manifest.json` (name, words, author, palette, the world, the toolchain), `theme.wasm`, `theme.rs` and `preview.png`; read and checked on import with the reasons in words (`open`; a file with a source and no module, or a source alone, `from_source`, to be built), written again by Export (`write`), the same bytes for the same parts |
+| `own.rs` | Themes of the writer's own (R35): one SVG drawing read into its desk, pieces and carrier (`Pack`), checked on import with the reasons in plain words (`check`), its palette taken from its picture (`palette_of`); the shelf of them in the data folder (`Shelf`); importing and exporting drawings (never a program), deleting, the template, the guide and the import's report (`Workshop`) |
+| `bundle.rs` | A theme that is a program as it travels (R36): a `.caprice-theme`, a zip of `manifest.json` (name, words, author, palette, the world, the toolchain), `theme.wasm`, `theme.rs` and `preview.png`; read and checked with the reasons in words (`open`; a file with a source and no module, or a source alone, `from_source`, to be built), written (`write`), the same bytes for the same parts; never a file a writer picks or saves |
+| `making.rs` | Making a theme with Claude (R36): the "Make a theme with Claude" window; the request to `/api/theme-program`, the source built in the tab, checked and pictured, the compiler's words and a program that will not play sent back to Claude unseen, its pictures shown to Claude once, the last version that worked kept until the writer keeps it or asks for a change |
 | `cast.rs` | The cast: people found by name in what is painted, their looks and model sheets in the scene's prompt; the Cast window and its example |
 | `start.rs` | The welcome page when Caprice opens without a file: kinds of new story (`Kind`), the stories last opened with what they hold, the sheet flying to the desk; the list of stories last opened, kept in the data folder |
 | `peek.rs` | The cast peeking out from behind the page: the puppet asked of Claude, cut into parts, who peeks when, where they look, the peek drawn |
@@ -2443,33 +2444,41 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
 - **None of it is printed or saved with a story** (R20, R30): it is drawn in none of `underlay`,
   `ink` or `furniture`, and moves no text. Its colours are its own (R29), its palette the entry's.
   Test: `print_shows_nothing_of_a_program_theme`.
-- **A program comes and goes as a theme file** (`bundle.rs`, the plan's step 3): a `.caprice-theme`,
+- **A program travels as a theme file, but never as a file a writer picks or saves** (`bundle.rs`,
+  the plan's step 3; the owner's decision of 2026-11-16, §7): a `.caprice-theme`,
   a zip of `manifest.json` (`bundle::Manifest`: the world it is built for, which must be
   `caprice:theme@1.0.0`; its name, a few words, its author; its palette by `own::NAMES`; the
   toolchain), `theme.wasm`, and if they come with it `theme.rs` (kept beside the module as
-  `<id>.rs`) and `preview.png` (the gallery's picture, made 320 wide). "Import a theme…" in Yours
-  takes it or a drawing, told apart by the file's first bytes (`bundle::is_bundle`), read off the
-  frame like a drawing (`own::Prepared`) and reported in the same window: refused with reasons in
+  `<id>.rs`) and `preview.png` (the gallery's picture, made 320 wide). Programs are made with
+  Claude (`making.rs`, below) or taken from the gallery (step 6, whose "Use" hands the shelf a
+  theme file: `App::take_theme_file`). "Import a theme…" in Yours offers drawings only
+  (`own::import_dialog`); a theme file (told by its first bytes, `bundle::is_bundle`) or a `.rs`
+  picked anyway is refused, saying where programs come from (`own::NO_PROGRAM_FILES`), and a
+  program on the shelf has no Export: what is shared goes through the gallery, which rebuilds it
+  from its source and checks it first. A theme file taken is read off the frame like a drawing
+  (`own::Prepared`) and reported in the same window: refused with reasons in
   words when it is not a zip, has no manifest, neither a module nor a source, names another world,
   or its module fails `eggs::program::check`; a file with a source and no module is built first
   (below); and what it lacks or holds besides (no palette, colours not read, no
   picture, other files) is worth knowing, never a refusal. Every part is read to at most its size,
-  whatever the zip says (`MOST_FILE`, the module's `MOST_BYTES`). Unsigned modules are welcome on
-  one's own shelf (the sandbox keeps them harmless); a file never carries the gallery's signature.
+  whatever the zip says (`MOST_FILE`, the module's `MOST_BYTES`). A file never carries the
+  gallery's signature.
   **Its palette is the theme's**: the toolbar, the buttons, the page bar and the desk under the
   program's shapes (shown before its first frame and when it is stopped) take its colours, so a
-  program that draws its own sky should carry a palette that agrees with it. Export writes a
-  program back as the file it came as (`Shelf::bundle`, `bundle::write`: no time in the zip, so the
-  same parts give the same bytes). `tests/fixtures/snow.caprice-theme` and `vineyard.caprice-theme`
+  program that draws its own sky should carry a palette that agrees with it. A program on the shelf
+  is the file it came as again (`Shelf::bundle`, `bundle::write`: no time in the zip, so the
+  same parts give the same bytes), as it will go to the gallery. `tests/fixtures/snow.caprice-theme` and `vineyard.caprice-theme`
   are the ports, with their sources and the built-in themes' palettes (`themes/<theme>/manifest.json`),
   to try by hand; a change to a port, its manifest or its module means making them again
   (`CAPRICE_FIXTURES=1 cargo test`). Tests:
   `the_snow_s_and_the_vineyard_s_theme_files_are_their_manifests_modules_and_sources`,
   `a_file_that_is_not_a_theme_or_whose_program_cannot_be_played_is_refused_saying_why`,
   `what_a_theme_file_lacks_or_holds_besides_is_worth_knowing_not_a_refusal`,
-  `a_theme_file_is_imported_chosen_and_played_in_its_own_colours_and_exported_as_it_came`,
-  `a_theme_file_whose_program_cannot_be_played_is_not_added_and_a_window_says_why`; in the browser
-  `smoke.mjs`, "a theme file imported goes on the shelf, its source with it, and plays at once".
+  `a_theme_file_taken_is_chosen_and_played_in_its_own_colours_and_kept_as_it_came`,
+  `a_theme_file_whose_program_cannot_be_played_is_not_added_and_a_window_says_why`,
+  `a_program_is_never_imported_from_a_file_nor_exported_to_one`,
+  `a_writer_is_offered_only_drawings_to_import_never_a_program`; in the browser `smoke.mjs`, "the
+  gallery's import offers drawings only, and a theme file given it anyway is not added".
 - **A gallery theme is the gallery's only while its signature holds** (`own::Signed`): the gallery
   signs (ed25519) its module's SHA-256, its source's, the toolchain and the name it is published
   under (`Signed::message`); the shelf checks it against `GALLERY_KEY` every time it is read or a
@@ -2489,9 +2498,10 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   machine**: where the checkout and the crates' sources lie would be in what rustc makes (the
   working directory in the SDK rlib's metadata, a crate's path in the decoder's panic messages), so
   both are remapped (`/caprice`, `/crates`); before that, CI and this machine packed the same
-  compiler under two ids. "Import a theme…" takes a
-  program's source (a `.rs`, `bundle::from_source`) or a theme file with a source and no module;
-  `Workshop::build_theme` starts a compiler (52 MiB fetched the first time, then from Cache
+  compiler under two ids. A source Claude wrote is
+  built by the window that asked for it (`making.rs`, below); a theme file taken with a source and
+  no module, or a source alone (`App::build_theme_source`, `bundle::from_source`), by
+  `Workshop::build_theme`, which starts a compiler (52 MiB fetched the first time, then from Cache
   Storage, its pieces' hashes checked once, when fetched), a window says how far it has loaded and
   can stop it, and the module it builds is checked like any other and kept with its source and the
   toolchain's id (`Manifest::toolchain`). **The compiler is ended as soon as it has answered**
@@ -2503,18 +2513,40 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   that. On the desktop the compiler says themes are built in the browser for now; under `cargo test`
   a stand-in builds the sources of `themes/` to their fixtures and anything else to what the test
   says (`compiler::stand_in`). Tests:
-  `a_theme_s_source_imported_is_built_kept_with_its_source_and_toolchain_and_played`,
+  `a_theme_s_source_is_built_kept_with_its_source_and_toolchain_and_played`,
   `a_theme_s_source_with_mistakes_is_not_added_and_the_window_shows_what_the_compiler_said`,
   `a_theme_being_built_says_how_far_the_compiler_has_loaded_and_can_be_stopped`,
   `a_theme_file_or_a_source_with_no_module_is_taken_to_be_built_from_its_source`; in the browser
-  `smoke.mjs`, "a theme's source is built in the tab, to the very module the toolchain builds
-  anywhere" (the Snow's `theme.rs`, its module compared with the fixture byte for byte) and "and the
-  compiler is ended once it has built it". **The release is pinned**: `toolchain/release.json` names
+  `smoke.mjs`, "its source is built in the tab, and Claude is shown its pictures once", "and the
+  compiler is ended once there is nothing more to build" and "kept, it is the very module the
+  toolchain builds anywhere, with its source and a picture, and it plays" (the Snow's `theme.rs`,
+  as a stand-in Claude answers, its module compared with the fixture byte for byte). **The release is pinned**: `toolchain/release.json` names
   the investigation's GitHub release (`1.99.1-6c798e2613f0`, with its licences) and each file's
   sha256; `toolchain/fetch.mjs` fetches it (CI does, before `web/build.sh`, keeping what brotli made
   in a cache), and `pack.mjs` checks every file against its pin wherever it found it, so CI, a
   deploy and this machine pack the same toolchain, the same id. `web/build.sh` fails if it cannot
   pack it (`CAPRICE_TOOLCHAIN=0` leaves it out; `smoke.mjs` then skips the build, saying so).
+- **A theme made with Claude reaches the writer only once it works** (`making.rs`, the plan's step
+  5; the server's side is R33's `/api/theme-program`). The window ("Make one with Claude…" in
+  Yours, for a writer signed in, saying the words go to Claude) starts the compiler first, so a
+  browser that cannot build says so before Claude is asked, and the toolchain loads while Claude
+  writes. Each answer (only a source and a palette) is built, checked (`eggs::program::check`) and
+  played off screen (`eggs::preview`); what goes wrong (the compiler's words, a program Caprice will
+  not play, one stopped while playing) goes back to Claude as an `errors` round, at most `FIXES`
+  (the server's `THEME_ERRORS_ROUNDS`), and **the writer never sees the compiler's words**. The
+  first version that plays is shown to Claude as its pictures and points (`frames`, `LOOKS` times:
+  each costs about as much as writing it); then the writer sees its pictures, keeps it, starts
+  again, or asks for a change (`change`). **A version that worked is never lost to one that did
+  not**: a fix that never builds, or a look Claude cannot give, leaves the last good version shown,
+  with a word why; with none, the window says nothing came of it, and nothing is kept. Nothing goes
+  on the shelf until "Keep it" (then as a theme file would: its module, source, palette, toolchain
+  and its preview's picture, `App::keep_theme`). The compiler is ended once there is nothing more
+  to build. Closing the window only hides it. Tests:
+  `a_theme_made_with_claude_is_built_shown_to_claude_once_changed_and_kept_when_the_writer_says`,
+  `mistakes_go_back_to_claude_unseen_and_a_theme_that_never_works_says_so_keeping_nothing`,
+  `a_theme_is_made_only_for_a_writer_signed_in_and_what_the_server_says_is_shown` (the stand-in
+  server answers the rounds, `Online::theme_answers`); in the browser `smoke.mjs` makes one with a
+  stand-in Claude, built in the tab.
 - **A theme is pictured by playing it off screen** (`eggs/preview.rs`): through the same
   `platform::Program` and `program::read` as on the desk, told a short story at ten frames a second
   (begun; three chapters written, shown afresh; the fourth begun, the third finishing; a title
@@ -2534,7 +2566,8 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   `a_theme_is_shown_its_story_and_pictured_as_the_desk_looks_with_the_page_on_it`
   (`CAPRICE_PREVIEW_OUT=dir` keeps the pictures to look at),
   `a_program_theme_kept_with_no_picture_is_given_one_made_from_its_program`; in the browser
-  `smoke.mjs`, "and it is given a picture for the gallery, made from its program".
+  `smoke.mjs`, "kept, it is the very module the toolchain builds anywhere, with its source and a
+  picture, and it plays".
 - **The themes in `themes/` are built as the writer's tab builds them** (`themes/build.sh`):
   rustc 1.99.1, the SDK as one rlib, one file, the flags Caprice fixes (`--max-memory` among them),
   the output always named `theme.wasm`, and **every path as the tab has it**: the SDK's files as
@@ -3012,5 +3045,13 @@ result sent back, a stand-in answer in `api.test.mjs` and in `cloud::stand_in` (
   JavaScript once and kept beside `theme-worker.js`, so the web build needs no bundler. The compiler
   holds a gigabyte while it lives, so it is ended as soon as a build has answered: loading it again
   from Cache Storage costs under two seconds.
+- **2026-11-16 — Theme programs never come from or go to files.** A writer imports drawings
+  (`.svg`) and nothing else; a program is made with Claude in Caprice or taken from the gallery, and
+  is shared only by publishing it there (R36). Theme files (`.caprice-theme`) and sources (`.rs`)
+  were imported and exported until then (steps 3 and 4). A program anyone could hand anyone else
+  would be played unchecked on their shelf; through the gallery each is rebuilt from its source,
+  played and looked at before anyone else plays it, and a theme made with Claude is built in the
+  writer's own tab from what Claude wrote. The theme file stays as the form a program travels in
+  (to the gallery and back) and the ports' fixtures.
 - **No `.docx` import.** Export only.
 - **Contents heading is "Contents"** (English), in the app and in Word.
