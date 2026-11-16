@@ -1009,7 +1009,44 @@ impl Shelf {
         let entries = dir.as_ref().and_then(|d| fs::read_to_string(d.join("index.json")).ok()).and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
         let mut shelf = Self { dir, entries, held: HashMap::new(), held_modules: HashMap::new(), held_sources: HashMap::new(), gallery_key: GALLERY_KEY, version: 0 };
         shelf.check_signatures();
+        shelf.join_doubles();
         shelf
+    }
+
+    /// The writer's own program on the shelf that is `module` byte for byte.
+    fn same_program(&self, module: &[u8]) -> Option<String> {
+        let same = |e: &&Entry| e.program && !e.from_gallery && self.module(&e.id).is_some_and(|m| m == module);
+        self.entries.iter().find(same).map(|e| e.id.clone())
+    }
+
+    /// The gallery signed `module`. If the writer's own theme on the shelf is that very program (the
+    /// one they made and sent), it becomes the gallery's, with its source and all, rather than lying
+    /// on the shelf twice; its id.
+    pub fn sign(&mut self, signed: &Signed, module: &[u8]) -> Option<String> {
+        let id = self.same_program(module)?;
+        if let Some(e) = self.entries.iter_mut().find(|e| e.id == id) {
+            e.gallery = Some(signed.clone());
+        }
+        self.check_signatures();
+        let _ = self.save();
+        Some(id)
+    }
+
+    /// A shelf from before `sign` may hold a theme twice, as made and as taken from the gallery:
+    /// the gallery's stays, and knows it was sent.
+    pub fn join_doubles(&mut self) {
+        let taken: Vec<String> = self.entries.iter().filter(|e| e.from_gallery).map(|e| e.id.clone()).collect();
+        for id in taken {
+            let Some(module) = self.module(&id) else { continue };
+            while let Some(own) = self.same_program(&module) {
+                let sent = self.get(&own).and_then(|e| e.sent.clone());
+                self.remove(&own);
+                if let Some(e) = self.entries.iter_mut().find(|e| e.id == id) {
+                    e.sent = e.sent.take().or(sent);
+                }
+                let _ = self.save();
+            }
+        }
     }
 
     /// Each theme's signature checked against its module as it is now: one changed by a byte, or

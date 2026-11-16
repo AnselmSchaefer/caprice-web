@@ -118,6 +118,8 @@ struct Review {
     same: Option<String>,
     why: String,
     deciding: Asked,
+    /// Whether the decision on its way is to publish it.
+    publishing: bool,
 }
 
 /// Sending a theme on the shelf to the gallery: what it is to be called there, and the answer.
@@ -152,6 +154,13 @@ pub struct Gallery {
 }
 
 impl Gallery {
+    /// Close the window; the owner's look ends with it, and the compiler it may hold.
+    pub fn close(&mut self) {
+        self.open = false;
+        self.review = None;
+        self.sending = None;
+    }
+
     /// Whether a theme is being taken, or looked at by the owner.
     pub fn busy(&self) -> bool {
         self.taking.is_some() || self.listing.is_some() || self.review.as_ref().is_some_and(|r| !matches!(r.look, Look::Seen { .. } | Look::Failed))
@@ -286,7 +295,7 @@ impl App {
     /// The owner looks at a theme waiting: its file fetched first.
     fn review(&mut self, ctx: &egui::Context, theme: Waiting) {
         let Some(rx) = self.ask_server(ctx, "GET", format!("/api/gallery/{}/theme", theme.id), None) else { return };
-        self.gallery.review = Some(Review { theme, look: Look::Fetching(rx), found: Vec::new(), same: None, why: String::new(), deciding: None });
+        self.gallery.review = Some(Review { theme, look: Look::Fetching(rx), found: Vec::new(), same: None, why: String::new(), deciding: None, publishing: false });
     }
 
     fn decide(&mut self, ctx: &egui::Context, publish: bool) {
@@ -298,7 +307,7 @@ impl App {
         };
         let asked = self.ask_server(ctx, "POST", format!("/api/gallery/waiting/{}", r.theme.id), Some(("application/json", said.to_string().into_bytes())));
         if let Some(r) = &mut self.gallery.review {
-            r.deciding = asked;
+            (r.deciding, r.publishing) = (asked, publish);
         }
     }
 
@@ -385,7 +394,13 @@ impl App {
                         self.gallery.said = Some(format!("\u{201c}{}\u{201d} is not as the gallery signed it, so it was not taken.", listed.name));
                         return;
                     }
-                    match self.themes.own.add_bundle(&opened.bundle, Some(signed)) {
+                    // The writer's own theme, published, is not put beside itself: it becomes the gallery's.
+                    let shelf = &mut self.themes.own;
+                    let kept = match shelf.sign(&signed, &opened.bundle.module) {
+                        Some(id) => Ok(id),
+                        None => shelf.add_bundle(&opened.bundle, Some(signed)),
+                    };
+                    match kept {
                         Ok(id) => {
                             self.themes.choose_own(ctx, &id);
                             self.status = format!("- theme \u{201c}{}\u{201d} taken from the gallery", listed.name);
@@ -426,10 +441,15 @@ impl App {
             let decided = answer.status == 200;
             r.found.push(if decided { "Decided.".into() } else { said_of(&answer) });
             if decided {
-                let id = r.theme.id.clone();
+                let (id, name, published) = (r.theme.id.clone(), r.theme.name.clone(), r.publishing);
                 self.gallery.review = None;
                 self.gallery.waiting.retain(|w| w.id != id);
-                self.gallery.said = Some("Decided: the gallery says so to its writer.".into());
+                // What was decided, in its own words: a yes is not told as a no is.
+                self.gallery.said = Some(if published {
+                    format!("\u{201c}{name}\u{201d} is published: it is in the gallery now, under New.")
+                } else {
+                    format!("\u{201c}{name}\u{201d} is refused: its writer reads why under \u{201c}Sent by you\u{201d}.")
+                });
                 self.list_gallery(ctx);
             }
             return;
@@ -521,9 +541,13 @@ impl App {
         let mut act = None;
         let g = &mut self.gallery;
         let shelf = &self.themes.own;
-        egui::Window::new("Gallery").id(egui::Id::new("theme_gallery_window")).open(&mut open).collapsible(false).resizable(false).default_width(500.0)
+        // Three themes to a row, or as many as a phone's screen has room for.
+        let wide = crate::ui::window_width(ctx, 500.0);
+        let gap = if wide < 500.0 { 8.0 } else { 12.0 };
+        let columns = (((wide + gap) / (150.0 + gap)).floor() as usize).clamp(1, 3);
+        egui::Window::new("Gallery").id(egui::Id::new("theme_gallery_window")).open(&mut open).collapsible(false).resizable(false).default_width(wide)
             .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0)).show(ctx, |ui| {
-            ui.set_max_width(520.0);
+            ui.set_max_width(wide);
             if !signed_in {
                 ui.label("Themes made with Claude by writers using Caprice, looked at by Caprice before they show here. The gallery is for writers signed in.");
                 if ui.button("Sign in\u{2026}").clicked() {
@@ -532,7 +556,7 @@ impl App {
                 return;
             }
             let before = g.tab;
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.selectable_value(&mut g.tab, Tab::New, "New");
                 ui.selectable_value(&mut g.tab, Tab::Mine, "Sent by you");
                 if owner {
@@ -563,7 +587,7 @@ impl App {
                         });
                     }
                     egui::ScrollArea::vertical().max_height(460.0).show(ui, |ui| {
-                        egui::Grid::new("gallery_themes").num_columns(3).spacing(vec2(12.0, 8.0)).show(ui, |ui| {
+                        egui::Grid::new("gallery_themes").num_columns(columns).spacing(vec2(gap, 8.0)).show(ui, |ui| {
                             for (k, t) in g.themes.iter().enumerate() {
                                 ui.vertical(|ui| {
                                     ui.set_width(150.0);
@@ -583,7 +607,7 @@ impl App {
                                         });
                                     });
                                 });
-                                if k % 3 == 2 {
+                                if k % columns == columns - 1 {
                                     ui.end_row();
                                 }
                             }
@@ -600,7 +624,7 @@ impl App {
                             "refused" => format!("Not taken: {}", m.why),
                             _ => "Waiting to be looked at".to_owned(),
                         };
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.label(egui::RichText::new(&m.name).strong());
                             ui.label(egui::RichText::new(state).color(pal().text_dim));
                         });
@@ -628,20 +652,22 @@ impl App {
         let Some(s) = &mut self.gallery.sending else { return };
         let mut open = true;
         let (mut send, mut done) = (false, false);
-        egui::Window::new("Send to the gallery").id(egui::Id::new("gallery_sending")).open(&mut open).collapsible(false).resizable(false).default_width(420.0)
+        let wide = crate::ui::window_width(ctx, 420.0);
+        let field = (wide - 140.0).clamp(100.0, 280.0);
+        egui::Window::new("Send to the gallery").id(egui::Id::new("gallery_sending")).open(&mut open).collapsible(false).resizable(false).default_width(wide)
             .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0)).show(ctx, |ui| {
-            ui.set_max_width(440.0);
+            ui.set_max_width(wide);
             ui.label(WHAT_HAPPENS);
             ui.add_space(4.0);
             egui::Grid::new("gallery_sending_fields").num_columns(2).spacing(vec2(8.0, 6.0)).show(ui, |ui| {
                 ui.label("Called");
-                ui.add_enabled(!s.sent, egui::TextEdit::singleline(&mut s.name).char_limit(60).desired_width(280.0));
+                ui.add_enabled(!s.sent, egui::TextEdit::singleline(&mut s.name).char_limit(60).desired_width(field));
                 ui.end_row();
                 ui.label("In a few words");
-                ui.add_enabled(!s.sent, egui::TextEdit::singleline(&mut s.about).char_limit(140).desired_width(280.0));
+                ui.add_enabled(!s.sent, egui::TextEdit::singleline(&mut s.about).char_limit(140).desired_width(field));
                 ui.end_row();
                 ui.label("By");
-                ui.add_enabled(!s.sent, egui::TextEdit::singleline(&mut s.author).char_limit(40).desired_width(280.0).hint_text("A writer"));
+                ui.add_enabled(!s.sent, egui::TextEdit::singleline(&mut s.author).char_limit(40).desired_width(field).hint_text("A writer"));
                 ui.end_row();
             });
             if let Some(said) = &s.said {
@@ -683,7 +709,7 @@ fn waiting_tab(ui: &mut egui::Ui, g: &mut Gallery, act: &mut Option<GalleryAct>)
     }
     for w in &g.waiting {
         let looking = g.review.as_ref().is_some_and(|r| r.theme.id == w.id);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label(egui::RichText::new(&w.name).strong());
             ui.label(egui::RichText::new(format!("by {}, {} KB, {}", w.author, w.size.div_ceil(1024), w.toolchain)).size(11.0).color(pal().text_dim));
             if !looking && ui.button("Look at it").clicked() {
@@ -714,9 +740,10 @@ fn waiting_tab(ui: &mut egui::Ui, g: &mut Gallery, act: &mut Option<GalleryAct>)
     if let Look::Seen { previewed, textures } = &r.look {
         let at = previewed.pictures.iter().position(|p| p.name == "written").unwrap_or(0);
         if let Some(t) = textures.get(at) {
-            ui.add(egui::Image::new(t).fit_to_exact_size(vec2(480.0, 300.0)));
+            let w = ui.available_width().min(480.0);
+            ui.add(egui::Image::new(t).fit_to_exact_size(vec2(w, w * 0.625)));
         }
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             for (k, t) in textures.iter().enumerate() {
                 if k != at {
                     ui.add(egui::Image::new(t).fit_to_exact_size(vec2(112.0, 70.0)));
@@ -728,7 +755,7 @@ fn waiting_tab(ui: &mut egui::Ui, g: &mut Gallery, act: &mut Option<GalleryAct>)
         return;
     }
     let may = r.same.is_some() && matches!(r.look, Look::Seen { .. });
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         if r.deciding.is_some() {
             ui.spinner();
             return;
@@ -736,7 +763,7 @@ fn waiting_tab(ui: &mut egui::Ui, g: &mut Gallery, act: &mut Option<GalleryAct>)
         if ui.add_enabled(may, egui::Button::new("Publish it")).on_disabled_hover_text("Only a theme built again the same, that plays, is published").clicked() {
             *act = Some(GalleryAct::Decide(true));
         }
-        ui.add(egui::TextEdit::singleline(&mut r.why).char_limit(200).desired_width(220.0).hint_text("Why it is not taken"));
+        ui.add(egui::TextEdit::singleline(&mut r.why).char_limit(200).desired_width(ui.available_width().min(220.0)).hint_text("Why it is not taken"));
         if ui.add_enabled(!r.why.trim().is_empty(), egui::Button::new("Refuse it")).clicked() {
             *act = Some(GalleryAct::Decide(false));
         }

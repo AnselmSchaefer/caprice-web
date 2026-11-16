@@ -636,6 +636,8 @@ impl App {
                 self.begin(ctx, crate::start::Kind::Blank);
                 self.start.open = true;
                 self.start.stories = None;
+                // The Gallery window was opened over that story: it does not wait for the next one.
+                self.gallery.close();
                 self.status.clear();
             }
         }
