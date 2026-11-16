@@ -91,6 +91,7 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `own.rs` | Themes of the writer's own (R35): one SVG drawing read into its desk, pieces and carrier (`Pack`), checked on import with the reasons in plain words (`check`), its palette taken from its picture (`palette_of`); the shelf of them in the data folder (`Shelf`); importing and exporting drawings (never a program), deleting, the template, the guide and the import's report (`Workshop`) |
 | `bundle.rs` | A theme that is a program as it travels (R36): a `.caprice-theme`, a zip of `manifest.json` (name, words, author, palette, the world, the toolchain), `theme.wasm`, `theme.rs` and `preview.png`; read and checked with the reasons in words (`open`; a file with a source and no module, or a source alone, `from_source`, to be built), written (`write`), the same bytes for the same parts; never a file a writer picks or saves |
 | `making.rs` | Making a theme with Claude (R36): the "Make a theme with Claude" window; the request to `/api/theme-program`, the source built in the tab, checked and pictured, the compiler's words and a program that will not play sent back to Claude unseen, its pictures shown to Claude once, the last version that worked kept until the writer keeps it or asks for a change |
+| `gallery.rs` | The gallery of theme programs (R33, R36): the Gallery window (New, Sent by you, and for the owner Waiting), each theme's picture, "Use" checking the gallery's signature before the shelf keeps it; sending a theme made with Claude; the owner's look, built again the same in the tab and played, and their decision |
 | `cast.rs` | The cast: people found by name in what is painted, their looks and model sheets in the scene's prompt; the Cast window and its example |
 | `start.rs` | The welcome page when Caprice opens without a file: kinds of new story (`Kind`), the stories last opened with what they hold, the sheet flying to the desk; the list of stories last opened, kept in the data folder |
 | `peek.rs` | The cast peeking out from behind the page: the puppet asked of Claude, cut into parts, who peeks when, where they look, the peek drawn |
@@ -119,6 +120,8 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `web/api/failure.js` | What a failed request answers: Cloudflare's daily limit said plainly, with when it lifts; any other fault, "Something went wrong" (R34) |
 | `web/api/ledger.js` | The Durable Object `Ledger`: who has signed up, the current version and history of each story online, the day's scenes, every limit (R33) |
 | `web/api/tally.js` | The day's scenes counted in R2 as well, with conditional writes, for when the Ledger cannot be reached (R33, R34) |
+| `web/api/gallery.js` | The gallery's requests (R33, R36): a theme file sent, unpacked and checked, queued; the list, each writer's own, the owner's queue and decision, signed with `GALLERY_SIGNING_KEY`; its files read from R2 |
+| `web/api/wasm-check.js` | R36's check of a theme's module, as the Worker makes it before anything is kept: imports, exports, sizes |
 
 ---
 
@@ -2037,6 +2040,39 @@ out for a theme, and themes for a writer, and claude is not asked again", "the s
 day run out for everyone, and a round that fails still counts", "without a key, or switched off, no
 theme is made".
 
+The gallery of theme programs (`web/api/gallery.js`, R36, the plan's step 6) is for writers signed in:
+
+- **A theme sent is checked as far as is cheap, and queued for the owner**: its file (a zip, at most
+  `GALLERY_FILE_BYTES`) is unpacked in the Worker (`unzip`: stored or deflated, each part capped);
+  its manifest's world, name, toolchain and colours, its module (`wasm-check.js`, R36's check
+  ported: only `host` imported, the world's exports, sizes bounded), its source (UTF-8, naming
+  `theme!(`) and its picture (a PNG 320 wide) must hold, or 422 with a sentence. The Worker works
+  out the module's and source's SHA-256 itself; nothing the writer's browser says of them is kept.
+  `USER_PUBLISHED_PER_DAY` a writer, `GALLERY_WAITING` in the queue, `GALLERY_BYTES` in all; the
+  Ledger says yes and counts two writes before R2 is touched (`galleryPublish`, then
+  `galleryCommit`), as for stories. Its files are under `gallery/<id>/`, the one R2 key outside
+  `users/`: a theme published is the gallery's, not its writer's, and stays when they delete their
+  stories online; one still waiting, or refused, goes with them (`removeAll`).
+- **The owner is the session's user named in `GALLERY_OWNERS`** (a dashboard var, hashed ids,
+  never in the repo); `/api/me` says `owner` to them only, and `/api/gallery/waiting` is 404 to
+  anyone else, as is a waiting theme's file.
+- **Only the owner's yes signs, over what the Worker worked out**: the decision names the module's
+  SHA-256 the owner's build gave, which must be the one kept (409 otherwise); the Worker signs
+  `Signed::message` with the secret `GALLERY_SIGNING_KEY` (an Ed25519 seed, base64), whose public
+  half is `own::GALLERY_KEY`. Without the secret nothing is signed (503). A refusal says why to the
+  writer (`/api/gallery/mine`) and its files are deleted.
+- **Reading the gallery is counted**: the list, and each file, against `SITE_READS_PER_DAY`
+  (`galleryRead`); a theme published never changes, so its files go back `private, max-age=31536000,
+  immutable` (the one Cache-Control `guarded` keeps) and the browser asks once.
+- `GALLERY_OFF = "1"` stops sending.
+
+Tests: "a theme sent is queued for the owner and seen by no one else", "what is not a theme the
+gallery can take is refused before anything is kept", "the owner's yes is signed by the worker over
+what it worked out, and the theme is everyone's", "a theme the owner refuses says why to its writer,
+and its files go", "a writer sends a few themes a day, the queue is bounded, and without a key
+nothing is signed", "deleting a writer's stories online takes their themes still waiting, and
+leaves the gallery's".
+
 Tests (`node --test web/api/api.test.mjs`): "without a session, or with a forged one,
 nothing is answered", "one writer cannot reach another's stories", "ids that could reach elsewhere
 are refused", "requests from another site are refused", "a sign-in not started here is refused",
@@ -2489,8 +2525,22 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   under (`Signed::message`); the shelf checks it against `GALLERY_KEY` every time it is read or a
   theme added (`Shelf::check_signatures`), never trusting an earlier check, and only then shows the
   gallery's name (`Entry::shown_name`). Changed by a byte, or signed by another key, it is the
-  writer's own under its own name. Until the gallery has its key `GALLERY_KEY` is none, so nothing is
-  taken for the gallery's. Test: `a_gallery_theme_is_shown_under_the_gallery_s_name_until_a_byte_of_it_changes`.
+  writer's own under its own name. Tests set the stand-in server's key (`stand_in::gallery_key`).
+  Test: `a_gallery_theme_is_shown_under_the_gallery_s_name_until_a_byte_of_it_changes`.
+- **The gallery publishes only what the owner built again, the same, and saw play** (`gallery.rs`):
+  a writer sends a theme made with Claude from its "⋯" menu (once: `Entry::sent`), under the name,
+  words and author they give. The owner looks at it in Caprice: the module fetched must be the one
+  the Worker took in; its source is built in their tab by the toolchain it names (another toolchain
+  cannot be built the same, so it is not published), and the module built must be the module sent,
+  byte for byte; then it is played through the preview's story (`eggs::preview`) and its pictures
+  and points shown against `gallery::BUDGET`. "Publish it" is offered only then, and sends the hash
+  of what was built. "Use" fetches the file, checks the gallery's signature over its module before
+  anything is kept, and adds it with that signature; one already on the shelf is chosen instead.
+  Yours shows the themes from the gallery, those made with Claude and the drawings apart, in that
+  order. Tests: `a_theme_made_with_claude_is_sent_built_again_by_the_owner_published_and_used_from_the_gallery`,
+  `the_owner_refuses_a_theme_that_is_not_built_again_the_same_and_says_why`,
+  `only_the_owner_is_shown_the_themes_waiting_and_the_gallery_is_for_writers_signed_in`,
+  `yours_shows_the_themes_from_the_gallery_those_made_with_claude_and_the_drawings_apart_and_sends_each_once`.
 - **A theme is built from its source in the writer's tab, by one fixed toolchain** (`web/compiler/`,
   `platform::compiler`, the plan's step 4): rustc and wasm-ld built as WebAssembly (the
   investigation's release, `1.99.1-6c798e2613f0`), rustup's std for `wasm32-unknown-unknown`
@@ -3058,5 +3108,13 @@ result sent back, a stand-in answer in `api.test.mjs` and in `cloud::stand_in` (
   played and looked at before anyone else plays it, and a theme made with Claude is built in the
   writer's own tab from what Claude wrote. The theme file stays as the form a program travels in
   (to the gallery and back) and the ports' fixtures.
+- **2026-11-16 — The gallery signs core modules, and its owner reviews in Caprice.** What the
+  writer's tab builds and the reader plays is a core module (the world `caprice:theme@1.0.0` as
+  wit-bindgen lays it out), so that is what is signed and taken: a component would be a second form
+  to check, build and keep in step for nothing a theme needs. The owner's review is in the app
+  (the Waiting tab), with their session, rather than a page with an admin token: it needs the
+  compiler and the preview that are there already, and no token sits in a browser. The first step
+  is the loop alone (send, review, sign, list, Use); votes, reports, remixes, taking a theme out
+  and Claude's opinion before the owner's come after.
 - **No `.docx` import.** Export only.
 - **Contents heading is "Contents"** (English), in the app and in Word.

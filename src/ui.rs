@@ -262,7 +262,7 @@ struct Yours<'a> {
 
 /// A theme drawn as a little desk with its dock, a page and the accent, over its picture if it has
 /// one; clicked, or not.
-fn theme_tile(ui: &mut egui::Ui, name: &str, about: &str, c: crate::theme::Palette, picture: Option<egui::TextureId>, chosen: bool) -> bool {
+pub fn theme_tile(ui: &mut egui::Ui, name: &str, about: &str, c: crate::theme::Palette, picture: Option<egui::TextureId>, chosen: bool) -> bool {
     let (rect, resp) = ui.allocate_exact_size(vec2(150.0, 84.0), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
     let p = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
@@ -311,14 +311,19 @@ fn theme_gallery(ui: &mut egui::Ui, theme: &mut Theme, yours: &Yours) -> Option<
     let id = egui::Id::new("theme_gallery_shown");
     let first = if *theme == Theme::Own { 2u8 } else { u8::from(theme.magic()) };
     let mut shown = ui.data(|d| d.get_temp::<u8>(id)).unwrap_or(first);
+    let mut ask = None;
     ui.horizontal(|ui| {
         ui.selectable_value(&mut shown, 0, "Classic").on_hover_text("Colours around the page");
         ui.selectable_value(&mut shown, 1, "Magic").on_hover_text("Themes that hide things to find");
         ui.selectable_value(&mut shown, 2, "Yours").on_hover_text("Themes you make yourself, or are given");
+        if ui.button("Gallery\u{2026}").on_hover_text("Themes other writers made with Claude, to use").clicked() {
+            ask = Some(Ask::Gallery);
+            // Its window opens where the menu was: the menu goes.
+            ui.close();
+        }
     });
     ui.data_mut(|d| d.insert_temp(id, shown));
     ui.separator();
-    let mut ask = None;
     if shown == 2 {
         ui.horizontal(|ui| {
             if yours.importing {
@@ -344,36 +349,20 @@ fn theme_gallery(ui: &mut egui::Ui, theme: &mut Theme, yours: &Yours) -> Option<
             }
             return ask;
         }
-        ui.add_space(4.0);
-        egui::Grid::new("theme_gallery_yours").num_columns(2).spacing(vec2(12.0, 6.0)).show(ui, |ui| {
-            for (k, e) in yours.entries.iter().enumerate() {
-                ui.vertical(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.set_width(150.0);
-                        ui.label(egui::RichText::new(&e.name).size(12.0).color(pal().text_dim));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.menu_button(egui::RichText::new("\u{22ef}").size(12.0), |ui| {
-                                // A drawing goes to a file; a program only to the gallery (R36).
-                                if !e.program && ui.button("Export\u{2026}").on_hover_text("Save its drawing, to change it or give it to someone").clicked() {
-                                    ask = Some(Ask::Export(e.id.clone()));
-                                }
-                                if ui.button("Delete\u{2026}").clicked() {
-                                    ask = Some(Ask::Delete(e.id.clone()));
-                                }
-                            });
-                        });
-                    });
-                    let about = if e.author.is_empty() { e.about.clone() } else { format!("{} \u{2014} by {}", e.about, e.author) };
-                    let chosen = *theme == Theme::Own && yours.chosen == Some(e.id.as_str());
-                    if theme_tile(ui, &e.name, about.trim_start_matches(" \u{2014} "), e.palette(), yours.thumbs.get(&e.id).map(|t| t.id()), chosen) {
-                        ask = Some(Ask::Use(e.id.clone()));
-                    }
-                });
-                if k % 2 == 1 {
-                    ui.end_row();
-                }
+        // Those taken from the gallery, those made with Claude, and the drawings, apart.
+        type Holds = fn(&crate::own::Entry) -> bool;
+        let sections: [(&str, Holds); 3] = [
+            ("From Gallery", |e| e.from_gallery),
+            ("Made with Claude", |e| e.program && !e.from_gallery),
+            ("From SVG", |e| !e.program),
+        ];
+        for (title, holds) in sections {
+            if yours.entries.iter().any(holds) {
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new(title).size(12.0).strong());
+                yours_section(ui, title, yours.entries.iter().filter(|e| holds(e)), theme, yours, &mut ask);
             }
-        });
+        }
         return ask;
     }
     let magic = shown == 1;
@@ -392,6 +381,49 @@ fn theme_gallery(ui: &mut egui::Ui, theme: &mut Theme, yours: &Yours) -> Option<
         }
     });
     ask
+}
+
+/// Some of the writer's own themes, two to a row, each with its "⋯" menu.
+fn yours_section<'a>(ui: &mut egui::Ui, title: &str, entries: impl Iterator<Item = &'a crate::own::Entry>, theme: &Theme, yours: &Yours,
+    ask: &mut Option<crate::own::Ask>) {
+    use crate::own::Ask;
+    egui::Grid::new(("theme_gallery_yours", title)).num_columns(2).spacing(vec2(12.0, 6.0)).show(ui, |ui| {
+        for (k, e) in entries.enumerate() {
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.set_width(150.0);
+                    ui.label(egui::RichText::new(e.shown_name()).size(12.0).color(pal().text_dim));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.menu_button(egui::RichText::new("\u{22ef}").size(12.0), |ui| {
+                            // A drawing goes to a file; a program only to the gallery (R36), once.
+                            if !e.program && ui.button("Export\u{2026}").on_hover_text("Save its drawing, to change it or give it to someone").clicked() {
+                                *ask = Some(Ask::Export(e.id.clone()));
+                            }
+                            if e.program && !e.from_gallery {
+                                if e.sent.is_some() {
+                                    ui.label(egui::RichText::new("Sent to the gallery").color(pal().text_dim));
+                                } else if ui.button("Send to the gallery\u{2026}").on_hover_text("For other writers to use, once Caprice has looked at it").clicked() {
+                                    *ask = Some(Ask::Send(e.id.clone()));
+                                    ui.close();
+                                }
+                            }
+                            if ui.button("Delete\u{2026}").clicked() {
+                                *ask = Some(Ask::Delete(e.id.clone()));
+                            }
+                        });
+                    });
+                });
+                let about = if e.author.is_empty() { e.about.clone() } else { format!("{} \u{2014} by {}", e.about, e.author) };
+                let chosen = *theme == Theme::Own && yours.chosen == Some(e.id.as_str());
+                if theme_tile(ui, e.shown_name(), about.trim_start_matches(" \u{2014} "), e.palette(), yours.thumbs.get(&e.id).map(|t| t.id()), chosen) {
+                    *ask = Some(Ask::Use(e.id.clone()));
+                }
+            });
+            if k % 2 == 1 {
+                ui.end_row();
+            }
+        }
+    });
 }
 
 /// Something picked in the Insert menu.

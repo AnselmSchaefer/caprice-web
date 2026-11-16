@@ -15,6 +15,7 @@ mod emblem;
 mod export;
 mod fileio;
 mod fonts;
+mod gallery;
 mod ideas;
 mod images;
 mod layout;
@@ -321,6 +322,7 @@ pub struct App {
     pub workshop: own::Workshop,
     /// The "Make a theme with Claude" window (R36).
     pub making: making::Making,
+    pub gallery: gallery::Gallery,
     /// Where the page bar is docked, and where that is kept.
     pub bar: ui::BarPlace,
     /// What grows and flies in the Magic Garden theme, and what builds in the Magic City.
@@ -427,6 +429,7 @@ impl App {
             themes: theme::Themes::new(),
             workshop: own::Workshop::default(),
             making: making::Making::default(),
+            gallery: gallery::Gallery::default(),
             bar: ui::BarPlace::new(),
             eggs: eggs::Eggs::default(),
         };
@@ -665,6 +668,7 @@ impl App {
         self.poll_dialog(&ctx);
         self.tend_workshop(&ctx);
         self.tend_making(&ctx);
+        self.tend_gallery(&ctx);
         self.cloud_frame(&ctx);
         self.live_frame(&ctx);
         self.guard_close(&ctx);
@@ -837,6 +841,7 @@ impl App {
         self.cloud_window(&ctx);
         self.workshop_windows(&ctx);
         self.making_window(&ctx);
+        self.gallery_window(&ctx);
         self.info_window(&ctx);
         self.keep_safe(&ctx);
         self.track_words(&ctx);
@@ -7246,6 +7251,217 @@ mod tests {
     fn until_made(h: &mut Harness) {
         h.frames_until("the theme made", |a| !a.making.busy());
         h.frames(2, vec![], Modifiers::NONE);
+    }
+
+    /// The Gallery window, opened from the themes' menu, its first listing and pictures in.
+    fn open_gallery(h: &mut Harness) {
+        h.click_widget("Page");
+        h.click_widget(&format!("{} \u{23f5}", h.app.themes.name()));
+        h.click_widget("Gallery\u{2026}");
+        h.frames_until("the gallery listed", |a| !a.gallery.busy());
+        h.frames(3, vec![], Modifiers::NONE);
+    }
+
+    /// The owner's look at the theme waiting, to its end.
+    fn look_at_it(h: &mut Harness) {
+        h.click_widget("Look at it");
+        h.frames_until("the theme looked at", |a| !a.gallery.busy());
+        h.frames(2, vec![], Modifiers::NONE);
+    }
+
+    #[test]
+    fn a_theme_made_with_claude_is_sent_built_again_by_the_owner_published_and_used_from_the_gallery() {
+        let mut h = Harness::new();
+        let server = make_with_claude(&mut h, "gallery", vec![written(FIREFLIES_SOURCE, "Fireflies at dusk"), written(FIREFLIES_SOURCE, "Fireflies at dusk")], "Fireflies in jars");
+        until_made(&mut h);
+        h.click_widget("Keep it");
+        h.frames_until("the theme", |a| a.themes.theme == theme::Theme::Own);
+        let made = h.app.themes.own_id.clone().unwrap();
+        // The writer is the site's owner too, as `/api/me` says it (the next test sees it said).
+        server.0.borrow_mut().owner = true;
+        h.app.cloud.who.as_mut().unwrap().owner = true;
+
+        // Sent from its menu, under the name and words the writer gives it.
+        h.click_widget("Page");
+        h.click_widget(&format!("{} \u{23f5}", h.app.themes.name()));
+        h.click_widget("Yours");
+        h.click_widget("\u{22ef} \u{23f5}");
+        h.click_widget("Send to the gallery\u{2026}");
+        assert!(h.labels().contains(gallery::WHAT_HAPPENS), "the writer is told what happens to it");
+        h.click_widget("Send it");
+        {
+            let o = server.0.borrow();
+            let [sent] = o.gallery.as_slice() else { panic!("one theme sent") };
+            assert!(sent.state == "waiting" && sent.user == "ada", "queued");
+            assert_eq!((sent.manifest.name.as_str(), sent.manifest.author.as_str()), ("Fireflies at dusk", "Ada"), "named as the window said");
+            assert_eq!(sent.manifest.toolchain, "the tests' stand-in");
+            assert!(sent.module == include_bytes!("../tests/fixtures/fireflies.wasm") && sent.source == gallery::sha256(FIREFLIES_SOURCE.as_bytes()));
+        }
+        assert!(h.labels().contains("Sent. It waits to be looked at"), "{}", h.labels());
+        h.click_widget("Done");
+        assert_eq!(h.app.themes.own.get(&made).unwrap().sent.as_deref(), Some("0000000000000001"), "the shelf knows it was sent");
+        h.click_widget("Page");
+        h.click_widget(&format!("{} \u{23f5}", h.app.themes.name()));
+        h.click_widget("\u{22ef} \u{23f5}");
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.painted_at("Sent to the gallery").is_some() && h.painted_at("Send to the gallery\u{2026}").is_none(), "sent once");
+        h.key(Key::Escape, Modifiers::NONE);
+        h.key(Key::Escape, Modifiers::NONE);
+
+        // The owner looks at it: built again the very same, played, its pictures shown.
+        open_gallery(&mut h);
+        assert!(h.labels().contains("Nothing in the gallery yet"), "nothing published yet");
+        h.click_widget("Waiting (1)");
+        look_at_it(&mut h);
+        let labels = h.labels();
+        assert!(labels.contains("the very program sent, byte for byte") && labels.contains("It plays its story."), "{labels}");
+        assert!(!labels.contains("more than the"), "within the points a frame is asked to keep within: {labels}");
+        h.click_widget("Publish it");
+        h.frames_until("published", |a| a.gallery.review_is_none());
+        let signed = {
+            let o = server.0.borrow();
+            let t = &o.gallery[0];
+            assert_eq!(t.state, "public");
+            own::Signed { name: t.manifest.name.clone(), source: t.source.clone(), toolchain: t.manifest.toolchain.clone(), signature: t.signature.clone() }
+        };
+        assert!(signed.by(&cloud::stand_in::gallery_key(), include_bytes!("../tests/fixtures/fireflies.wasm")), "signed over what was built");
+
+        // In the gallery, with its picture. A signature by any other key is not taken.
+        h.click_widget("New");
+        h.frames_until("its picture", |a| !a.gallery.busy() && a.gallery.pictured() == 1);
+        assert!(h.labels().contains("by Ada"), "{}", h.labels());
+        h.click_widget("Use");
+        h.frames_until("refused", |a| !a.gallery.busy());
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.labels().contains("is not as the gallery signed it"), "{}", h.labels());
+        assert_eq!(h.app.themes.own.entries.len(), 1, "nothing taken");
+
+        // With the gallery's key, it goes on the shelf as the gallery's, and is played.
+        h.app.themes.own.gallery_key = cloud::stand_in::gallery_key();
+        h.click_widget("Use");
+        h.frames_until("taken", |a| a.themes.own.entries.len() == 2);
+        let taken = h.app.themes.own_id.clone().unwrap();
+        assert_ne!(taken, made, "the theme taken is the one in use");
+        let entry = h.app.themes.own.get(&taken).unwrap();
+        assert!(entry.from_gallery && entry.shown_name() == "Fireflies at dusk" && entry.gallery.as_ref() == Some(&signed), "{entry:?}");
+        h.frames_until("the program's first frame", |a| a.eggs.program.seen.as_ref().is_some_and(|s| s.frames > 0));
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.painted_at("On your shelf").is_some(), "the gallery says it is taken");
+
+    }
+
+    #[test]
+    fn yours_shows_the_themes_from_the_gallery_those_made_with_claude_and_the_drawings_apart_and_sends_each_once() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "yours-grouped");
+        let server = online(&mut h, &dir, true);
+        server.0.borrow_mut().owner = true;
+        h.frames(12, vec![], Modifiers::NONE);
+        h.app.themes.own.gallery_key = cloud::stand_in::gallery_key();
+        // Fireflies made with Claude and sent; the same published and taken; and a drawing.
+        let file = |toolchain: &str| {
+            let mut b = bundle::open(SNOW_FILE, "snow").unwrap().bundle;
+            b.manifest.toolchain = toolchain.into();
+            b.module = include_bytes!("../tests/fixtures/fireflies.wasm").to_vec();
+            b.source = Some(FIREFLIES_SOURCE.into());
+            b.manifest.name = "Fireflies".into();
+            b
+        };
+        let made = h.app.themes.own.add_bundle(&file("the tests' stand-in"), None).unwrap();
+        h.app.themes.own.set_sent(&made, "0000000000000009");
+        let module = include_bytes!("../tests/fixtures/fireflies.wasm");
+        let signed = {
+            use base64::Engine;
+            let mut s = own::Signed { name: "Fireflies in the gallery".into(), source: gallery::sha256(FIREFLIES_SOURCE.as_bytes()), toolchain: "the tests' stand-in".into(), signature: String::new() };
+            let key = ed25519_compact::KeyPair::from_seed(ed25519_compact::Seed::new([7; 32]));
+            s.signature = base64::engine::general_purpose::STANDARD.encode(*key.sk.sign(s.message(module), None));
+            s
+        };
+        h.app.themes.own.add_bundle(&file("the tests' stand-in"), Some(signed)).unwrap();
+        h.app.themes.own.check_signatures();
+        in_own_theme(&mut h, own::TEMPLATE, 0.0);
+        assert_eq!(h.app.themes.own.entries.len(), 3);
+
+        h.click_widget("Page");
+        h.click_widget(&format!("{} \u{23f5}", h.app.themes.name()));
+        h.click_widget("Yours");
+        let at = |h: &Harness, s: &str| h.painted_at(s).unwrap_or_else(|| panic!("no {s:?}")).y;
+        let (gallery, claude, svg) = (at(&h, "From Gallery"), at(&h, "Made with Claude"), at(&h, "From SVG"));
+        assert!(gallery < claude && claude < svg, "in that order");
+        let gallery_name = at(&h, "Fireflies in the gallery");
+        assert!(gallery < gallery_name && gallery_name < claude, "shown under the gallery's name, among the gallery's");
+        // The one sent says so; none of them offers to be sent again.
+        h.click_widget("\u{22ef} \u{23f5}");
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.painted_at("Send to the gallery\u{2026}").is_none(), "the gallery's own is not sent back");
+    }
+
+    #[test]
+    fn the_owner_refuses_a_theme_that_is_not_built_again_the_same_and_says_why() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "gallery-refused");
+        let server = online(&mut h, &dir, true);
+        server.0.borrow_mut().owner = true;
+        h.frames(12, vec![], Modifiers::NONE);
+        assert!(h.app.cloud.who.as_ref().is_some_and(|w| w.owner), "the owner, as /api/me says");
+        // Two sent from elsewhere: one built by another toolchain, one whose module is not its source's.
+        let sent = |id: &str, toolchain: &str, source: &str| {
+            let mut b = bundle::open(SNOW_FILE, "snow").unwrap().bundle;
+            b.manifest.toolchain = toolchain.into();
+            b.source = Some(source.into());
+            let file = bundle::write(&b).unwrap();
+            cloud::stand_in::Sent { id: id.into(), user: "bea".into(), file, manifest: b.manifest, module: b.module, source: gallery::sha256(source.as_bytes()),
+                state: "waiting".into(), why: String::new(), signature: String::new() }
+        };
+        let snow = include_str!("../themes/snow/theme.rs");
+        server.0.borrow_mut().gallery = vec![sent("00000000000000a1", "rustc 1.99.1", snow)];
+        open_gallery(&mut h);
+        h.click_widget("Waiting (1)");
+        look_at_it(&mut h);
+        assert!(h.labels().contains("It was built by the toolchain rustc 1.99.1"), "{}", h.labels());
+        h.click_widget("Publish it");
+        h.frames(4, vec![], Modifiers::NONE);
+        assert_eq!(server.0.borrow().gallery[0].state, "waiting", "not published");
+        // The next comes meanwhile, and is shown once this one is decided.
+        server.0.borrow_mut().gallery.push(sent("00000000000000a2", "the tests' stand-in", FIREFLIES_SOURCE));
+        h.click_widget("Why it is not taken");
+        h.type_text("Built by an older Caprice");
+        h.click_widget("Refuse it");
+        h.frames_until("refused", |a| a.gallery.review_is_none());
+        {
+            let o = server.0.borrow();
+            assert_eq!((o.gallery[0].state.as_str(), o.gallery[0].why.as_str()), ("refused", "Built by an older Caprice"));
+        }
+        h.frames(4, vec![], Modifiers::NONE);
+        assert!(h.labels().contains("Waiting (1)"), "the refused one waits no more");
+        look_at_it(&mut h);
+        assert!(h.labels().contains("Built again from its source, it is not the program sent"), "{}", h.labels());
+        h.click_widget("Publish it");
+        h.frames(4, vec![], Modifiers::NONE);
+        assert_eq!(server.0.borrow().gallery[1].state, "waiting", "not published");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn only_the_owner_is_shown_the_themes_waiting_and_the_gallery_is_for_writers_signed_in() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "gallery-not-owner");
+        let server = online(&mut h, &dir, false);
+        h.frames(12, vec![], Modifiers::NONE);
+        open_gallery(&mut h);
+        assert!(h.labels().contains("The gallery is for writers signed in"), "{}", h.labels());
+        assert!(!server.0.borrow().asked.iter().any(|a| a.contains("/api/gallery")), "nothing asked of the gallery");
+
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "gallery-not-owner-signed-in");
+        let server_b = online(&mut h, &dir, true);
+        h.frames(12, vec![], Modifiers::NONE);
+        open_gallery(&mut h);
+        let labels = h.labels();
+        assert!(labels.contains("Sent by you") && !labels.contains("Waiting"), "{labels}");
+        assert!(!server_b.0.borrow().asked.iter().any(|a| a.contains("/waiting")), "not even asked");
+        drop(server);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     const FIREFLIES_SOURCE: &str = include_str!("../themes/fireflies/theme.rs");

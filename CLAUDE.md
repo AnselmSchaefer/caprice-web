@@ -155,7 +155,9 @@ Full list with reasons and tests in `ARCHITECTURE.md` §4.
     source is the same bytes everywhere: flags change in `themes/build.sh` and `pack.mjs` together.
     The compiler is ended once it has answered (it holds a gigabyte). A writer never imports or
     exports a program: it is made with Claude (`making.rs`: the compiler's words go back to Claude,
-    never to the writer, and a version that worked is never lost) or taken from the gallery. The Magic
+    never to the writer, and a version that worked is never lost) or taken from the gallery, which
+    publishes only what its owner built again in Caprice byte for byte and saw play, signed by the
+    Worker (`GALLERY_SIGNING_KEY`; the app checks `own::GALLERY_KEY` each time it reads the shelf). The Magic
     Snow and the Magic Vineyard have twins, `themes/snow` and `themes/vineyard`: a change to
     `eggs/snow.rs`, `eggs/vineyard.rs` or `eggs/country.rs` is made there too (a test compares them
     frame by frame).

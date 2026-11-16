@@ -23,7 +23,7 @@ const WRITER = "claude-opus-5-5";
 // A theme's id, given by the Ledger when one is begun.
 export const THEME_ID = /^[0-9a-f]{16}$/;
 // The palette's names (src/own.rs, NAMES), and "light".
-const COLOURS = ["desk_top", "desk", "dock", "dock_edge", "button", "button_hover", "field", "text", "text_dim", "text_hot", "accent", "on_accent", "caret", "thumb"];
+export const COLOURS = ["desk_top", "desk", "dock", "dock_edge", "button", "button_hover", "field", "text", "text_dim", "text_hot", "accent", "on_accent", "caret", "thumb"];
 
 // The prompt, the same for every theme and every round, so it is cached after the first.
 const SYSTEM = [
@@ -44,7 +44,7 @@ function refused(answer) {
 }
 
 // The body, read only so far as it may be: its length said first, and held to it.
-async function body(request, most) {
+export async function body(request, most) {
   const length = Number(request.headers.get("Content-Length"));
   if (!request.headers.has("Content-Length") || !Number.isInteger(length)) return { error: 411, message: "Say how long the request is" };
   if (length > most) return { error: 413, message: "There is too much in it" };

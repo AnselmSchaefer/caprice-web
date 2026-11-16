@@ -2873,7 +2873,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bdaa4fffe9ff3ca2c353fa9729792805b9b3e324695ff5a081f860612e81b330"
 dependencies = [
  "bytemuck",
- "foldhash 0.2.0",
+ "foldhash",
  "font-types 0.12.7",
  "once_cell",
  "smallvec",

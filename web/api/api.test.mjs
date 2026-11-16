@@ -4,9 +4,10 @@
 // node --test api/api.test.mjs   (here in web/; Node 24 takes no folder)
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync, verify } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { deflateRawSync, inflateRawSync } from "node:zlib";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { failure } from "./failure.js";
 
@@ -71,7 +72,7 @@ async function start(t, vars = {}, down = false) {
     // From the checkout's root: the theme prompt's texts are the SDK's and the themes' own files.
     modulesRoot: fileURLToPath(new URL("../..", import.meta.url)),
     modules: [
-      ...[...(down ? ["ledger-down.mjs"] : []), "worker.js", "ledger.js", "room.js", "failure.js", "tally.js", "theme.js"].map(m => ({ type: "ESModule", path: fileURLToPath(new URL(m, import.meta.url)) })),
+      ...[...(down ? ["ledger-down.mjs"] : []), "worker.js", "ledger.js", "room.js", "failure.js", "tally.js", "theme.js", "gallery.js", "wasm-check.js"].map(m => ({ type: "ESModule", path: fileURLToPath(new URL(m, import.meta.url)) })),
       ...PROMPT.map(f => ({ type: "Text", path: fileURLToPath(new URL(`../../${f}`, import.meta.url)) })),
     ],
     compatibilityDate: DATE,
@@ -1128,4 +1129,200 @@ test("without a key, or switched off, no theme is made", async t => {
   const keyless = await start(t, { ANTHROPIC_API_KEY: "" });
   assert.equal((await begin(await writer(keyless, "1", "Ada"))).status, 503);
   assert.equal(claude.asked.length, 0);
+});
+
+// The gallery (gallery.js, R36): a theme file sent, checked and queued; the owner's decision; what
+// everyone sees. The owner is the writer signed in as "9", their hashed id in GALLERY_OWNERS.
+const OWNER = createHash("sha256").update("google:9").digest("hex").slice(0, 32);
+const KEYS = generateKeyPairSync("ed25519");
+const SEED = KEYS.privateKey.export({ format: "der", type: "pkcs8" }).subarray(16).toString("base64");
+const GALLERY = { GALLERY_OWNERS: `someone-else,${OWNER}`, GALLERY_SIGNING_KEY: SEED };
+const SNOW_FILE = readFileSync(new URL("../../tests/fixtures/snow.caprice-theme", import.meta.url));
+const sha = b => createHash("sha256").update(b).digest("hex");
+
+// The parts of a zip, as the app's `bundle::write` makes them (deflated), read back.
+function unzipped(zip) {
+  const parts = {};
+  for (let at = 0; zip.readUInt32LE(at) === 0x04034b50;) {
+    const [packed, n, e] = [zip.readUInt32LE(at + 18), zip.readUInt16LE(at + 26), zip.readUInt16LE(at + 28)];
+    const name = zip.subarray(at + 30, at + 30 + n).toString();
+    const data = zip.subarray(at + 30 + n + e, at + 30 + n + e + packed);
+    parts[name] = zip.readUInt16LE(at + 8) === 8 ? inflateRawSync(data) : data;
+    at += 30 + n + e + packed;
+  }
+  return parts;
+}
+
+// A zip of `parts` (name to bytes), deflated, as a theme file is.
+function zipped(parts) {
+  const local = [], central = [];
+  let at = 0;
+  for (const [name, bytes] of Object.entries(parts)) {
+    const data = deflateRawSync(bytes);
+    const n = Buffer.from(name);
+    const head = Buffer.alloc(30);
+    head.writeUInt32LE(0x04034b50, 0); head.writeUInt16LE(20, 4); head.writeUInt16LE(8, 8);
+    head.writeUInt32LE(data.length, 18); head.writeUInt32LE(bytes.length, 22); head.writeUInt16LE(n.length, 26);
+    const dir = Buffer.alloc(46);
+    dir.writeUInt32LE(0x02014b50, 0); dir.writeUInt16LE(20, 4); dir.writeUInt16LE(20, 6); dir.writeUInt16LE(8, 10);
+    dir.writeUInt32LE(data.length, 20); dir.writeUInt32LE(bytes.length, 24); dir.writeUInt16LE(n.length, 28); dir.writeUInt32LE(at, 42);
+    local.push(head, n, data);
+    central.push(dir, n);
+    at += 30 + n.length + data.length;
+  }
+  const dir = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(central.length / 2, 8); end.writeUInt16LE(central.length / 2, 10);
+  end.writeUInt32LE(dir.length, 12); end.writeUInt32LE(at, 16);
+  return Buffer.concat([...local, dir, end]);
+}
+
+const SNOW = unzipped(SNOW_FILE);
+const manifest = changes => Buffer.from(JSON.stringify({ ...JSON.parse(SNOW["manifest.json"]), ...changes }));
+const send = (api, file) => api("/api/gallery", { method: "POST", body: file, headers: { "Content-Type": "application/zip" } });
+
+test("a theme sent to the gallery is checked by the worker and waits for the owner, seen by no one else", async t => {
+  const mf = await start(t, GALLERY);
+  const ada = await writer(mf, "1", "Ada");
+  const sent = await send(ada, SNOW_FILE);
+  assert.equal(sent.status, 202);
+  const { id, state } = await sent.json();
+  assert.match(id, /^[0-9a-f]{16}$/);
+  assert.equal(state, "waiting");
+  assert.deepEqual((await inR2(mf)).sort(), [`gallery/${id}/preview.png`, `gallery/${id}/theme.caprice-theme`]);
+  const mine = await (await ada("/api/gallery/mine")).json();
+  assert.deepEqual(mine.themes.map(m => [m.id, m.name, m.state, m.module]), [[id, "Magic Snow", "waiting", sha(SNOW["theme.wasm"])]]);
+
+  // Not in the gallery yet: listed for no one, read by no one but the owner.
+  assert.deepEqual((await (await ada("/api/gallery")).json()).themes, []);
+  assert.equal((await ada(`/api/gallery/${id}/theme`)).status, 404);
+  assert.equal((await ada("/api/gallery/waiting")).status, 404, "the queue is the owner's");
+  const owner = await writer(mf, "9", "Owner");
+  assert.equal((await (await owner("/api/me")).json()).owner, true, "the app is told who the owner is");
+  assert.equal((await (await ada("/api/me")).json()).owner, undefined);
+  const waiting = (await (await owner("/api/gallery/waiting")).json()).themes;
+  assert.equal(waiting.length, 1);
+  assert.deepEqual([waiting[0].name, waiting[0].author, waiting[0].toolchain, waiting[0].module, waiting[0].source],
+    ["Magic Snow", "Caprice", "rustc 1.99.1", sha(SNOW["theme.wasm"]), sha(SNOW["theme.rs"])], "worked out by the worker");
+  const file = await owner(`/api/gallery/${id}/theme`);
+  assert.equal(file.headers.get("Cache-Control"), "no-store", "a theme waiting may still change its fate");
+  assert.ok(Buffer.from(await file.arrayBuffer()).equals(SNOW_FILE), "the owner reads it as it was sent");
+
+  assert.equal((await send(ada, SNOW_FILE)).status, 409, "the same program is sent once");
+});
+
+test("what is not a theme the gallery can build and play is refused before anything is kept", async t => {
+  const mf = await start(t, GALLERY);
+  const ada = await writer(mf, "1", "Ada");
+  const refusedFor = async (parts, said) => {
+    const got = await send(ada, Buffer.isBuffer(parts) ? parts : zipped(parts));
+    assert.equal(got.status, 422, said);
+    assert.match(await got.text(), said);
+  };
+  const { "theme.rs": _, ...noSource } = SNOW;
+  await refusedFor(Buffer.from("not a zip at all"), /not a Caprice theme file/);
+  await refusedFor(noSource, /no source/);
+  await refusedFor({ ...SNOW, "manifest.json": manifest({ world: "caprice:theme@2.0.0" }) }, /not made for caprice:theme@1\.0\.0/);
+  await refusedFor({ ...SNOW, "manifest.json": manifest({ name: " " }) }, /no name/);
+  await refusedFor({ ...SNOW, "manifest.json": manifest({ toolchain: "" }) }, /which toolchain/);
+  await refusedFor({ ...SNOW, "theme.rs": Buffer.from("fn main() {}") }, /not a theme's/);
+  await refusedFor({ ...SNOW, "preview.png": SNOW["theme.wasm"] }, /picture/);
+  // A module that asks for something besides Caprice's host: its import renamed, byte for byte.
+  const module = Buffer.from(SNOW["theme.wasm"]);
+  const at = module.indexOf("caprice:theme/host@1.0.0");
+  module.write("caprice:theme/hack@1.0.0", at);
+  await refusedFor({ ...SNOW, "theme.wasm": module }, /cannot be played: imports caprice:theme\/hack@1\.0\.0/);
+  assert.deepEqual(await inR2(mf), [], "nothing kept");
+  assert.deepEqual((await (await ada("/api/gallery/mine")).json()).themes, []);
+
+  const big = await ada("/api/gallery", { method: "POST", body: Buffer.alloc(3_000_001) });
+  assert.equal(big.status, 413);
+});
+
+test("the owner's yes is signed by the worker over what it worked out, and the theme is everyone's", async t => {
+  const mf = await start(t, GALLERY);
+  const ada = await writer(mf, "1", "Ada");
+  const { id } = await (await send(ada, SNOW_FILE)).json();
+  const owner = await writer(mf, "9", "Owner");
+  const decide = said => owner(`/api/gallery/waiting/${id}`, { method: "POST", body: JSON.stringify(said), headers: { "Content-Type": "application/json" } });
+  assert.equal((await ada(`/api/gallery/waiting/${id}`, { method: "POST", body: '{"publish":true}' })).status, 404, "only the owner decides");
+
+  // The module the owner's browser built from the source must be the one sent.
+  const other = await decide({ publish: true, module: sha(Buffer.from("another module")) });
+  assert.equal(other.status, 409);
+  const yes = await decide({ publish: true, module: sha(SNOW["theme.wasm"]) });
+  assert.equal(yes.status, 200);
+  const { signature } = await yes.json();
+  const signed = `caprice:theme@1.0.0\nmodule ${sha(SNOW["theme.wasm"])}\nsource ${sha(SNOW["theme.rs"])}\ntoolchain rustc 1.99.1\nname Magic Snow\n`;
+  assert.ok(verify(null, Buffer.from(signed), KEYS.publicKey, Buffer.from(signature, "base64")), "the message the app checks");
+  assert.equal((await decide({ publish: false, why: "changed my mind" })).status, 404, "decided once: it waits no more");
+
+  // Everyone signed in sees it, with what the app needs to check the signature, but not who sent it.
+  const bo = await writer(mf, "2", "Bo");
+  const { themes } = await (await bo("/api/gallery")).json();
+  assert.equal(themes.length, 1);
+  const [listed] = themes;
+  assert.deepEqual([listed.id, listed.name, listed.author, listed.source, listed.toolchain, listed.signature],
+    [id, "Magic Snow", "Caprice", sha(SNOW["theme.rs"]), "rustc 1.99.1", signature]);
+  assert.equal(listed.colours.desk, "#7a80b2");
+  assert.ok(!JSON.stringify(themes).includes(createHash("sha256").update("google:1").digest("hex").slice(0, 32)), "never the writer's id");
+  const file = await bo(`/api/gallery/${id}/theme`);
+  assert.equal(file.headers.get("Cache-Control"), "private, max-age=31536000, immutable", "it never changes");
+  assert.ok(Buffer.from(await file.arrayBuffer()).equals(SNOW_FILE));
+  const picture = await bo(`/api/gallery/${id}/preview`);
+  assert.equal(picture.headers.get("Content-Type"), "image/png");
+  assert.ok(Buffer.from(await picture.arrayBuffer()).equals(SNOW["preview.png"]));
+  assert.equal((await (await ada("/api/gallery/mine")).json()).themes[0].state, "public");
+
+  // Signed out, nothing of it.
+  assert.equal((await mf.dispatchFetch(`${SITE}/api/gallery`, { headers: { "X-Caprice": "1" } })).status, 401);
+});
+
+test("a theme the owner refuses says why to its writer, and its files go", async t => {
+  const mf = await start(t, GALLERY);
+  const ada = await writer(mf, "1", "Ada");
+  const { id } = await (await send(ada, SNOW_FILE)).json();
+  const owner = await writer(mf, "9", "Owner");
+  const no = await owner(`/api/gallery/waiting/${id}`, { method: "POST", body: JSON.stringify({ publish: false, why: "It is the Magic Snow itself" }) });
+  assert.equal(no.status, 200);
+  assert.deepEqual(await inR2(mf), []);
+  const [mine] = (await (await ada("/api/gallery/mine")).json()).themes;
+  assert.deepEqual([mine.state, mine.why], ["refused", "It is the Magic Snow itself"]);
+  assert.equal((await owner(`/api/gallery/${id}/theme`)).status, 404);
+  assert.equal((await send(ada, SNOW_FILE)).status, 202, "and it may be sent again, changed or not");
+});
+
+test("a writer sends a few themes a day, the queue is bounded, and without a key nothing is signed", async t => {
+  const mf = await start(t, { ...GALLERY, USER_PUBLISHED_PER_DAY: "2", GALLERY_WAITING: "3", GALLERY_SIGNING_KEY: "" });
+  const [ada, bo] = [await writer(mf, "1", "Ada"), await writer(mf, "2", "Bo")];
+  const named = name => zipped({ ...SNOW, "manifest.json": manifest({ name }), "theme.rs": Buffer.concat([SNOW["theme.rs"], Buffer.from(`// ${name}\n`)]),
+    "theme.wasm": Buffer.concat([SNOW["theme.wasm"], Buffer.from([0, 4, 3, 0x61, 0x62, name.charCodeAt(0)])]) });
+  assert.equal((await send(ada, named("a"))).status, 202);
+  assert.equal((await send(ada, named("b"))).status, 202);
+  const third = await send(ada, named("c"));
+  assert.equal(third.status, 429);
+  assert.ok(Number(third.headers.get("Retry-After")) > 0);
+  assert.equal((await send(bo, named("d"))).status, 202);
+  assert.equal((await send(bo, named("e"))).status, 503, "the owner has as many as they can look at");
+
+  const owner = await writer(mf, "9", "Owner");
+  const [first] = (await (await owner("/api/gallery/waiting")).json()).themes;
+  const yes = await owner(`/api/gallery/waiting/${first.id}`, { method: "POST", body: JSON.stringify({ publish: true, module: first.module }) });
+  assert.equal(yes.status, 503, "no key, no signature");
+  assert.equal((await (await owner("/api/gallery/waiting")).json()).themes.length, 3, "still waiting");
+});
+
+test("deleting a writer's stories online takes their themes still waiting, and leaves the gallery's", async t => {
+  const mf = await start(t, GALLERY);
+  const ada = await writer(mf, "1", "Ada");
+  const other = zipped({ ...SNOW, "theme.wasm": Buffer.concat([SNOW["theme.wasm"], Buffer.from([0, 3, 2, 0x61, 0x62])]) });
+  const { id: kept } = await (await send(ada, SNOW_FILE)).json();
+  const { id: waiting } = await (await send(ada, other)).json();
+  const owner = await writer(mf, "9", "Owner");
+  await owner(`/api/gallery/waiting/${kept}`, { method: "POST", body: JSON.stringify({ publish: true, module: sha(SNOW["theme.wasm"]) }) });
+  assert.equal((await ada("/api/stories", { method: "DELETE" })).status, 204);
+  assert.deepEqual((await inR2(mf)).sort(), [`gallery/${kept}/preview.png`, `gallery/${kept}/theme.caprice-theme`]);
+  assert.deepEqual((await (await owner("/api/gallery/waiting")).json()).themes, []);
+  assert.equal((await (await owner("/api/gallery")).json()).themes[0].id, kept);
+  assert.notEqual(waiting, kept);
 });
