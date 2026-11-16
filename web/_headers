@@ -33,6 +33,14 @@
 /icon-*
   Cache-Control: public, max-age=31536000, immutable
 
+# The compiler for theme programs (R36): its pieces are named by their contents and its folder by
+# the toolchain, kept for good; the scripts that load it, and toolchain.json among them, which
+# names the toolchain in use, keep their names across builds, so they are asked about each time.
+/toolchain/*
+  Cache-Control: public, max-age=31536000, immutable
+/compiler/*
+  Cache-Control: no-cache
+
 # The fonts keep their names; a day, then asked again.
 /fonts/*
   Cache-Control: public, max-age=86400

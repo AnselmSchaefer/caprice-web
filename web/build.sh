@@ -8,5 +8,12 @@ export PATH="$HOME/.cargo/bin:$PATH"
 export RUSTUP_TOOLCHAIN="${CAPRICE_NIGHTLY:-nightly-2026-10-23}"
 export CARGO_UNSTABLE_BUILD_STD=std,panic_abort
 trunk build --release --offline "$@"
+# The compiler for theme programs (R36), into web/dist/toolchain and web/dist/compiler, from the
+# release toolchain/release.json pins (`node toolchain/fetch.mjs` fetches it; pack.mjs says where it
+# looks). CAPRICE_TOOLCHAIN=0 leaves it out: the build then cannot make themes, and says so where
+# one is made.
+if [ "${CAPRICE_TOOLCHAIN:-1}" != 0 ]; then
+    node toolchain/pack.mjs web/dist
+fi
 # The Content-Security-Policy names the inline scripts of this very build (web/csp.mjs).
 node web/csp.mjs web/dist

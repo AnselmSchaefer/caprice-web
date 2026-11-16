@@ -18,6 +18,7 @@ mod fonts;
 mod ideas;
 mod images;
 mod layout;
+mod making;
 mod leave;
 mod live;
 mod model;
@@ -318,6 +319,8 @@ pub struct App {
     pub themes: theme::Themes,
     /// Themes of the writer's own being imported, and the windows about them.
     pub workshop: own::Workshop,
+    /// The "Make a theme with Claude" window (R36).
+    pub making: making::Making,
     /// Where the page bar is docked, and where that is kept.
     pub bar: ui::BarPlace,
     /// What grows and flies in the Magic Garden theme, and what builds in the Magic City.
@@ -423,6 +426,7 @@ impl App {
             peeks: peek::Peeks::default(),
             themes: theme::Themes::new(),
             workshop: own::Workshop::default(),
+            making: making::Making::default(),
             bar: ui::BarPlace::new(),
             eggs: eggs::Eggs::default(),
         };
@@ -660,6 +664,7 @@ impl App {
         self.come_back(&ctx);
         self.poll_dialog(&ctx);
         self.tend_workshop(&ctx);
+        self.tend_making(&ctx);
         self.cloud_frame(&ctx);
         self.live_frame(&ctx);
         self.guard_close(&ctx);
@@ -831,6 +836,7 @@ impl App {
         self.shelf_window(&ctx);
         self.cloud_window(&ctx);
         self.workshop_windows(&ctx);
+        self.making_window(&ctx);
         self.info_window(&ctx);
         self.keep_safe(&ctx);
         self.track_words(&ctx);
@@ -7015,22 +7021,21 @@ mod tests {
     const SNOW_FILE: &[u8] = include_bytes!("../tests/fixtures/snow.caprice-theme");
 
     #[test]
-    fn a_theme_file_is_imported_chosen_and_played_in_its_own_colours_and_exported_as_it_came() {
+    fn a_theme_file_taken_is_chosen_and_played_in_its_own_colours_and_kept_as_it_came() {
+        // As the gallery's "Use" will hand it one (the plan's step 6).
         let dir = std::env::temp_dir().join(format!("caprice-theme-file-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let file = dir.join("Magic_Snow.caprice-theme");
-        std::fs::write(&file, SNOW_FILE).unwrap();
         let mut h = Harness::new();
         h.app.themes = theme::Themes::kept_in(Some(dir.join("theme.json")));
         h.frames(3, vec![], Modifiers::NONE);
         let ctx = h.ctx.clone();
-        h.app.import_theme(&ctx, &file);
+        h.app.take_theme_file(&ctx, SNOW_FILE.to_vec(), "Magic Snow".into());
         h.frames_until("the theme", |a| a.themes.theme == theme::Theme::Own);
         let report = h.app.workshop.report.as_ref().expect("a report");
         assert!(report.added && report.problems.is_empty() && report.name == "Magic Snow", "named as its manifest says");
         assert!(report.found.iter().any(|f| f.contains("A program")) && report.found.iter().any(|f| f.contains("Its source")), "{:?}", report.found);
-        assert!(report.notes.iter().any(|n| n.contains("no picture for the gallery")), "{:?}", report.notes);
+        assert!(report.found.iter().any(|f| f == "A picture for the gallery."), "{:?}", report.found);
         h.frames(2, vec![], Modifiers::NONE);
         assert!(h.painted_at("Theme added").is_some(), "a window says so");
         h.click_widget("OK");
@@ -7040,14 +7045,48 @@ mod tests {
         assert_eq!(theme::pal(), theme::Theme::Snow.palette());
         let seen = program_seen(&h);
         assert!(seen.stopped.is_none() && seen.desk > 100 && seen.window == 140, "the hillside and the snow: {seen:?}");
-        // Kept as it came, and given back the same.
+        // Kept as it came, to go to the gallery the same.
         let id = h.app.themes.own_id.clone().unwrap();
         let entry = h.app.themes.own.get(&id).unwrap();
         assert!(entry.program && entry.author == "Caprice" && entry.toolchain == "rustc 1.99.1", "{entry:?}");
         assert!(h.app.themes.own.source(&id).is_some_and(|s| s.contains("The Magic Snow, as a theme program")), "its source kept");
+        assert!(bundle::write(&h.app.themes.own.bundle(&id).unwrap()).unwrap() == SNOW_FILE, "the same file");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_program_is_never_imported_from_a_file_nor_exported_to_one() {
+        // A theme file or a program's source picked anyway (the dialog offers drawings only) is
+        // not added, and the window says where programs come from.
+        let dir = std::env::temp_dir().join(format!("caprice-no-program-files-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut h = Harness::new();
+        h.frames(3, vec![], Modifiers::NONE);
+        let ctx = h.ctx.clone();
+        for (name, bytes) in [("Magic_Snow.caprice-theme", SNOW_FILE), ("snow.svg", SNOW_FILE), ("theme.rs", include_bytes!("../themes/snow/theme.rs"))] {
+            std::fs::write(dir.join(name), bytes).unwrap();
+            h.app.import_theme(&ctx, &dir.join(name));
+            h.frames(2, vec![], Modifiers::NONE);
+            let report = h.app.workshop.report.as_ref().expect("a report");
+            assert!(!report.added && report.problems == [own::NO_PROGRAM_FILES], "{name}: {:?}", report.problems);
+            assert!(h.painted_at("Theme not added").is_some() && h.app.workshop.building.is_none(), "{name}: nothing built");
+            h.click_widget("OK");
+        }
+        assert!(h.app.themes.own.entries.is_empty() && h.app.themes.theme == theme::Theme::Midnight, "nothing on the shelf");
+
+        // One on the shelf has no Export in its menu, and is never written to a file.
+        in_program_theme(&mut h, FIREFLIES, 0.0);
+        let id = h.app.themes.own_id.clone().unwrap();
+        h.click_widget("Page");
+        h.click_widget(&format!("{} ⏵", h.app.themes.name()));
+        h.click_widget("Yours");
+        h.click_widget("\u{22ef} \u{23f5}");
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.painted_at("Delete…").is_some() && h.painted_at("Export…").is_none(), "only Delete");
         let out = dir.join("given.caprice-theme");
         h.app.export_theme_to(&id, &out);
-        assert!(std::fs::read(&out).unwrap() == SNOW_FILE, "the same file: {}", h.app.status);
+        assert!(!out.exists(), "nothing written");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -7059,13 +7098,248 @@ mod tests {
         let mut h = Harness::new();
         h.frames(3, vec![], Modifiers::NONE);
         let ctx = h.ctx.clone();
-        h.app.import_theme_file(&ctx, file, "Greedy".into());
+        h.app.take_theme_file(&ctx, file, "Greedy".into());
         h.frames_until("a report", |a| a.workshop.report.is_some());
         let report = h.app.workshop.report.as_ref().unwrap();
         assert!(!report.added && report.problems.iter().any(|p| p.contains("Its program cannot be played") && p.contains("env")), "{:?}", report.problems);
         assert!(h.app.themes.own.entries.is_empty() && h.app.themes.theme == theme::Theme::Midnight, "nothing on the shelf, the theme as it was");
         h.frames(2, vec![], Modifiers::NONE);
         assert!(h.painted_at("Theme not added").is_some());
+    }
+
+    #[test]
+    fn a_program_theme_kept_with_no_picture_is_given_one_made_from_its_program() {
+        // The fireflies as a theme file of a manifest and a module alone.
+        let manifest = bundle::Manifest { world: bundle::WORLD.into(), name: "Fireflies".into(), ..Default::default() };
+        let file = bundle::write(&bundle::Bundle { manifest, module: FIREFLIES.to_vec(), ..Default::default() }).unwrap();
+        let mut h = Harness::new();
+        h.frames(3, vec![], Modifiers::NONE);
+        let ctx = h.ctx.clone();
+        h.app.take_theme_file(&ctx, file, "Fireflies".into());
+        h.frames_until("the theme", |a| a.themes.theme == theme::Theme::Own);
+        let report = h.app.workshop.report.as_ref().unwrap();
+        assert!(report.notes.iter().any(|n| n.contains("Caprice makes it one from its program")), "{:?}", report.notes);
+        let id = h.app.themes.own_id.clone().unwrap();
+        h.frames_until("its picture", |a| a.themes.own.thumb(&id).is_some());
+        let picture = h.app.themes.own.thumb(&id).unwrap();
+        assert_eq!(picture.size, [320, 200], "as wide as the gallery keeps them");
+        // The night sky the fireflies fly in, and the page in the middle.
+        let at = |x: usize, y: usize| picture.pixels[y * 320 + x];
+        assert!(at(10, 60).b() > at(10, 60).r() && at(10, 60).r() < 40, "{:?}", at(10, 60));
+        assert!(at(160, 100).r() > 240, "the page: {:?}", at(160, 100));
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.app.workshop.thumbs.contains_key(&id), "the gallery shows it");
+    }
+
+    /// A theme program's source built and kept, as one Claude wrote is, named `name`.
+    fn import_source(h: &mut Harness, name: &str, source: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("caprice-theme-source-{}-{}", std::process::id(), name.len()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        h.app.themes = theme::Themes::kept_in(Some(dir.join("theme.json")));
+        h.frames(3, vec![], Modifiers::NONE);
+        let ctx = h.ctx.clone();
+        h.app.build_theme_source(&ctx, source.to_owned(), name.to_owned());
+        dir
+    }
+
+    #[test]
+    fn a_theme_s_source_is_built_kept_with_its_source_and_toolchain_and_played() {
+        // The Snow's source alone: built (by the tests' stand-in, to the module the toolchain
+        // builds from it), on the shelf, chosen and playing; with no palette of its own.
+        let source = include_str!("../themes/snow/theme.rs");
+        let mut h = Harness::new();
+        let dir = import_source(&mut h, "Night snow", source);
+        h.frames_until("the theme", |a| a.themes.theme == theme::Theme::Own);
+        let report = h.app.workshop.report.as_ref().expect("a report");
+        assert!(report.added && report.name == "Night snow", "named as it was asked: {:?}", report.problems);
+        assert!(report.found.iter().any(|f| f.starts_with("Built in this browser")), "{:?}", report.found);
+        assert!(report.notes.iter().any(|n| n.contains("no palette of its own")), "{:?}", report.notes);
+        assert!(h.app.workshop.building.is_none(), "the compiler is ended once it has built it");
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.painted_at("Theme added").is_some());
+        h.click_widget("OK");
+        h.frames_until("the program's first frame", |a| a.eggs.program.seen.as_ref().is_some_and(|s| s.frames > 0));
+        assert!(program_seen(&h).stopped.is_none() && program_seen(&h).window == 140, "the Snow falling: {:?}", program_seen(&h));
+        let id = h.app.themes.own_id.clone().unwrap();
+        let entry = h.app.themes.own.get(&id).unwrap();
+        assert!(entry.program && entry.toolchain == "the tests' stand-in", "kept with the toolchain that built it: {entry:?}");
+        assert_eq!(h.app.themes.own.source(&id).as_deref(), Some(source), "its source kept, to be built again");
+        // As it would go to the gallery: a theme file of its module and its source.
+        let given = h.app.themes.own.bundle(&id).unwrap();
+        assert!(given.module == include_bytes!("../tests/fixtures/snow.wasm") && given.source.as_deref() == Some(source));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_theme_s_source_with_mistakes_is_not_added_and_the_window_shows_what_the_compiler_said() {
+        use platform::compiler::{Built, stand_in};
+        let source = "fn frame( {";
+        let said = "error: this file contains an unclosed delimiter\n --> /theme/theme.rs:1:11";
+        stand_in(source, Ok(Built::Errors(said.into())));
+        let mut h = Harness::new();
+        let dir = import_source(&mut h, "Broken", source);
+        h.frames_until("a report", |a| a.workshop.report.is_some());
+        let report = h.app.workshop.report.as_ref().unwrap();
+        assert!(!report.added && report.problems.iter().any(|p| p.contains("did not build")), "{:?}", report.problems);
+        assert!(h.app.themes.own.entries.is_empty() && h.app.themes.theme == theme::Theme::Midnight, "nothing on the shelf");
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.painted_at("Theme not added").is_some());
+        let shown = h.painted.iter().any(|cs| matches!(&cs.shape, egui::Shape::Text(t) if t.galley.job.text.contains("unclosed delimiter")));
+        assert!(shown, "the compiler's words, in the window");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_theme_being_built_says_how_far_the_compiler_has_loaded_and_can_be_stopped() {
+        use platform::compiler::{State, stand_in};
+        let source = "// a theme the compiler is still loading for";
+        stand_in(source, Err(State::Loading { fetched: 12 << 20, of: 52 << 20 }));
+        let mut h = Harness::new();
+        let dir = import_source(&mut h, "Slow", source);
+        h.frames_until("the build", |a| a.workshop.building.is_some());
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.painted_at("Building a theme").is_some(), "a window while it is built");
+        assert!(h.painted_at("Loading the compiler: 12 of 52 MB").is_some() && h.painted_at("Only this once: then this browser keeps it.").is_some());
+        h.click_widget("Stop");
+        assert!(h.app.workshop.building.is_none() && h.app.workshop.report.is_none() && h.app.themes.own.entries.is_empty(), "stopped, nothing kept");
+        assert!(h.app.shown_status.contains("not built"), "{}", h.app.shown_status);
+        // A browser that cannot build says so, and nothing is kept.
+        let other = "// a theme in a browser that cannot build";
+        stand_in(other, Err(State::Failed { why: "Making a theme needs Chrome or Edge on a computer.".into(), unsupported: true }));
+        let ctx = h.ctx.clone();
+        h.app.build_theme_source(&ctx, other.to_owned(), "Other".into());
+        h.frames_until("a report", |a| a.workshop.report.is_some());
+        assert_eq!(h.app.workshop.report.as_ref().unwrap().problems, ["Making a theme needs Chrome or Edge on a computer."]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Claude's answer to a round of a theme being made, as the server gives it: the theme's id
+    /// there, a source and its palette.
+    fn written(source: &str, name: &str) -> platform::Answer {
+        let colours = serde_json::json!({ "desk_top": "#101830", "desk": "#202848", "accent": "#f0b25a", "light": "no" });
+        let body = serde_json::json!({ "theme": "0123456789abcdef", "source": source, "name": name, "about": "jars of light", "colours": colours, "left": 9 });
+        platform::Answer { status: 200, headers: Vec::new(), body: body.to_string().into_bytes() }
+    }
+
+    /// Signed in, with Claude answering the rounds with `answers`, the window opened from the
+    /// gallery's Yours and `request` asked for.
+    fn make_with_claude(h: &mut Harness, name: &str, answers: Vec<platform::Answer>, request: &str) -> std::rc::Rc<cloud::stand_in::StandIn> {
+        let dir = with_shelf(h, &format!("making-{name}"));
+        let server = online(h, &dir, true);
+        server.0.borrow_mut().theme_answers = answers.into();
+        h.frames(12, vec![], Modifiers::NONE);
+        assert!(h.app.cloud.who.is_some(), "signed in");
+        h.click_widget("Page");
+        h.click_widget(&format!("{} \u{23f5}", h.app.themes.name()));
+        h.click_widget("Yours");
+        h.click_widget("Make one with Claude\u{2026}");
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.labels().contains(making::GOES_TO_CLAUDE), "the writer is told where their words go");
+        h.click_widget("A lighthouse on a cliff by the sea, a window lit for each page, a boat for each chapter");
+        h.type_text(request);
+        h.click_widget("Make it");
+        server
+    }
+
+    /// Frames until the window shows a version to keep, or says nothing came of it.
+    fn until_made(h: &mut Harness) {
+        h.frames_until("the theme made", |a| !a.making.busy());
+        h.frames(2, vec![], Modifiers::NONE);
+    }
+
+    const FIREFLIES_SOURCE: &str = include_str!("../themes/fireflies/theme.rs");
+
+    #[test]
+    fn a_theme_made_with_claude_is_built_shown_to_claude_once_changed_and_kept_when_the_writer_says() {
+        let mut h = Harness::new();
+        let answers = vec![written(FIREFLIES_SOURCE, "Fireflies at dusk"), written(FIREFLIES_SOURCE, "Fireflies at dusk"), written(include_str!("../themes/snow/theme.rs"), "Snow at dusk")];
+        let server = make_with_claude(&mut h, "kept", answers, "Fireflies in jars");
+        until_made(&mut h);
+        {
+            let o = server.0.borrow();
+            let kinds: Vec<Option<&str>> = o.theme_rounds.iter().map(|r| r.1.as_deref()).collect();
+            assert_eq!(kinds, [None, Some("frames")], "begun, then shown its pictures once");
+            assert_eq!((o.theme_rounds[0].0.as_str(), o.theme_rounds[0].2.as_slice()), ("/api/theme-program", &b"Fireflies in jars"[..]));
+            let (path, _, body, headers) = &o.theme_rounds[1];
+            let header = |n: &str| headers.iter().find(|(k, _)| k == n).map(|(_, v)| v.clone()).unwrap_or_default();
+            assert_eq!(path, "/api/theme-program/0123456789abcdef", "the same theme");
+            let moments = header("X-Caprice-Moments");
+            assert!(moments.starts_with("begun,written,finishing") && body[0] as usize == moments.split(',').count(), "{moments}");
+            assert!(body.windows(8).any(|w| w == [137, 80, 78, 71, 13, 10, 26, 10]), "PNGs");
+            let points: Vec<usize> = header("X-Caprice-Points").split(',').map(|p| p.parse().unwrap()).collect();
+            assert!(points.len() == 2 && points[0] > 0 && points[1] > 0, "{points:?}");
+        }
+        assert!(h.painted_at("Fireflies at dusk").is_some() && h.painted_at("Keep it").is_some(), "shown to the writer");
+        assert!(h.app.themes.own.entries.is_empty(), "nothing kept before the writer says");
+
+        // A change: asked, built, shown, not shown to Claude again.
+        h.click_widget("Or say what to change");
+        h.type_text("Make it snow");
+        h.click_widget("Change it");
+        until_made(&mut h);
+        let kinds: Vec<Option<String>> = server.0.borrow().theme_rounds.iter().map(|r| r.1.clone()).collect();
+        assert_eq!(kinds.last().unwrap().as_deref(), Some("change"));
+        assert_eq!(kinds.len(), 3);
+        assert_eq!(server.0.borrow().theme_rounds[2].2, b"Make it snow");
+        assert!(h.painted_at("Snow at dusk").is_some());
+
+        h.click_widget("Keep it");
+        h.frames_until("the theme", |a| a.themes.theme == theme::Theme::Own);
+        let id = h.app.themes.own_id.clone().unwrap();
+        let entry = h.app.themes.own.get(&id).unwrap().clone();
+        assert!(entry.program && entry.name == "Snow at dusk" && entry.toolchain == "the tests' stand-in", "{entry:?}");
+        assert_eq!(entry.colours.get("accent").map(String::as_str), Some("#f0b25a"), "its palette kept");
+        assert!(h.app.themes.own.source(&id).is_some_and(|s| s.contains("The Magic Snow, as a theme program")));
+        assert!(h.app.themes.own.thumb(&id).is_some(), "its picture, from its preview");
+        assert!(!h.app.making.open && !h.app.making.busy(), "the window closes");
+        h.frames_until("the program's first frame", |a| a.eggs.program.seen.as_ref().is_some_and(|s| s.frames > 0));
+        assert!(program_seen(&h).stopped.is_none());
+    }
+
+    #[test]
+    fn mistakes_go_back_to_claude_unseen_and_a_theme_that_never_works_says_so_keeping_nothing() {
+        // A source with mistakes (the tests' compiler builds only the themes of themes/), then one
+        // that works; the look at its pictures finds Claude busy, and the version that works stays.
+        let mut h = Harness::new();
+        let server = make_with_claude(&mut h, "fixed", vec![written("// not yet a theme", "Jars"), written(FIREFLIES_SOURCE, "Jars")], "Jars of light");
+        until_made(&mut h);
+        let rounds = server.0.borrow().theme_rounds.clone();
+        let kinds: Vec<Option<&str>> = rounds.iter().map(|r| r.1.as_deref()).collect();
+        assert_eq!(kinds, [None, Some("errors"), Some("frames")]);
+        assert!(String::from_utf8_lossy(&rounds[1].2).contains("builds only the themes of themes/"), "the compiler's words, to Claude");
+        assert!(h.painted_at("Keep it").is_some(), "the version that works, after all");
+        let shown = h.painted.iter().any(|cs| matches!(&cs.shape, egui::Shape::Text(t) if t.galley.job.text.contains("builds only")));
+        assert!(!shown, "never the compiler's words to the writer");
+
+        // Never built, whatever Claude does: given up after the fixes the server allows.
+        let mut h = Harness::new();
+        let never = (0..5).map(|_| written("// never a theme", "Never")).collect();
+        let server = make_with_claude(&mut h, "never", never, "Something impossible");
+        until_made(&mut h);
+        assert_eq!(server.0.borrow().theme_rounds.len(), 4, "begun and three fixes");
+        assert!(h.painted_at("Claude could not make this theme work. Try again, perhaps with something simpler.").is_some());
+        assert!(h.painted_at("Try again").is_some() && h.painted_at("Keep it").is_none());
+        assert!(h.app.themes.own.entries.is_empty(), "nothing kept");
+    }
+
+    #[test]
+    fn a_theme_is_made_only_for_a_writer_signed_in_and_what_the_server_says_is_shown() {
+        let mut h = Harness::new();
+        h.frames(3, vec![], Modifiers::NONE);
+        h.app.make_theme();
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.painted_at("Sign in first: Claude makes themes for writers signed in.").is_some() && h.painted_at("Make it").is_none());
+
+        // Signed in, with Claude busy.
+        let mut h = Harness::new();
+        let server = make_with_claude(&mut h, "busy", Vec::new(), "A lighthouse");
+        until_made(&mut h);
+        assert_eq!(server.0.borrow().theme_rounds.len(), 1);
+        assert!(h.painted_at("Claude is busy: try again in a minute.").is_some(), "the server's words");
+        h.click_widget("Try again");
+        assert!(h.painted_at("Make it").is_some(), "back to the request");
+        assert!(h.labels().contains("A lighthouse"), "as it was written");
     }
 
     #[test]

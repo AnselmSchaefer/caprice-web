@@ -1,0 +1,10 @@
+{
+ "tag": "1.99.1-6c798e2613f0",
+ "url": "https://github.com/AnselmSchaefer/rust-compiler-wasm-investigation/releases/download/1.99.1-6c798e2613f0/",
+ "files": {
+  "manifest.json": "b935b6d1ee1cfff6193d5a7f20799057a5d3d9c24165bd952f6ae2d5fd60d767",
+  "rustc.wasm.br": "61626841a0f1c71af44f10382f70dc591fcdbea31bbee46b13eeb5b25dd183c5",
+  "lld.wasm.br": "fb606d44ed9cbc97e1780ef2c952dd4ab16112e4ad05e2a2cc7ece77720d7b5c",
+  "vfs.wasm": "dbcf40adf6298b30e958f01a74d9a977b254091c3e203776ef8ce980a79c0d5d"
+ }
+}

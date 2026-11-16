@@ -324,8 +324,13 @@ fn theme_gallery(ui: &mut egui::Ui, theme: &mut Theme, yours: &Yours) -> Option<
             if yours.importing {
                 ui.spinner();
                 ui.label("Reading the theme\u{2026}");
-            } else if ui.button("Import a theme\u{2026}").on_hover_text("A drawing (SVG) made for Caprice, or a Caprice theme file: from a file").clicked() {
+            } else if ui.button("Import a theme\u{2026}").on_hover_text("A drawing (SVG) made for Caprice, from a file").clicked() {
                 ask = Some(Ask::Import);
+            }
+            if ui.button("Make one with Claude\u{2026}").on_hover_text("Say what you would like, and Claude writes it as a program that grows with your story").clicked() {
+                ask = Some(Ask::Make);
+                // Its window opens where the menu was: the menu goes.
+                ui.close();
             }
             if ui.button("How to make one").clicked() {
                 ask = Some(Ask::Guide);
@@ -348,8 +353,8 @@ fn theme_gallery(ui: &mut egui::Ui, theme: &mut Theme, yours: &Yours) -> Option<
                         ui.label(egui::RichText::new(&e.name).size(12.0).color(pal().text_dim));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.menu_button(egui::RichText::new("\u{22ef}").size(12.0), |ui| {
-                                let what = if e.program { "Save it as a Caprice theme file, to give to someone" } else { "Save its drawing, to change it or give it to someone" };
-                                if ui.button("Export\u{2026}").on_hover_text(what).clicked() {
+                                // A drawing goes to a file; a program only to the gallery (R36).
+                                if !e.program && ui.button("Export\u{2026}").on_hover_text("Save its drawing, to change it or give it to someone").clicked() {
                                     ask = Some(Ask::Export(e.id.clone()));
                                 }
                                 if ui.button("Delete\u{2026}").clicked() {

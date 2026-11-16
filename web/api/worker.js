@@ -10,6 +10,7 @@ import { Ledger, key, limits } from "./ledger.js";
 import { StoryRoom } from "./room.js";
 import { failure, OVER_LIMIT } from "./failure.js";
 import { noted, tally } from "./tally.js";
+import { THEME_ID, themeProgram } from "./theme.js";
 
 export { Ledger, StoryRoom };
 
@@ -116,6 +117,13 @@ async function signedIn(request, env, url, session) {
   const method = request.method;
   if (path === "/api/scene") return method === "POST" ? scene(request, env, session.u) : text(405, "POST only");
   if (path === "/api/scenes") return method === "GET" ? waiting(url, env, session.u) : text(405, "GET only");
+  // Making a theme program with Claude (theme.js): begun, then a round at a time.
+  const making = path.match(/^\/api\/theme-program(?:\/([^/]+))?$/);
+  if (making) {
+    if (method !== "POST") return text(405, "POST only");
+    if (making[1] !== undefined && !THEME_ID.test(making[1])) return text(400, "Not a theme's id");
+    return themeProgram(request, env, session.u, making[1]);
+  }
   const kept = path.match(/^\/api\/scenes\/([^/]+)$/);
   if (kept) {
     if (method !== "DELETE") return text(405, "DELETE only");
