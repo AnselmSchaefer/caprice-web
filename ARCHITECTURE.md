@@ -2406,7 +2406,12 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   falling, not the hillside) is laid out on `desk.window`, the desk as it lies on the screen, and
   never zoomed; it is drawn after the desk's shapes, behind the pages. Zoomed about the foot
   instead, the Snow's port stood 4.6 points off the built-in at the first zoom tried: the
-  comparison below fails so.
+  comparison below fails so. **Zoomed out, a frame is drawn at the zoom it was asked at** until
+  the next comes (`Shown::made_at`): it covers only the desk as it was then, so drawn at the zoom
+  of the moment its sky stopped short of the window's edges while the writer zoomed out quickly
+  (seen live, 2026-11-16, and never in the built-in themes, which draw in Caprice's own frame).
+  Zoomed in, it covers more than the window, and follows the view at once. Test:
+  `a_program_theme_zoomed_out_quickly_never_leaves_the_edges_of_the_window_bare`.
 - **The Magic Snow and the Magic Vineyard draw the same as their ports, frame for frame**
   (`themes/snow/theme.rs` and `themes/vineyard/theme.rs`, built into `tests/fixtures/`): two
   `Harness`es given the same story, window and keys (`Twins`), one in the built-in theme, one in its

@@ -346,6 +346,9 @@ pub struct Seen {
     pub points: usize,
     pub frames: usize,
     pub stopped: Option<String>,
+    /// The zoom its desk was drawn at, and the zoom of the view (as at the fitting zoom, 1).
+    pub zoom: f32,
+    pub view: f32,
 }
 
 /// The program theme shown: its program, what it was last told, its newest frame.
@@ -367,6 +370,9 @@ pub struct Shown {
     said: bool,
     /// The zoom its shapes are drawn at, and about where.
     zoom: egui::emath::TSTransform,
+    /// The zoom the frame on its way was asked at, and the one the newest frame was made for.
+    asked_at: Option<egui::emath::TSTransform>,
+    made_at: egui::emath::TSTransform,
     /// For tests: what it was drawn last frame, and everything it was told, in order.
     pub seen: Option<Seen>,
     #[cfg(test)]
@@ -456,6 +462,7 @@ impl App {
                 match read(&words) {
                     Ok(d) => {
                         (p.drawn, p.over, p.frames) = (d, 0, p.frames + 1);
+                        p.made_at = p.asked_at.take().unwrap_or(p.zoom);
                     }
                     Err(Unread::Over(points)) => {
                         p.over += 1;
@@ -509,7 +516,7 @@ impl App {
         }
         let lift = self.eggs.odds.is_none_or(|o| o > 0.0);
         let p = &mut self.eggs.program;
-        p.zoom = egui::emath::TSTransform::new(anchor.to_vec2() * (1.0 - z), z);
+        let now_at = egui::emath::TSTransform::new(anchor.to_vec2() * (1.0 - z), z);
         let ask = Ask {
             input: input_bytes(now, &Desk { area: unzoom(area), page: unzoom(page), bar, zoom: z, unit, window: area, ground: anchor }, carried),
             events: event_bytes(&p.events),
@@ -524,10 +531,16 @@ impl App {
             #[cfg(test)]
             p.told.extend_from_slice(&p.events);
             p.events.clear();
+            p.asked_at = Some(now_at);
         }
+        // Its newest frame covers the desk as it was when asked: zoomed further out since, it would
+        // leave the edges of the window bare until the next frame came (its sky ends where that
+        // desk did), so it stays at the zoom it was made for until then. Zoomed in, it covers more
+        // than the window, and follows at once.
+        p.zoom = if now_at.scaling < p.made_at.scaling { p.made_at } else { now_at };
         let zoom = p.zoom;
         let d = &p.drawn;
-        p.seen = Some(Seen { id: id.to_owned(), desk: d.desk.len(), window: d.window.len(), over: d.over.len(), points: d.points, frames: p.frames, stopped: None });
+        p.seen = Some(Seen { id: id.to_owned(), desk: d.desk.len(), window: d.window.len(), over: d.over.len(), points: d.points, frames: p.frames, stopped: None, zoom: zoom.scaling, view: z });
         // The desk zoomed, then what is in the window as it is.
         let drawn: Vec<Shape> = d.desk.iter().cloned().map(|mut s| {
             s.transform(zoom);
