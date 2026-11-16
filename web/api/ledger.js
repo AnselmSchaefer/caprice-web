@@ -45,6 +45,14 @@ const DEFAULTS = {
   THEME_FRAMES_BYTES: 4_000_000,
   THEME_TOKENS: 64_000,
   THEME_DAYS: 7,
+  // The gallery of theme programs (gallery.js): what one theme file may hold, the themes one writer
+  // may send in a day, how many may wait for the owner at once, the room all of them may take in
+  // R2, and how many the gallery lists at a time.
+  GALLERY_FILE_BYTES: 3_000_000,
+  USER_PUBLISHED_PER_DAY: 3,
+  GALLERY_WAITING: 30,
+  GALLERY_BYTES: 1e9,
+  GALLERY_LIST: 60,
   // How many days the scenes painted, by hashed id, are kept for /api/admin/scenes.
   SCENE_DAYS: 30,
   // A picture painted is kept until the app has it (a reload, another story opened meanwhile):
@@ -114,6 +122,8 @@ export class Ledger extends DurableObject {
       CREATE TABLE IF NOT EXISTS theme_talks (id TEXT PRIMARY KEY, user TEXT, made INTEGER, errors INTEGER, frames INTEGER,
         changes INTEGER, busy INTEGER);
       CREATE TABLE IF NOT EXISTS theme_turns (id TEXT, n INTEGER, role TEXT, text TEXT, PRIMARY KEY (id, n));
+      CREATE TABLE IF NOT EXISTS gallery (id TEXT PRIMARY KEY, user TEXT, name TEXT, about TEXT, author TEXT, colours TEXT,
+        module TEXT, source TEXT, toolchain TEXT, size INTEGER, at INTEGER, state TEXT, why TEXT, signature TEXT, decided INTEGER);
     `);
   }
 
@@ -328,6 +338,91 @@ export class Ledger extends DurableObject {
     return { ok: true };
   }
 
+  // A theme sent to the gallery (gallery.js), checked by the Worker: allowed while the writer's day,
+  // the queue, the site's writes and the gallery's room allow, and only once for one module. It is
+  // `sending` until both its files are in R2 (`galleryCommit`), then waits for the owner.
+  galleryPublish(user, t, now = Date.now()) {
+    if (!this.known(user)) return { error: 401, message: "Not signed in" };
+    const l = this.limits;
+    // One that never reached R2 gives its place back.
+    this.sql.exec("DELETE FROM gallery WHERE state = 'sending' AND at <= ?", now - 10 * MINUTE);
+    const same = this.rows("SELECT state FROM gallery WHERE module = ? AND state != 'refused'", t.module)[0];
+    if (same) return { error: 409, message: same.state === "public" ? "This theme is in the gallery already" : "This theme is waiting for the gallery already" };
+    if (this.count(now, `published|${user}`) >= l.USER_PUBLISHED_PER_DAY) {
+      return { error: 429, message: `You can send ${l.USER_PUBLISHED_PER_DAY} themes to the gallery a day. More tomorrow.`, retry: untilTomorrow(now) };
+    }
+    if (this.rows("SELECT COUNT(*) AS n FROM gallery WHERE state IN ('sending', 'waiting')")[0].n >= l.GALLERY_WAITING) {
+      return { error: 503, message: "The gallery has as many themes waiting as it can look at: try again in a few days.", retry: 86400 };
+    }
+    if (this.count(now, "writes") + 2 > l.SITE_WRITES_PER_DAY) {
+      return { error: 503, message: "The gallery takes no more themes today. More tomorrow.", retry: untilTomorrow(now) };
+    }
+    const used = this.rows("SELECT COALESCE(SUM(size), 0) AS n FROM gallery WHERE state != 'refused'")[0].n;
+    if (used + t.size > l.GALLERY_BYTES) return { error: 507, message: "The gallery has no more room for now" };
+    this.bump(now, `published|${user}`);
+    this.bump(now, "writes");
+    this.bump(now, "writes");
+    const id = [...crypto.getRandomValues(new Uint8Array(8))].map(b => b.toString(16).padStart(2, "0")).join("");
+    this.sql.exec("INSERT INTO gallery VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sending', '', '', 0)",
+      id, user, t.name, t.about, t.author, JSON.stringify(t.colours), t.module, t.source, t.toolchain, t.size, now);
+    return { ok: true, id };
+  }
+
+  // Its files are in R2: it waits for the owner. Or they could not be put there: it is forgotten.
+  galleryCommit(id, ok) {
+    if (ok) this.sql.exec("UPDATE gallery SET state = 'waiting' WHERE id = ? AND state = 'sending'", id);
+    else this.sql.exec("DELETE FROM gallery WHERE id = ? AND state = 'sending'", id);
+    return { ok: true };
+  }
+
+  // The themes in the gallery, newest first, as everyone may see them: never who sent them.
+  galleryList() {
+    const rows = this.rows(`SELECT id, name, about, author, colours, source, toolchain, signature, decided FROM gallery
+      WHERE state = 'public' ORDER BY decided DESC, id LIMIT ?`, this.limits.GALLERY_LIST);
+    return { ok: true, themes: rows.map(r => ({ ...r, colours: JSON.parse(r.colours) })) };
+  }
+
+  // What one writer has sent, and what became of it.
+  galleryMine(user) {
+    if (!this.known(user)) return { error: 401, message: "Not signed in" };
+    const rows = this.rows("SELECT id, name, module, state, why, at FROM gallery WHERE user = ? AND state != 'sending' ORDER BY at DESC", user);
+    return { ok: true, themes: rows };
+  }
+
+  // The themes waiting for the owner, oldest first, with what the Worker found of each.
+  galleryWaiting() {
+    const rows = this.rows("SELECT id, name, about, author, colours, module, source, toolchain, size, at FROM gallery WHERE state = 'waiting' ORDER BY at, id");
+    return { ok: true, themes: rows.map(r => ({ ...r, colours: JSON.parse(r.colours) })) };
+  }
+
+  // One of a theme's files to read from R2, counted against the day's reads: a theme in the gallery
+  // for anyone signed in, one waiting for the owner only.
+  galleryRead(user, id, owner, now = Date.now()) {
+    if (!this.known(user)) return { error: 401, message: "Not signed in" };
+    const t = this.rows("SELECT state FROM gallery WHERE id = ?", id)[0];
+    if (!t || !(t.state === "public" || (owner && t.state === "waiting"))) return { error: 404, message: "No such theme in the gallery" };
+    if (this.count(now, "reads") >= this.limits.SITE_READS_PER_DAY) {
+      return { error: 503, message: "The gallery is resting until tomorrow.", retry: untilTomorrow(now) };
+    }
+    this.bump(now, "reads");
+    return { ok: true, state: t.state };
+  }
+
+  // A theme waiting, as the Worker signs it.
+  galleryEntry(id) {
+    const t = this.rows("SELECT * FROM gallery WHERE id = ? AND state = 'waiting'", id)[0];
+    return t ? { ok: true, theme: t } : { error: 404, message: "No such theme waiting" };
+  }
+
+  // The owner's decision: in the gallery with the Worker's signature, or refused with a word why
+  // (its files to delete). Only a theme still waiting is decided.
+  galleryDecide(id, signature, why, now = Date.now()) {
+    if (!this.rows("SELECT 1 FROM gallery WHERE id = ? AND state = 'waiting'", id).length) return { error: 409, message: "That theme is not waiting any more" };
+    if (signature) this.sql.exec("UPDATE gallery SET state = 'public', signature = ?, decided = ? WHERE id = ?", signature, now, id);
+    else this.sql.exec("UPDATE gallery SET state = 'refused', why = ?, decided = ? WHERE id = ?", why, now, id);
+    return { ok: true };
+  }
+
   // The scenes of the days kept, newest first: each day's total, how many writers, and each
   // writer's count by hashed id, most first.
   sceneDays(now = Date.now()) {
@@ -415,6 +510,10 @@ export class Ledger extends DurableObject {
     const gone = this.rows("SELECT id, version FROM versions WHERE user = ?", user);
     // Who painted how many goes too; the day's total for the site stays, so it is no way round the limit.
     for (const table of ["versions", "stories", "pending", "gone", "scene_days", "painted"]) this.sql.exec(`DELETE FROM ${table} WHERE user = ?`, user);
-    return { ok: true, drop: gone.map(v => key(user, v.id, v.version)) };
+    // Themes sent to the gallery and not in it go too; those in it stay, as copies on shelves do.
+    const unpublished = this.rows("SELECT id FROM gallery WHERE user = ? AND state != 'public'", user);
+    this.sql.exec("DELETE FROM gallery WHERE user = ? AND state != 'public'", user);
+    const files = unpublished.flatMap(t => [`gallery/${t.id}/theme.caprice-theme`, `gallery/${t.id}/preview.png`]);
+    return { ok: true, drop: [...gone.map(v => key(user, v.id, v.version)), ...files] };
   }
 }

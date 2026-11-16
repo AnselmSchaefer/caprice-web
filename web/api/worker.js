@@ -11,6 +11,7 @@ import { StoryRoom } from "./room.js";
 import { failure, OVER_LIMIT } from "./failure.js";
 import { noted, tally } from "./tally.js";
 import { THEME_ID, themeProgram } from "./theme.js";
+import { gallery, isOwner } from "./gallery.js";
 
 export { Ledger, StoryRoom };
 
@@ -38,9 +39,10 @@ export default {
 };
 
 // Headers for every answer: nothing cached, nothing to sniff, frame or read from another site.
+// Only what never changes (a theme in the gallery) may be kept, by the browser that asked alone.
 function guarded(response) {
   const r = new Response(response.body, response);
-  r.headers.set("Cache-Control", "no-store");
+  if (!r.headers.get("Cache-Control")?.startsWith("private,")) r.headers.set("Cache-Control", "no-store");
   r.headers.set("X-Content-Type-Options", "nosniff");
   r.headers.set("Cross-Origin-Resource-Policy", "same-origin");
   r.headers.set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
@@ -89,7 +91,7 @@ async function route(request, env) {
   const session = await opened(request, SESSION, env);
   if (!session) return text(401, "Not signed in");
   // The user's id is no secret of theirs (a hash), and tells the app when someone else signs in.
-  if (path === "/api/me") return json({ name: session.n, provider: session.p, user: session.u });
+  if (path === "/api/me") return json({ name: session.n, provider: session.p, user: session.u, ...(isOwner(env, session.u) ? { owner: true } : {}) });
   if (!session.k) return signedIn(request, env, url, session);
 
   // Signed in while the Ledger could not be reached (`callback`): the sign-up is recorded now,
@@ -124,6 +126,9 @@ async function signedIn(request, env, url, session) {
     if (making[1] !== undefined && !THEME_ID.test(making[1])) return text(400, "Not a theme's id");
     return themeProgram(request, env, session.u, making[1]);
   }
+  // The gallery of theme programs (gallery.js): sent, listed, read, and decided by the owner.
+  const shown = path.match(/^\/api\/gallery(\/.*)?$/);
+  if (shown) return gallery(request, env, session.u, shown[1] ?? "");
   const kept = path.match(/^\/api\/scenes\/([^/]+)$/);
   if (kept) {
     if (method !== "DELETE") return text(405, "DELETE only");

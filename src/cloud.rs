@@ -190,6 +190,9 @@ pub struct Who {
     pub provider: String,
     #[serde(default)]
     user: String,
+    /// The site's owner, who decides what the gallery shows (`gallery.rs`).
+    #[serde(default)]
+    pub owner: bool,
 }
 
 /// What is to be done with one story.
@@ -787,7 +790,7 @@ impl App {
                     cloud.begun = false;
                     if cloud.who.is_none() && !cloud.kept.user.is_empty() && !cloud.kept.name.is_empty() {
                         let k = &cloud.kept;
-                        cloud.who = Some(Who { name: k.name.clone(), provider: k.provider.clone(), user: k.user.clone() });
+                        cloud.who = Some(Who { name: k.name.clone(), provider: k.provider.clone(), user: k.user.clone(), owner: false });
                     }
                 }
             },
@@ -1316,6 +1319,42 @@ pub mod stand_in {
         pub theme_answers: VecDeque<Answer>,
         pub theme_rounds: Vec<Round>,
         versions: u32,
+        /// Whether the one signed in is the site's owner (`GALLERY_OWNERS`), who looks at the
+        /// themes sent to the gallery; and the themes sent, as `web/api/gallery.js` keeps them.
+        pub owner: bool,
+        pub gallery: Vec<Sent>,
+    }
+
+    /// A theme sent to the gallery: who sent it, its file, what it says it is, and what became of it.
+    #[derive(Clone)]
+    pub struct Sent {
+        pub id: String,
+        pub user: String,
+        pub file: Vec<u8>,
+        pub manifest: crate::bundle::Manifest,
+        pub module: Vec<u8>,
+        pub source: String,
+        /// waiting, public or refused.
+        pub state: String,
+        pub why: String,
+        pub signature: String,
+    }
+
+    /// The seed of the key the stand-in signs the gallery's themes with; the shelf in a test checks
+    /// them with `gallery_key()` in place of `own::GALLERY_KEY`.
+    const GALLERY_SEED: [u8; 32] = [7; 32];
+
+    pub fn gallery_key() -> [u8; 32] {
+        *ed25519_compact::KeyPair::from_seed(ed25519_compact::Seed::new(GALLERY_SEED)).pk
+    }
+
+    /// One file of a theme file, as kept.
+    fn part_of(file: &[u8], name: &str) -> Vec<u8> {
+        use std::io::Read;
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(file)).expect("a theme file");
+        let mut bytes = Vec::new();
+        zip.by_name(name).expect("its part").read_to_end(&mut bytes).expect("read");
+        bytes
     }
 
     /// A round of a theme being made, as asked: the path, its kind (none to begin), its body and
@@ -1371,7 +1410,11 @@ pub mod stand_in {
             }
             let Some((name, user)) = o.signed_in.clone() else { return status(401) };
             if r.path == "/api/me" {
-                return json(serde_json::json!({ "name": name, "provider": "google", "user": user }));
+                let owner = o.owner;
+                return json(serde_json::json!({ "name": name, "provider": "google", "user": user, "owner": owner }));
+            }
+            if let Some(rest) = r.path.strip_prefix("/api/gallery") {
+                return gallery(&mut o, &r, rest, &user);
             }
             if r.path == "/api/scene" {
                 if let Some((code, said)) = &o.no_painting {
@@ -1465,6 +1508,62 @@ pub mod stand_in {
                 }
                 _ => status(404),
             }
+        }
+    }
+
+    /// The gallery's routes, as `web/api/gallery.js` answers them (without its limits).
+    fn gallery(o: &mut Online, r: &Request, rest: &str, user: &str) -> Answer {
+        let json = |status: u16, v: serde_json::Value| Answer { status, headers: Vec::new(), body: v.to_string().into_bytes() };
+        let said = |status: u16, said: &str| Answer { status, headers: Vec::new(), body: said.as_bytes().to_vec() };
+        let sha = |b: &[u8]| crate::gallery::sha256(b);
+        let listed = |t: &Sent| serde_json::json!({ "id": t.id, "name": t.manifest.name, "about": t.manifest.about, "author": t.manifest.author,
+            "colours": t.manifest.colours, "module": sha(&t.module), "source": t.source, "toolchain": t.manifest.toolchain,
+            "size": t.file.len(), "state": t.state, "why": t.why, "signature": t.signature });
+        let parts: Vec<&str> = rest.trim_start_matches('/').split('/').collect();
+        match (r.method, parts.as_slice()) {
+            ("POST", [""]) => {
+                let file = r.body.clone().unwrap_or_default();
+                let opened = match crate::bundle::open(&file, "sent") {
+                    Ok(opened) if opened.bundle.source.is_some() => opened,
+                    Ok(_) => return said(422, "It has no source"),
+                    Err(why) => return said(422, &why.join(" ")),
+                };
+                let id = format!("{:016x}", o.gallery.len() + 1);
+                let source = sha(opened.bundle.source.as_deref().unwrap_or_default().as_bytes());
+                let b = opened.bundle;
+                o.gallery.push(Sent { id: id.clone(), user: user.into(), file, manifest: b.manifest, module: b.module, source, state: "waiting".into(),
+                    why: String::new(), signature: String::new() });
+                json(202, serde_json::json!({ "id": id, "state": "waiting" }))
+            }
+            ("GET", [""]) => json(200, serde_json::json!({ "themes": o.gallery.iter().rev().filter(|t| t.state == "public").map(listed).collect::<Vec<_>>() })),
+            ("GET", ["mine"]) => json(200, serde_json::json!({ "themes": o.gallery.iter().filter(|t| t.user == user).map(listed).collect::<Vec<_>>() })),
+            ("GET", ["waiting"]) if o.owner => json(200, serde_json::json!({ "themes": o.gallery.iter().filter(|t| t.state == "waiting").map(listed).collect::<Vec<_>>() })),
+            ("POST", ["waiting", id]) if o.owner => {
+                let Some(t) = o.gallery.iter_mut().find(|t| t.id == *id && t.state == "waiting") else { return said(404, "No such theme waiting") };
+                let decision: serde_json::Value = serde_json::from_slice(r.body.as_deref().unwrap_or_default()).unwrap_or_default();
+                if decision["publish"] == true {
+                    if decision["module"].as_str() != Some(sha(&t.module).as_str()) {
+                        return said(409, "That is not the program waiting");
+                    }
+                    use base64::Engine;
+                    let signed = crate::own::Signed { name: t.manifest.name.clone(), source: t.source.clone(), toolchain: t.manifest.toolchain.clone(), signature: String::new() };
+                    let key = ed25519_compact::KeyPair::from_seed(ed25519_compact::Seed::new(GALLERY_SEED));
+                    t.signature = base64::engine::general_purpose::STANDARD.encode(*key.sk.sign(signed.message(&t.module), None));
+                    t.state = "public".into();
+                } else {
+                    t.why = decision["why"].as_str().unwrap_or_default().to_owned();
+                    t.state = "refused".into();
+                }
+                json(200, serde_json::json!({ "id": id, "state": t.state }))
+            }
+            ("GET", [id, part @ ("theme" | "preview")]) => {
+                let Some(t) = o.gallery.iter().find(|t| t.id == *id && (t.state == "public" || (o.owner && t.state == "waiting"))) else {
+                    return said(404, "No such theme in the gallery");
+                };
+                let body = if *part == "theme" { t.file.clone() } else { part_of(&t.file, "preview.png") };
+                Answer { status: 200, headers: Vec::new(), body }
+            }
+            _ => said(404, "Not found"),
         }
     }
 

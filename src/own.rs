@@ -930,6 +930,9 @@ pub struct Entry {
     /// then is it shown under the gallery's name.
     #[serde(skip)]
     pub from_gallery: bool,
+    /// The gallery's id for it, once the writer has sent it there (`gallery.rs`).
+    #[serde(default)]
+    pub sent: Option<String>,
 }
 
 impl Entry {
@@ -958,9 +961,13 @@ pub struct Signed {
     pub signature: String,
 }
 
-/// The gallery's public key. Until the gallery has its key (step 6) it is none of any key's, so
-/// nothing is taken for the gallery's.
-pub const GALLERY_KEY: [u8; 32] = [0; 32];
+/// The gallery's public key: the Worker signs with its private half (the secret
+/// `GALLERY_SIGNING_KEY`, `web/api/gallery.js`). A new key makes every theme taken from the gallery
+/// the writer's own until it is taken again.
+pub const GALLERY_KEY: [u8; 32] = [
+    0xeb, 0x4b, 0x8f, 0xad, 0x27, 0xe0, 0xf3, 0x22, 0xa3, 0x1a, 0x4f, 0x08, 0x9f, 0x35, 0xb6, 0xc0, 0xb3, 0x17, 0x2d, 0x82, 0x12, 0xb0, 0x10, 0x0e,
+    0xda, 0xe8, 0x3f, 0x53, 0x78, 0x5f, 0x3b, 0xed,
+];
 
 impl Signed {
     /// What the gallery signs for `module`.
@@ -1041,18 +1048,18 @@ impl Shelf {
             }
         }
         let entry = Entry { id: id.clone(), name: name.to_owned(), about: about.to_owned(), author: String::new(), colours, grows: true, carries: true,
-            added: crate::platform::since_epoch().as_secs(), program: true, toolchain: String::new(), gallery, from_gallery: false };
+            added: crate::platform::since_epoch().as_secs(), program: true, toolchain: String::new(), gallery, from_gallery: false, sent: None };
         self.entries.push(entry);
         self.check_signatures();
         self.save()?;
         Ok(id)
     }
 
-    /// Put a theme file's program on the shelf (`bundle::open` read it), with its source and its
-    /// picture for the gallery; its id.
-    pub fn add_bundle(&mut self, b: &crate::bundle::Bundle) -> Result<String, String> {
+    /// Put a theme file's program on the shelf (`bundle::open` read it), with its source, its
+    /// picture for the gallery and what the gallery signed, if it came from there; its id.
+    pub fn add_bundle(&mut self, b: &crate::bundle::Bundle, gallery: Option<Signed>) -> Result<String, String> {
         let m = &b.manifest;
-        let id = self.add_program(&m.name, &m.about, m.colours.clone(), &b.module, None)?;
+        let id = self.add_program(&m.name, &m.about, m.colours.clone(), &b.module, gallery)?;
         match &self.dir {
             Some(d) => {
                 if let Some(source) = &b.source {
@@ -1148,6 +1155,7 @@ impl Shelf {
             toolchain: String::new(),
             gallery: None,
             from_gallery: false,
+            sent: None,
         };
         match &self.dir {
             Some(d) => {
@@ -1174,6 +1182,19 @@ impl Shelf {
             for ext in ["svg", "png", "wasm", "rs"] {
                 let _ = fs::remove_file(d.join(format!("{id}.{ext}")));
             }
+        }
+        let _ = self.save();
+    }
+
+    /// The theme on the shelf that the gallery signed with `signature`: one taken from it already.
+    pub fn signed(&self, signature: &str) -> Option<&Entry> {
+        self.entries.iter().find(|e| e.from_gallery && e.gallery.as_ref().is_some_and(|g| g.signature == signature))
+    }
+
+    /// Theme `id` was sent to the gallery, which knows it as `gallery`.
+    pub fn set_sent(&mut self, id: &str, gallery: &str) {
+        if let Some(e) = self.entries.iter_mut().find(|e| e.id == id) {
+            e.sent = Some(gallery.to_owned());
         }
         let _ = self.save();
     }
@@ -1273,6 +1294,9 @@ pub enum Ask {
     Guide,
     Export(String),
     Delete(String),
+    /// The Gallery window (`gallery.rs`), and a theme to send to it.
+    Gallery,
+    Send(String),
 }
 
 impl App {
@@ -1387,7 +1411,7 @@ impl App {
         let (added, named, found, notes) = match prepared {
             Prepared::Drawing(ready) => (self.themes.own.add(&ready), ready.checked.pack.meta.name, ready.checked.found, ready.checked.notes),
             Prepared::Program(o) => {
-                let added = self.themes.own.add_bundle(&o.bundle);
+                let added = self.themes.own.add_bundle(&o.bundle, None);
                 if let Ok(id) = &added
                     && o.bundle.preview.is_none()
                 {
@@ -1478,6 +1502,8 @@ impl App {
                 self.ask_path(ctx, crate::fileio::DialogFor::ExportTheme(id), dialog);
             }
             Ask::Delete(id) => self.workshop.deleting = Some(id),
+            Ask::Gallery => self.open_gallery(ctx),
+            Ask::Send(id) => self.send_to_gallery(&id),
         }
     }
 
