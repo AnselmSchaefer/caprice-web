@@ -322,7 +322,7 @@ fn theme_gallery(ui: &mut egui::Ui, theme: &mut Theme, yours: &Yours) -> Option<
         ui.selectable_value(&mut shown, 0, "Classic").on_hover_text("Colours around the page");
         ui.selectable_value(&mut shown, 1, "Magic").on_hover_text("Themes that hide things to find");
         ui.selectable_value(&mut shown, 2, "Yours").on_hover_text("Themes you make yourself, or are given");
-        if ui.button("Gallery\u{2026}").on_hover_text("Themes other writers made with Claude, to use").clicked() {
+        if ui.button("Gallery\u{2026}").on_hover_text("Themes other writers made, to use").clicked() {
             ask = Some(Ask::Gallery);
             // Its window opens where the menu was: the menu goes.
             ui.close();
@@ -338,7 +338,7 @@ fn theme_gallery(ui: &mut egui::Ui, theme: &mut Theme, yours: &Yours) -> Option<
             } else if ui.button("Import a theme\u{2026}").on_hover_text("A drawing (SVG) made for Caprice, from a file").clicked() {
                 ask = Some(Ask::Import);
             }
-            if ui.button("Make one with Claude\u{2026}").on_hover_text("Say what you would like, and Claude writes it as a program that grows with your story").clicked() {
+            if ui.button("Have one made\u{2026}").on_hover_text("Say what you would like, and we make it: a theme that grows with your story").clicked() {
                 ask = Some(Ask::Make);
                 // Its window opens where the menu was: the menu goes.
                 ui.close();
@@ -355,11 +355,12 @@ fn theme_gallery(ui: &mut egui::Ui, theme: &mut Theme, yours: &Yours) -> Option<
             }
             return ask;
         }
-        // Those taken from the gallery, those made with Claude, and the drawings, apart.
+        // Those taken from the gallery, those made with Claude (for the writer: made for them), and the
+        // drawings, apart.
         type Holds = fn(&crate::own::Entry) -> bool;
         let sections: [(&str, Holds); 3] = [
             ("From Gallery", |e| e.from_gallery),
-            ("Made with Claude", |e| e.program && !e.from_gallery),
+            ("Made for you", |e| e.program && !e.from_gallery),
             ("From SVG", |e| !e.program),
         ];
         for (title, holds) in sections {

@@ -298,16 +298,16 @@ export class Ledger extends DurableObject {
     if (id !== null) {
       talk = this.rows("SELECT * FROM theme_talks WHERE id = ? AND user = ?", id, user)[0];
       if (!talk) return { error: 404, message: "That theme is no longer being made: begin it again" };
-      if (talk.busy > now) return { error: 409, message: "Claude is working on this theme already", retry: 30 };
+      if (talk.busy > now) return { error: 409, message: "This theme is being worked on already", retry: 30 };
       if (talk[column[kind]] >= most[kind]) return { error: 429, message: `No more rounds of this kind for this theme (${most[kind]})` };
     } else if (this.count(now, `themes:${user}`) >= l.USER_THEMES_PER_DAY) {
       return { error: 429, message: `You can begin ${l.USER_THEMES_PER_DAY} themes a day. More tomorrow.`, retry: untilTomorrow(now) };
     }
     if (this.count(now, "theme_rounds") >= l.SITE_THEME_ROUNDS_PER_DAY) {
-      return { error: 503, message: "Claude makes no more themes today for anyone. More tomorrow.", retry: untilTomorrow(now) };
+      return { error: 503, message: "Caprice makes no more themes today, for anyone. More tomorrow.", retry: untilTomorrow(now) };
     }
     if (this.count(now, `theme_rounds:${user}`) >= l.USER_THEME_ROUNDS_PER_DAY) {
-      return { error: 429, message: "You have asked Claude for as much as a day allows. More tomorrow.", retry: untilTomorrow(now) };
+      return { error: 429, message: "You have made as much as a day allows. More tomorrow.", retry: untilTomorrow(now) };
     }
     this.bump(now, "theme_rounds");
     this.bump(now, `theme_rounds:${user}`);

@@ -39,10 +39,12 @@ export default {
 };
 
 // Headers for every answer: nothing cached, nothing to sniff, frame or read from another site.
-// Only what never changes (a theme in the gallery) may be kept, by the browser that asked alone.
+// Only what never changes (a theme in the gallery) may be kept, by the browser that asked alone;
+// what is sent a little at a time (a theme being written, theme.js) is not compressed on the way.
 function guarded(response) {
   const r = new Response(response.body, response);
-  if (!r.headers.get("Cache-Control")?.startsWith("private,")) r.headers.set("Cache-Control", "no-store");
+  const cache = r.headers.get("Cache-Control");
+  if (!cache?.startsWith("private,") && cache !== "no-store, no-transform") r.headers.set("Cache-Control", "no-store");
   r.headers.set("X-Content-Type-Options", "nosniff");
   r.headers.set("Cross-Origin-Resource-Policy", "same-origin");
   r.headers.set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");

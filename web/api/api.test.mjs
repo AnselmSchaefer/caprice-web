@@ -1131,6 +1131,41 @@ test("without a key, or switched off, no theme is made", async t => {
   assert.equal(claude.asked.length, 0);
 });
 
+test("a round that takes longer than a beat is answered at once, a space every beat, then the theme or why not", async t => {
+  const mf = await start(t, { THEME_BEAT_MS: "40" });
+  const api = await writer(mf, "1", "Ada");
+  claude.writes = THEME_REPLY;
+  let release;
+  claude.hold = new Promise(r => { release = r; });
+  const got = await begin(api);
+  assert.equal(got.status, 200, "answered before Claude has");
+  assert.equal(got.headers.get("Cache-Control"), "no-store, no-transform", "nothing on the way holds the spaces back");
+  const reading = got.body.getReader();
+  let heard = "";
+  while (heard.length < 3) heard += new TextDecoder().decode((await reading.read()).value);
+  assert.match(heard, /^ +$/, "only spaces while it is being written");
+  release();
+  for (let r = await reading.read(); !r.done; r = await reading.read()) heard += new TextDecoder().decode(r.value);
+  const theme = JSON.parse(heard);
+  assert.equal(theme.name, "Lighthouse", "the theme, after the spaces");
+  assert.match(theme.theme, /^[0-9a-f]{16}$/);
+  assert.ok(!heard.includes("hope you like it"), "none of Claude's own words");
+
+  // Claude failing once the spaces have begun: the status is sent already, the body says it.
+  claude.hold = new Promise(r => { release = r; });
+  claude.broke = { status: 529, said: "Overloaded" };
+  const busy = await round(api, theme.theme, "change", "Bluer");
+  assert.equal(busy.status, 200);
+  release();
+  const said = await busy.json();
+  assert.equal(said.error, 503);
+  assert.match(said.message, /^Many themes are being made just now/);
+  assert.ok(!said.message.includes("Claude"), "the writer is not told of Claude");
+  claude.broke = null;
+  claude.hold = null;
+  assert.equal((await round(api, theme.theme, "change", "Greener")).status, 200, "the theme is free for its next round");
+});
+
 // The gallery (gallery.js, R36): a theme file sent, checked and queued; the owner's decision; what
 // everyone sees. The owner is the writer signed in as "9", their hashed id in GALLERY_OWNERS.
 const OWNER = createHash("sha256").update("google:9").digest("hex").slice(0, 32);

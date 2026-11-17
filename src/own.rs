@@ -1319,7 +1319,7 @@ fn import_dialog() -> crate::platform::Dialog {
 }
 
 /// Why a program picked as a file anyway is not added.
-pub const NO_PROGRAM_FILES: &str = "Themes that are programs are not taken from files: they are made with Claude in Caprice, or taken from the gallery.";
+pub const NO_PROGRAM_FILES: &str = "Themes that are programs are not taken from files: they are made in Caprice (Yours \u{203a} Have one made), or taken from the gallery.";
 
 /// Something asked for in the gallery's "Yours".
 pub enum Ask {
