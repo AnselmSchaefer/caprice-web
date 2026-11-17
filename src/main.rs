@@ -7230,17 +7230,24 @@ mod tests {
     /// Signed in, with Claude answering the rounds with `answers`, the window opened from the
     /// gallery's Yours and `request` asked for.
     fn make_with_claude(h: &mut Harness, name: &str, answers: Vec<platform::Answer>, request: &str) -> std::rc::Rc<cloud::stand_in::StandIn> {
+        ask_for_theme(h, name, answers, request, false)
+    }
+
+    /// As `make_with_claude`, with Claude still writing each round asked (`writing`) until the test
+    /// says it has written.
+    fn ask_for_theme(h: &mut Harness, name: &str, answers: Vec<platform::Answer>, request: &str, writing: bool) -> std::rc::Rc<cloud::stand_in::StandIn> {
         let dir = with_shelf(h, &format!("making-{name}"));
         let server = online(h, &dir, true);
         server.0.borrow_mut().theme_answers = answers.into();
+        server.0.borrow_mut().writing = writing;
         h.frames(12, vec![], Modifiers::NONE);
         assert!(h.app.cloud.who.is_some(), "signed in");
         h.click_widget("Page");
         h.click_widget(&format!("{} \u{23f5}", h.app.themes.name()));
         h.click_widget("Yours");
-        h.click_widget("Make one with Claude\u{2026}");
+        h.click_widget("Have one made\u{2026}");
         h.frames(2, vec![], Modifiers::NONE);
-        assert!(h.labels().contains(making::GOES_TO_CLAUDE), "the writer is told where their words go");
+        assert!(h.labels().contains(making::GOES_OUT), "the writer is told where their words go");
         h.click_widget("A lighthouse on a cliff by the sea, a window lit for each page, a boat for each chapter");
         h.type_text(request);
         h.click_widget("Make it");
@@ -7355,7 +7362,7 @@ mod tests {
         h.click_widget("Page");
         h.click_widget(&format!("{} \u{23f5}", h.app.themes.name()));
         h.click_widget("Yours");
-        assert!(h.painted_at("From Gallery").is_some() && h.painted_at("Made with Claude").is_none(), "shown once, as the gallery's");
+        assert!(h.painted_at("From Gallery").is_some() && h.painted_at("Made for you").is_none(), "shown once, as the gallery's");
     }
 
     #[test]
@@ -7478,7 +7485,7 @@ mod tests {
         h.click_widget(&format!("{} \u{23f5}", h.app.themes.name()));
         h.click_widget("Yours");
         let at = |h: &Harness, s: &str| h.painted_at(s).unwrap_or_else(|| panic!("no {s:?}")).y;
-        let (gallery, claude, svg) = (at(&h, "From Gallery"), at(&h, "Made with Claude"), at(&h, "From SVG"));
+        let (gallery, claude, svg) = (at(&h, "From Gallery"), at(&h, "Made for you"), at(&h, "From SVG"));
         assert!(gallery < claude && claude < svg, "in that order");
         let gallery_name = at(&h, "Fireflies in the gallery");
         assert!(gallery < gallery_name && gallery_name < claude, "shown under the gallery's name, among the gallery's");
@@ -7628,7 +7635,7 @@ mod tests {
         let server = make_with_claude(&mut h, "never", never, "Something impossible");
         until_made(&mut h);
         assert_eq!(server.0.borrow().theme_rounds.len(), 4, "begun and three fixes");
-        assert!(h.painted_at("Claude could not make this theme work. Try again, perhaps with something simpler.").is_some());
+        assert!(h.painted_at(making::NEVER_WORKED).is_some());
         assert!(h.painted_at("Try again").is_some() && h.painted_at("Keep it").is_none());
         assert!(h.app.themes.own.entries.is_empty(), "nothing kept");
     }
@@ -7639,17 +7646,109 @@ mod tests {
         h.frames(3, vec![], Modifiers::NONE);
         h.app.make_theme();
         h.frames(2, vec![], Modifiers::NONE);
-        assert!(h.painted_at("Sign in first: Claude makes themes for writers signed in.").is_some() && h.painted_at("Make it").is_none());
+        assert!(h.painted_at("Sign in first: themes are made for writers signed in.").is_some() && h.painted_at("Make it").is_none());
 
         // Signed in, with Claude busy.
         let mut h = Harness::new();
         let server = make_with_claude(&mut h, "busy", Vec::new(), "A lighthouse");
         until_made(&mut h);
         assert_eq!(server.0.borrow().theme_rounds.len(), 1);
-        assert!(h.painted_at("Claude is busy: try again in a minute.").is_some(), "the server's words");
+        assert!(h.painted_at("Many themes are being made just now: try again in a few minutes.").is_some(), "the server's words");
         h.click_widget("Try again");
         assert!(h.painted_at("Make it").is_some(), "back to the request");
         assert!(h.labels().contains("A lighthouse"), "as it was written");
+    }
+
+    /// A text painted last frame that names Claude, besides the menu of Claude's own features.
+    fn names_claude(h: &Harness) -> Option<String> {
+        painted_texts(h).into_iter().find(|t| t.contains("Claude") && t != "Claude")
+    }
+
+    #[test]
+    fn a_theme_being_made_shows_its_steps_and_its_time_and_never_names_claude() {
+        let mut h = Harness::new();
+        let fireflies = || written(FIREFLIES_SOURCE, "Fireflies at dusk");
+        let server = ask_for_theme(&mut h, "steps", vec![fireflies(), fireflies()], "Fireflies", true);
+        h.frames(3, vec![], Modifiers::NONE);
+        assert_eq!(h.app.making.waiting(), Some(making::Kind::Begin));
+        let told = format!("We prepare the theme (up to {} minutes) and show it once it is done. Go on writing meanwhile: closing this window does not stop it.", making::UP_TO_MINUTES);
+        assert!(h.painted_at(&told).is_some(), "how long it takes");
+        assert!(h.painted_at("Step 2 of 7").is_some() && h.painted_at("Writing the theme\u{2026}").is_some(), "{}", h.painted_texts());
+
+        // Three minutes of writing, the server saying every 15 s that it is at it.
+        for _ in 0..12 {
+            h.time += 15.0;
+            server.beat();
+            h.frames(1, vec![], Modifiers::NONE);
+        }
+        assert!(h.painted_at("3 min 00 s").is_some(), "the time so far: {}", h.painted_texts());
+        assert!(!h.painted_texts().contains("No word"), "the server is heard");
+        assert_eq!(names_claude(&h), None);
+        // Half a minute without word: said, and gone once the server is heard again.
+        h.time += 30.0;
+        h.frames(1, vec![], Modifiers::NONE);
+        assert!(h.painted_at("No word from Caprice's server for 30 s: the connection may be lost.").is_some(), "{}", h.painted_texts());
+        server.beat();
+        h.frames(1, vec![], Modifiers::NONE);
+        assert!(!h.painted_texts().contains("No word"));
+
+        // Written: built and tried, then looked over, still at the step it reached.
+        server.written();
+        server.0.borrow_mut().writing = true;
+        h.frames_until("the look at its pictures", |a| a.making.waiting() == Some(making::Kind::Frames));
+        h.frames(1, vec![], Modifiers::NONE);
+        assert!(h.painted_at("Step 5 of 7").is_some() && h.painted_at("Looking it over, to make it lovelier\u{2026}").is_some(), "{}", h.painted_texts());
+        assert!(h.painted_at("So far:").is_some(), "the version that works, meanwhile");
+        assert_eq!(names_claude(&h), None);
+        server.written();
+        until_made(&mut h);
+        assert!(h.painted_at("Keep it").is_some() && h.painted_at("Fireflies at dusk").is_some());
+        assert_eq!(names_claude(&h), None);
+    }
+
+    #[test]
+    fn a_theme_being_made_says_plainly_when_the_network_or_the_server_is_lost() {
+        // The device loses its network while the theme is written: said at once; a minute on, the
+        // theme is lost with it.
+        let mut h = Harness::new();
+        let server = ask_for_theme(&mut h, "offline", Vec::new(), "A lighthouse", true);
+        h.frames(3, vec![], Modifiers::NONE);
+        server.0.borrow_mut().offline = true;
+        h.frames(1, vec![], Modifiers::NONE);
+        assert!(h.painted_at("Lost network. Waiting for it to come back\u{2026}").is_some(), "{}", h.painted_texts());
+        assert!(h.app.making.busy(), "it may come back in time");
+        h.time += 61.0;
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.painted_at(making::LOST_NETWORK).is_some() && h.painted_at("Try again").is_some(), "{}", h.painted_texts());
+        assert!(!h.app.making.busy());
+
+        // Online, but no word from the server for a minute.
+        let mut h = Harness::new();
+        let server = ask_for_theme(&mut h, "silent", Vec::new(), "A lighthouse", true);
+        h.frames(3, vec![], Modifiers::NONE);
+        h.time += 61.0;
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.painted_at(making::LOST_SERVER).is_some(), "{}", h.painted_texts());
+        assert!(server.0.borrow().theme_rounds.is_empty(), "never answered");
+
+        // The request failing outright, offline and online.
+        for (offline, said) in [(true, making::LOST_NETWORK), (false, making::LOST_SERVER)] {
+            let mut h = Harness::new();
+            let server = ask_for_theme(&mut h, &format!("failing-{offline}"), vec![platform::Answer::default()], "A lighthouse", true);
+            h.frames(2, vec![], Modifiers::NONE);
+            server.0.borrow_mut().offline = offline;
+            server.written();
+            until_made(&mut h);
+            assert!(h.painted_at(said).is_some(), "{}", h.painted_texts());
+        }
+
+        // Gone wrong after the server had begun answering with spaces: what it says is in the body.
+        let mut h = Harness::new();
+        let body = br#"     {"error":422,"message":"This theme cannot be made: ask for something else"}"#.to_vec();
+        make_with_claude(&mut h, "refused", vec![platform::Answer { status: 200, headers: Vec::new(), body }], "Something");
+        until_made(&mut h);
+        assert!(h.painted_at("This theme cannot be made: ask for something else.").is_some(), "{}", h.painted_texts());
+        assert_eq!(names_claude(&h), None);
     }
 
     #[test]

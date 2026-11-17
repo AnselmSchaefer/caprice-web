@@ -90,7 +90,7 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `motion.rs` | Scenes that move a little: the parts Claude marks by id (drift, wing, sway, smoke, flicker, shimmer), rendered apart from the still picture and moved every frame; and the kinds a theme of one's own may use besides (float, twinkle, pulse, wander, spin, and areas of snow, rain, fireflies, leaves, bubbles or embers that Caprice fills) |
 | `own.rs` | Themes of the writer's own (R35): one SVG drawing read into its desk, pieces and carrier (`Pack`), checked on import with the reasons in plain words (`check`), its palette taken from its picture (`palette_of`); the shelf of them in the data folder (`Shelf`); importing and exporting drawings (never a program), deleting, the template, the guide and the import's report (`Workshop`) |
 | `bundle.rs` | A theme that is a program as it travels (R36): a `.caprice-theme`, a zip of `manifest.json` (name, words, author, palette, the world, the toolchain), `theme.wasm`, `theme.rs` and `preview.png`; read and checked with the reasons in words (`open`; a file with a source and no module, or a source alone, `from_source`, to be built), written (`write`), the same bytes for the same parts; never a file a writer picks or saves |
-| `making.rs` | Making a theme with Claude (R36): the "Make a theme with Claude" window; the request to `/api/theme-program`, the source built in the tab, checked and pictured, the compiler's words and a program that will not play sent back to Claude unseen, its pictures shown to Claude once, the last version that worked kept until the writer keeps it or asks for a change |
+| `making.rs` | Making a theme with Claude (R36): the "Make a theme" window, its steps, time and lost connections told the writer without naming Claude; the request to `/api/theme-program`, the source built in the tab, checked and pictured, the compiler's words and a program that will not play sent back to Claude unseen, its pictures shown to Claude once, the last version that worked kept until the writer keeps it or asks for a change |
 | `gallery.rs` | The gallery of theme programs (R33, R36): the Gallery window (New, Sent by you, and for the owner Waiting), each theme's picture, "Use" checking the gallery's signature before the shelf keeps it; sending a theme made with Claude; the owner's look, built again the same in the tab and played, and their decision |
 | `cast.rs` | The cast: people found by name in what is painted, their looks and model sheets in the scene's prompt; the Cast window and its example |
 | `start.rs` | The welcome page when Caprice opens without a file: kinds of new story (`Kind`), the stories last opened with what they hold, the sheet flying to the desk; the list of stories last opened, kept in the data folder |
@@ -2031,6 +2031,16 @@ ask Claude anything else** (`/api/theme-program`, `web/api/theme.js`, R36, the p
   (`medium` in `wrangler.jsonc`, measured to fit `THEME_TOKENS`; `high` unless set); a model's refusal goes on with the platform's fallback
   (`server-side-fallback-2026-07-01`, `fallbacks: "default"`). Not streamed, as a scene is not.
   `THEMES_OFF = "1"` stops it; without a key there is none.
+- **A round not answered within a beat is kept alive** (`keptAlive`, `BEAT_MS` 15 s,
+  `THEME_BEAT_MS` in tests): answered at once with 200, a space sent every beat while Claude writes,
+  then the one JSON object (JSON may begin with spaces): the theme, or what went wrong as
+  `{ error, message, retry }`, since the status was sent before it was known. A round answered
+  within the beat keeps its status. The window counts the spaces as word that it is still at work
+  (`making::LOST`: a minute without one is a connection lost), so **a change to the beat changes
+  `QUIET` and `LOST` in `making.rs` too**. The answer is `Cache-Control: no-store, no-transform`
+  and `text/event-stream`, which `worker.js`'s `guarded` keeps, so Cloudflare does not hold the
+  spaces back to compress them. **What a writer may read** (the messages here and the Ledger's
+  `themeRound`) never names Claude: it says what happened and what to do.
 
 Tests: "a theme is begun from the writer's words, and only its source and palette come back", "the
 next round tells claude the compiler's words, with the whole conversation kept by the worker",
@@ -2038,7 +2048,8 @@ next round tells claude the compiler's words, with the whole conversation kept b
 of its kinds, too big, or not pictures is refused before claude is asked", "rounds of each kind run
 out for a theme, and themes for a writer, and claude is not asked again", "the site's rounds for the
 day run out for everyone, and a round that fails still counts", "without a key, or switched off, no
-theme is made".
+theme is made", "a round that takes longer than a beat is answered at once, a space every beat, then
+the theme or why not".
 
 The gallery of theme programs (`web/api/gallery.js`, R36, the plan's step 6) is for writers signed in:
 
@@ -2592,8 +2603,8 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   deploy and this machine pack the same toolchain, the same id. `web/build.sh` fails if it cannot
   pack it (`CAPRICE_TOOLCHAIN=0` leaves it out; `smoke.mjs` then skips the build, saying so).
 - **A theme made with Claude reaches the writer only once it works** (`making.rs`, the plan's step
-  5; the server's side is R33's `/api/theme-program`). The window ("Make one with Claude…" in
-  Yours, for a writer signed in, saying the words go to Claude) starts the compiler first, so a
+  5; the server's side is R33's `/api/theme-program`). The window ("Have one made…" in
+  Yours, for a writer signed in, saying the words go to an AI model by Anthropic) starts the compiler first, so a
   browser that cannot build says so before Claude is asked, and the toolchain loads while Claude
   writes. Each answer (only a source and a palette) is built, checked (`eggs::program::check`) and
   played off screen (`eggs::preview`); what goes wrong (the compiler's words, a program Caprice will
@@ -2612,6 +2623,23 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   `a_theme_is_made_only_for_a_writer_signed_in_and_what_the_server_says_is_shown` (the stand-in
   server answers the rounds, `Online::theme_answers`); in the browser `smoke.mjs` makes one with a
   stand-in Claude, built in the tab.
+- **The writer is told how far a theme is, and never of Claude** (`making.rs`, the owner's call,
+  2026-11-17). Rounds take minutes, so the window says how long a theme takes (`UP_TO_MINUTES`),
+  counts its steps (`Making::step`: getting ready, writing, building, trying, and for each look at
+  the pictures writing, building and trying again: 7 for a theme begun, 4 for a change), never
+  going back (a mistake put right stays at the step it was found in), and shows the time so far.
+  The bar moves within a round of writing by `TYPICAL_ROUND`, never past most of its step. A
+  round is sent with `Server::send_long`, which hears the server's spaces (R33's `keptAlive`; in
+  the browser `api_send` reads the answer as it comes): half a minute without them is said, a
+  minute is a connection lost. **What went wrong is said plainly**: the network lost
+  (`Server::online`, the browser's `navigator.onLine`: `LOST_NETWORK`), the server out of reach
+  (`LOST_SERVER`), or the server's own words, also when it had begun answering (its status in the
+  body). **Claude is not named in what a writer reads about themes** (the window, Yours' "Made
+  for you", the gallery, the refusal of program files); `GOES_OUT` names Anthropic, where the
+  words go. Claude's own features keep its name (the Claude menu). Tests:
+  `a_theme_being_made_shows_its_steps_and_its_time_and_never_names_claude`,
+  `a_theme_being_made_says_plainly_when_the_network_or_the_server_is_lost` (the stand-in holds
+  rounds with `Online::writing`, `beat` and `written`).
 - **A theme is pictured by playing it off screen** (`eggs/preview.rs`): through the same
   `platform::Program` and `program::read` as on the desk, told a short story at ten frames a second
   (begun; three chapters written, shown afresh; the fourth begun, the third finishing; a title

@@ -40,6 +40,11 @@ pub const BACKUP_OFF: &str = "Your stories are saved in this browser, and you ca
 /// Where requests go: the page's own server in the browser, a stand-in in tests.
 pub trait Server {
     fn send(&self, request: Request, tx: Sender<Answer>, wake: Waker);
+    /// As `send`, for an answer that takes minutes: `heard` is told each time the server says it is
+    /// still at it (a round of making a theme, R36).
+    fn send_long(&self, request: Request, tx: Sender<Answer>, heard: Sender<()>, wake: Waker);
+    /// Whether this device has a network at all (the browser's `navigator.onLine`).
+    fn online(&self) -> bool;
     /// Leave the page for a path on the server: signing in, which comes back to the page.
     fn go_to(&self, path: &str);
     /// Into a story's room, where the devices it is open on meet (R34).
@@ -53,6 +58,14 @@ struct Page;
 impl Server for Page {
     fn send(&self, request: Request, tx: Sender<Answer>, wake: Waker) {
         crate::platform::send(request, tx, wake);
+    }
+
+    fn send_long(&self, request: Request, tx: Sender<Answer>, heard: Sender<()>, wake: Waker) {
+        crate::platform::send_long(request, tx, heard, wake);
+    }
+
+    fn online(&self) -> bool {
+        crate::platform::online()
     }
 
     fn go_to(&self, path: &str) {
@@ -1292,7 +1305,8 @@ pub mod stand_in {
         pub went_to: Vec<String>,
         /// An answer to give every story request instead: its status, Retry-After, and what it says.
         pub refuse: Option<(u16, u32, String)>,
-        /// No network: every request goes unanswered (status 0), as the page's `send` gives it.
+        /// No network: every request goes unanswered (status 0), as the page's `send` gives it, and
+        /// the browser says it is offline (`online`).
         pub offline: bool,
         /// The stories' rooms, as `web/api/room.js` keeps them (R34), and whether they can be
         /// reached (no: a socket closes as soon as it opens, as with no network).
@@ -1315,9 +1329,13 @@ pub mod stand_in {
         pub slow: bool,
         held: Vec<(Request, Sender<Answer>)>,
         /// Claude's answers to the rounds of a theme being made (`/api/theme-program`), in turn;
-        /// with none left, Claude is busy.
+        /// with none left, too many themes are being made.
         pub theme_answers: VecDeque<Answer>,
         pub theme_rounds: Vec<Round>,
+        /// Claude still writing: rounds of a theme wait, each with whom to tell that the server
+        /// is still at it, until `beat` tells them or `written` answers them.
+        pub writing: bool,
+        writing_held: Vec<(Request, Sender<Answer>, Sender<()>)>,
         versions: u32,
         /// Whether the one signed in is the site's owner (`GALLERY_OWNERS`), who looks at the
         /// themes sent to the gallery; and the themes sent, as `web/api/gallery.js` keeps them.
@@ -1384,6 +1402,22 @@ pub mod stand_in {
             }
         }
 
+        /// The server says of every round still being written that it is still at it.
+        pub fn beat(&self) {
+            for (_, _, heard) in &self.0.borrow().writing_held {
+                let _ = heard.send(());
+            }
+        }
+
+        /// Claude has written: the rounds that waited are answered.
+        pub fn written(&self) {
+            self.0.borrow_mut().writing = false;
+            let held = std::mem::take(&mut self.0.borrow_mut().writing_held);
+            for (request, tx, _) in held {
+                let _ = tx.send(self.answer(request));
+            }
+        }
+
         /// Another browser deletes a story online.
         pub fn delete(&self, key: &str) {
             let mut o = self.0.borrow_mut();
@@ -1434,7 +1468,7 @@ pub mod stand_in {
                 let kind = header("X-Caprice-Kind");
                 let others = r.headers.iter().filter(|(n, _)| *n != "X-Caprice-Kind").map(|(n, v)| ((*n).to_owned(), v.clone())).collect();
                 o.theme_rounds.push((r.path.clone(), kind, r.body.clone().unwrap_or_default(), others));
-                return o.theme_answers.pop_front().unwrap_or(Answer { status: 503, headers: Vec::new(), body: b"Claude is busy: try again in a minute".to_vec() });
+                return o.theme_answers.pop_front().unwrap_or(Answer { status: 503, headers: Vec::new(), body: b"Many themes are being made just now: try again in a few minutes".to_vec() });
             }
             if let Some(story) = r.path.strip_prefix("/api/scenes?story=") {
                 let waiting: Vec<_> = o.kept.iter().filter(|k| k.1 == story).map(|k| serde_json::json!({ "id": k.0, "at": k.2, "svg": k.3 })).collect();
@@ -1575,6 +1609,18 @@ pub mod stand_in {
             }
             let _ = tx.send(self.answer(request));
             wake.wake();
+        }
+
+        fn send_long(&self, request: Request, tx: Sender<Answer>, heard: Sender<()>, wake: Waker) {
+            if self.0.borrow().writing {
+                self.0.borrow_mut().writing_held.push((request, tx, heard));
+                return;
+            }
+            self.send(request, tx, wake);
+        }
+
+        fn online(&self) -> bool {
+            !self.0.borrow().offline
         }
 
         fn go_to(&self, path: &str) {

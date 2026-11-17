@@ -549,7 +549,7 @@ impl App {
             .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0)).show(ctx, |ui| {
             ui.set_max_width(wide);
             if !signed_in {
-                ui.label("Themes made with Claude by writers using Caprice, looked at by Caprice before they show here. The gallery is for writers signed in.");
+                ui.label("Themes made in Caprice for writers using it, looked at by Caprice before they show here. The gallery is for writers signed in.");
                 if ui.button("Sign in\u{2026}").clicked() {
                     act = Some(GalleryAct::SignIn);
                 }
@@ -578,7 +578,7 @@ impl App {
                             ui.label("Looking in the gallery\u{2026}");
                         });
                     } else if g.themes.is_empty() {
-                        ui.label(egui::RichText::new("Nothing in the gallery yet. Make a theme with Claude in Yours, and send it here.").color(pal().text_dim));
+                        ui.label(egui::RichText::new("Nothing in the gallery yet. Have a theme made in Yours, and send it here.").color(pal().text_dim));
                     }
                     if g.taking.is_some() {
                         ui.horizontal(|ui| {

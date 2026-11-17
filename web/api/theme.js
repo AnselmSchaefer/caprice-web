@@ -121,16 +121,52 @@ export async function themeProgram(request, env, user, id) {
   const ledger = env.LEDGER.get(env.LEDGER.idFromName("ledger"));
   const round = await ledger.themeRound(user, id ?? null, kind);
   if (!round.ok) return refused(round);
-  let answered = null;
-  try {
-    const messages = [...round.turns.map(t => ({ role: t.role, content: t.text })), { role: "user", content }];
-    const written = await write(messages, env, l.THEME_TOKENS);
-    if (written.error) return text(written.error, written.message, written.retry ? { "Retry-After": String(written.retry) } : {});
-    answered = { asked: kept, answer: written.reply };
-    return Response.json({ theme: round.id, ...written.theme, left: round.left });
-  } finally {
-    await ledger.themeAnswered(user, round.id, answered);
-  }
+  const answer = (async () => {
+    let answered = null;
+    try {
+      const messages = [...round.turns.map(t => ({ role: t.role, content: t.text })), { role: "user", content }];
+      const written = await write(messages, env, l.THEME_TOKENS);
+      if (written.error) return written;
+      answered = { asked: kept, answer: written.reply };
+      return { theme: { theme: round.id, ...written.theme, left: round.left } };
+    } catch (e) {
+      console.error("theme: the round failed", String(e).slice(0, 200));
+      return { error: 502, message: "Something went wrong while the theme was written: try again" };
+    } finally {
+      await ledger.themeAnswered(user, round.id, answered);
+    }
+  })();
+  return keptAlive(answer, Number(env.THEME_BEAT_MS) || BEAT_MS);
+}
+
+// A beat, in milliseconds: how often a round still being written says so.
+const BEAT_MS = 15000;
+
+// A round takes minutes, and for all of them the writer's browser would hear nothing: it could not
+// tell a theme still being written from a connection lost, and a quiet connection may be dropped
+// on the way. So a round not answered within a beat is answered at once, and a space is sent every
+// beat until the theme comes (the window counts a minute without one as the connection lost). JSON
+// may begin with spaces, so the body is still one object: the theme, or what went wrong as
+// `{ error, message, retry }`, since its status was sent before it was known. A round answered
+// within the beat is answered as before, its status saying what went wrong. Sending spaces costs
+// the Worker next to nothing of its 10 ms; `no-transform` and the type keep Cloudflare from holding
+// them back to compress them.
+async function keptAlive(answer, beat) {
+  const first = await Promise.race([answer, new Promise(done => setTimeout(() => done(null), beat))]);
+  if (first) return first.theme ? Response.json(first.theme) : refused(first);
+  const { readable, writable } = new TransformStream();
+  const out = writable.getWriter();
+  const space = new TextEncoder().encode(" ");
+  const sent = () => out.write(space).catch(() => {});
+  sent();
+  const beating = setInterval(sent, beat);
+  answer.then(async a => {
+    clearInterval(beating);
+    const last = a.theme ?? { error: a.error, message: a.message, ...(a.retry ? { retry: a.retry } : {}) };
+    await out.write(new TextEncoder().encode(JSON.stringify(last)));
+    await out.close();
+  }).catch(() => clearInterval(beating));
+  return new Response(readable, { status: 200, headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store, no-transform" } });
 }
 
 // Claude's answer in one piece, not streamed, as a scene is (worker.js, `paint`): waiting costs the
@@ -157,14 +193,14 @@ async function write(messages, env, most) {
     console.error("theme: Claude answered", sent.status, said.slice(0, 200));
     if (sent.status === 402 || /credit balance/i.test(said)) return { error: 503, message: "Making themes is paused for now", retry: 3600 };
     return [429, 529].includes(sent.status)
-      ? { error: 503, message: "Claude is busy: try again in a minute" }
-      : { error: 502, message: "Claude could not be asked" };
+      ? { error: 503, message: "Many themes are being made just now: try again in a few minutes" }
+      : { error: 502, message: "The theme could not be begun just now: try again later" };
   }
   const message = await sent.json();
-  if (message.stop_reason === "refusal") return { error: 422, message: "Claude declined to write this theme" };
+  if (message.stop_reason === "refusal") return { error: 422, message: "This theme cannot be made: ask for something else" };
   const reply = (message.content ?? []).filter(b => b.type === "text").map(b => b.text).join("");
   const theme = read(reply);
-  if (!theme) return { error: 502, message: message.stop_reason === "max_tokens" ? "The theme grew too long to finish" : "Claude's reply held no theme" };
+  if (!theme) return { error: 502, message: message.stop_reason === "max_tokens" ? "The theme grew too long to finish: ask for something simpler" : "Something went wrong while the theme was written: try again" };
   return { theme, reply };
 }
 
