@@ -171,6 +171,13 @@ async function keptAlive(answer, beat) {
 
 // Claude's answer in one piece, not streamed, as a scene is (worker.js, `paint`): waiting costs the
 // Worker none of its 10 ms. Thinking is adaptive; the prompt is cached, and the conversation too.
+// For an hour, not the usual five minutes: a round takes seven or more, and the five are counted
+// from when it was asked, so the next round would always find the cache gone and write it again.
+// Writing it for an hour costs more once (twice the input's price instead of 1.25 times), and is
+// paid back by the next round. The prompt is the same for every writer, so any theme begun within
+// the hour reads it too; the conversation only that theme's next rounds.
+const CACHED = { type: "ephemeral", ttl: "1h" };
+
 async function write(messages, env, most) {
   const sent = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -181,9 +188,9 @@ async function write(messages, env, most) {
     },
     body: JSON.stringify({
       model: WRITER, max_tokens: most,
-      system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }],
+      system: [{ type: "text", text: SYSTEM, cache_control: CACHED }],
       output_config: { effort: env.THEME_EFFORT || "high" },
-      cache_control: { type: "ephemeral" },
+      cache_control: CACHED,
       fallbacks: "default",
       messages,
     }),
@@ -197,6 +204,10 @@ async function write(messages, env, most) {
       : { error: 502, message: "The theme could not be begun just now: try again later" };
   }
   const message = await sent.json();
+  // What the round cost, for `wrangler tail`: whether the cache was read or written again.
+  const u = message.usage ?? {};
+  const spent = { input: u.input_tokens, written: u.cache_creation_input_tokens, read: u.cache_read_input_tokens, output: u.output_tokens };
+  console.log("theme: a round", JSON.stringify(spent));
   if (message.stop_reason === "refusal") return { error: 422, message: "This theme cannot be made: ask for something else" };
   const reply = (message.content ?? []).filter(b => b.type === "text").map(b => b.text).join("");
   const theme = read(reply);

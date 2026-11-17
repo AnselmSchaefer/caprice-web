@@ -1034,7 +1034,8 @@ test("a theme is begun from the writer's words, and only its source and palette 
   for (const part of ["# Writing a magic theme for Caprice", "pub trait Theme", "package caprice:theme", "The Magic Snow, as a theme program", "theme!(Fireflies)"]) {
     assert.ok(system.includes(part), `the prompt holds ${part}`);
   }
-  assert.deepEqual(body.system.at(-1).cache_control, { type: "ephemeral" }, "and is cached");
+  assert.deepEqual(body.system.at(-1).cache_control, { type: "ephemeral", ttl: "1h" }, "and is cached for longer than a round takes");
+  assert.deepEqual(body.cache_control, { type: "ephemeral", ttl: "1h" }, "the conversation too");
   assert.deepEqual(body.messages, [{ role: "user", content: "<request>\nA lighthouse on a cliff, a window lit for each page\n</request>\n\nWrite this theme. Answer as the guide says: the palette's json block, then the whole rust file." }]);
 });
 
