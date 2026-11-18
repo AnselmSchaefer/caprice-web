@@ -1606,7 +1606,9 @@ impl App {
             let mut open = true;
             let mut close = false;
             let title = if report.added { "Theme added" } else { "Theme not added" };
+            let mut closed = false;
             egui::Window::new(title).id(egui::Id::new("theme_report")).open(&mut open).collapsible(false).resizable(false).default_width(420.0).anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0)).show(ctx, |ui| {
+                closed = crate::ui::finger_close(ui, egui::Id::new("theme_report"));
                 ui.set_max_width(440.0);
                 ui.label(egui::RichText::new(&report.name).strong().size(16.0));
                 if report.added {
@@ -1649,13 +1651,16 @@ impl App {
                     }
                 });
             });
+            open &= !closed;
             if !open || close {
                 self.workshop.report = None;
             }
         }
         if self.workshop.guide {
             let mut open = true;
+            let mut closed = false;
             egui::Window::new("Make a theme of your own").id(egui::Id::new("theme_guide")).open(&mut open).collapsible(false).default_width(480.0).show(ctx, |ui| {
+                closed = crate::ui::finger_close(ui, egui::Id::new("theme_guide"));
                 ui.set_max_width(500.0);
                 egui::ScrollArea::vertical().max_height(460.0).show(ui, guide);
                 ui.separator();
@@ -1668,6 +1673,7 @@ impl App {
                     }
                 });
             });
+            open &= !closed;
             self.workshop.guide &= open;
         }
         if let Some(id) = self.workshop.deleting.clone() {

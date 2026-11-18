@@ -1126,6 +1126,7 @@ impl App {
         let mut sign_in = None;
         let (mut sign_out, mut delete) = (false, false);
         let cloud = &mut self.cloud;
+        let mut closed = false;
         egui::Window::new("Stories online")
             .id(Id::new("cloud"))
             .open(&mut open)
@@ -1134,6 +1135,7 @@ impl App {
             .resizable(false)
             .collapsible(false)
             .show(ctx, |ui| {
+                closed = crate::ui::finger_close(ui, Id::new("cloud"));
                 match &cloud.who {
                     Some(who) => {
                         let by = if who.provider == "github" { "GitHub" } else { "Google" };
@@ -1215,6 +1217,7 @@ impl App {
                     }
                 }
             });
+        open &= !closed;
         if !open {
             self.cloud.open = false;
             self.cloud.confirm_delete = false;

@@ -203,6 +203,7 @@ impl App {
         let screen = ctx.content_rect();
         let saved_at = self.path.as_ref().and_then(fs::modified);
         let kept: Vec<u64> = self.keep.dir.as_ref().map_or(Vec::new(), |d| crate::versions::times_kept(&d.join(&self.story_id)));
+        let mut closed = false;
         egui::Window::new("Document info")
             .id(egui::Id::new("document_info"))
             .open(&mut open)
@@ -210,6 +211,7 @@ impl App {
             .resizable(false)
             .collapsible(false)
             .show(ctx, |ui| {
+                closed = crate::ui::finger_close(ui, egui::Id::new("document_info"));
                 let row = |ui: &mut egui::Ui, what: &str, value: String| {
                     ui.label(egui::RichText::new(what).color(pal().text_dim));
                     ui.label(value);
@@ -282,6 +284,7 @@ impl App {
                     ui.add(egui::ProgressBar::new(done).fill(reached).desired_height(6.0));
                 }
             });
+        open &= !closed;
         self.words.open = open;
         if goal != self.words.progress.goal {
             self.words.progress.goal = goal;

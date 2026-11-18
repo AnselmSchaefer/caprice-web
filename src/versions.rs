@@ -444,6 +444,7 @@ impl App {
         let mut open = true;
         let mut chosen: Option<Kept> = None;
         let screen = ctx.content_rect();
+        let mut closed = false;
         egui::Window::new("Versions")
             .id(Id::new("versions"))
             .open(&mut open)
@@ -452,6 +453,7 @@ impl App {
             .resizable(false)
             .collapsible(false)
             .show(ctx, |ui| {
+                closed = crate::ui::finger_close(ui, Id::new("versions"));
                 if self.keep.dir.is_none() {
                     ui.label("Versions cannot be kept: there is no folder for them.");
                     return;
@@ -473,7 +475,7 @@ impl App {
                 });
                 // Backups are out of the way: words another browser's replaced, seldom wanted.
                 if !self.keep.backups.is_empty() {
-                    let more = ui.small_button("\u{22ef}").on_hover_text("Backups: words replaced by another browser's, kept a week");
+                    let more = ui.small_button(egui::RichText::new("\u{22ef}").monospace()).on_hover_text("Backups: words replaced by another browser's, kept a week");
                     if more.clicked() {
                         self.keep.show_backups = !self.keep.show_backups;
                     }
@@ -506,6 +508,7 @@ impl App {
                 ui.add_space(2.0);
                 ui.allocate_space(vec2(ui.available_width(), 0.0));
             });
+        open &= !closed;
         self.keep.open = open;
         if let Some(k) = chosen {
             self.go_back_to(ctx, &k);

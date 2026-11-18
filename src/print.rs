@@ -271,6 +271,7 @@ impl App {
         let (mut go, mut settings, mut cancel, mut in_tab) = (false, false, false, false);
         let browser = cfg!(target_arch = "wasm32");
         let screen = ctx.content_rect();
+        let mut closed = false;
         egui::Window::new("Print")
             .id(Id::new("print"))
             .open(&mut open)
@@ -278,6 +279,7 @@ impl App {
             .resizable(false)
             .collapsible(false)
             .show(ctx, |ui| {
+                closed = crate::ui::finger_close(ui, Id::new("print"));
                 let p = &mut self.print;
                 egui::Grid::new("print_grid").num_columns(2).spacing(vec2(12.0, 10.0)).show(ui, |ui| {
                     // In the browser there is no printer to choose: its own print dialog has them.
@@ -366,6 +368,7 @@ impl App {
                     });
                 });
             });
+        open &= !closed;
         self.print.open = open && !cancel && !go && !in_tab;
         #[cfg(target_arch = "wasm32")]
         if in_tab {

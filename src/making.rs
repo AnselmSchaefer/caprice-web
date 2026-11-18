@@ -500,7 +500,9 @@ impl App {
             }
             _ => None,
         };
+        let mut closed = false;
         egui::Window::new("Make a theme").id(egui::Id::new("theme_making")).open(&mut open).collapsible(false).resizable(false).default_width(480.0).anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0)).show(ctx, |ui| {
+            closed = crate::ui::finger_close(ui, egui::Id::new("theme_making"));
             ui.set_max_width(500.0);
             match &m.step {
                 Step::Writing => {
@@ -587,6 +589,7 @@ impl App {
                 }
             }
         });
+        open &= !closed;
         self.making.open &= open;
         // The clock and the bar move on while it works.
         if self.making.busy() {
