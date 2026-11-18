@@ -4,7 +4,7 @@ How Caprice is put together, and the rules that hold it together. The rules (§4
 read before changing anything: each says what depends on what, what to check when touching it, and
 which tests guard it. Keep this file true: a change that alters a rule updates it in the same commit.
 
-*Last brought up to date: 2026-11-03 (on a phone: fitting the width, following the caret, one finger, R32).*
+*Last brought up to date: 2026-11-18 (a phone on its side: its docks, the width filled, the docks away while writing, R32).*
 
 ---
 
@@ -626,8 +626,8 @@ scratchpad's text is the document's (`Doc::scratchpad`, saved, R9); whether it s
   reach every menu; `Harness::width` narrows it. A new tool that makes them too wide shows as a
   test failing to find a menu of the last group ("Scene"). A new toggle goes in the page bar (like Fit and Scratchpad)
   or into a menu.
-- **On a phone the docks are laid out for a finger (`ui::phone`: narrower than `view::NARROW`,
-  where the page fills the width too).** The toolbar holds File, Undo and Redo (`history_tools`:
+- **On a phone the docks are laid out for a finger (`App::holding`, from `ui::held`: `Upright`, narrower
+  than `view::NARROW`, or `Sideways`; the page fills the width in both).** The toolbar holds File, Undo and Redo (`history_tools`:
   a phone has no keys for them), the name in the middle of the dock and "⋯" at its right end; all
   the other groups are in the second row, so the row has no room left empty after "⋯". The page
   bar lying down holds the page count ("2 / 9", with room for the widest it can be, so nothing
@@ -640,6 +640,15 @@ scratchpad's text is the document's (`Doc::scratchpad`, saved, R9); whether it s
   (`phone_strip`, sliding sideways when too short; its width measured as the toolbar's groups are);
   the keyboard put away takes them with it. They call the same tools and `apply_tools` as the
   toolbar. Something new for a phone's page bar goes into `phone_scrollbar` or `phone_strip`.
+  **On its side, while the writer writes, the docks are away** (`App::docks_away`, worked out at the
+  start of each frame, before the camera): the keyboard leaves a strip about 95 points high, less
+  than the two docks, which covered the page and each other. Only a round button at the top left
+  shows (`tools_button`, "Show the tools", on a layer of its own); it puts the keyboard away
+  (`writing` to `None`), which brings the docks back, and a tap on the page puts them away again.
+  `view_area` is then the whole window, and `tools_bottom` its top. Not while a field in a window
+  has the keys (the search, opened from the toolbar). Anything new drawn in a dock goes away with
+  it there; something that must stay in reach while writing on a phone's side goes in "⋯" or by
+  the round button. `on_a_phone_on_its_side_the_page_fills_the_width_and_the_docks_go_away_while_writing`.
   Guarded by `on_a_phone_the_toolbar_holds_file_undo_and_redo_with_the_name_in_the_middle_and_the_rest_under_more`,
   `on_a_phone_the_page_bar_holds_the_count_the_track_and_small_buttons_with_no_room_left_empty`,
   `on_a_phone_while_writing_the_page_bar_holds_the_formatting_over_the_keyboard`, and at every
@@ -1753,11 +1762,18 @@ The native tests cover the desktop half.
 `page_rect` is the camera. In a view narrower than `view::NARROW` (a phone held upright), the whole
 page would be too small to read (about half size), so fitting fills the width with it, without
 the room for post-its, and the page scrolls up and down while it stays fitted; `centered` keeps its
-top no lower than the view's top and its foot no higher than the view's foot. Wider views fit the
-whole page, centred, as always.
+top no lower than the view's top and its foot no higher than the view's foot. On a phone on its
+side (`ui::Held::Sideways`) the whole page was a third of its size: it fills the width too, but no
+larger than `view::SIDEWAYS_MOST` (100%), as larger fewer lines showed over the keyboard and they
+grew too long. Wider views fit the whole page, centred, as always.
 
 - **Narrow is the width alone**, never "taller than wide": a phone's keyboard takes half the height,
   and the page shrank to the whole-page fit when it came up.
+- **A phone is known by its screen, not its window** (`ui::held`): a window at least `NARROW` wide
+  is a phone on its side when the screen's short side (`platform::screen_short_side`: the
+  browser's `screen`, the desktop's monitor) is under `NARROW`. The screen does not change as the
+  keyboard comes up or the phone turns round; a tablet's is wider, and lays out as a desk. Tests
+  give a phone's screen with `Harness::monitor`.
 - **Zooming out stops at half the fitting zoom** (`view::LEAST`, not below `MIN_ZOOM`), and a
   window grown while zoomed out brings the zoom up to it. The magic themes that zoom with the page
   (R30: the snow, the vineyard) come no further than that; below it the page shrank alone over a
@@ -1833,7 +1849,8 @@ whole page, centred, as always.
 - Headless Chromium cannot show this at a phone's pixel ratio: its emulation leaves
   `devicePixelContentBoxSize` in CSS pixels, so eframe draws everything 2.6 times too big. Look at
   phone layouts at ratio 1 (412×839): egui lays out by points, so that is what a phone shows.
-- Tests: `on_a_phone_the_page_fills_the_width_scrolls_and_keeps_the_caret_in_sight` (fitted width,
+- Tests: `on_a_phone_on_its_side_the_page_fills_the_width_and_the_docks_go_away_while_writing`,
+  `on_a_phone_the_page_fills_the_width_scrolls_and_keeps_the_caret_in_sight` (fitted width,
   the top first, the caret followed down the page and above a keyboard, two fingers panning),
   `on_a_phone_the_keyboard_stays_up_while_a_new_page_comes_in_and_a_menu_is_open`,
   `on_a_touch_screen_the_keyboard_comes_with_a_tap_on_the_page_and_stays_away_once_put_away`,
@@ -3193,5 +3210,11 @@ result sent back, a stand-in answer in `api.test.mjs` and in `cloud::stand_in` (
   the keyboard's state and the second row were all there already. So under `view::NARROW` the
   toolbar is File, Undo, Redo, the name and "⋯"; the page bar is the count, the track and small
   buttons, and the formatting while writing, over the keyboard, where the thumbs are.
+- **2026-11-18 — A phone on its side puts the docks away while the writer writes.** In Chrome on
+  Android the keyboard left Caprice a strip of about 95 points, less than the two docks: no text
+  showed. One bar over the keyboard still left two lines. So the docks go, a round button at the
+  top left brings them back by putting the keyboard away, and the formatting is one tap further
+  than upright. The page fills the width up to 100%. Fullscreen, which gives back the browser's
+  own bars, is the next step, apart: it rests on what the browser allows, and is checked on a phone.
 - **No `.docx` import.** Export only.
 - **Contents heading is "Contents"** (English), in the app and in Word.

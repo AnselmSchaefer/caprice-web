@@ -316,9 +316,9 @@ const keptAndOpened = async (files, wait) => {
 // Beside the page, low on the desk.
 const beside = () => page.screenshot({ clip: { x: 20, y: 560, width: 220, height: 200 } });
 // The screen's pixel, from a screenshot of it: a WebGL canvas cannot be read back.
-const pixelAt = async (x, y) => {
-  const shot = (await page.screenshot({ clip: { x, y, width: 1, height: 1 } })).toString("base64");
-  return page.evaluate(async png => {
+const pixelAt = async (x, y, on = page) => {
+  const shot = (await on.screenshot({ clip: { x, y, width: 1, height: 1 } })).toString("base64");
+  return on.evaluate(async png => {
     const img = new Image();
     img.src = `data:image/png;base64,${png}`;
     await img.decode();
@@ -530,6 +530,27 @@ await old.goto(url);
 const renewed = await old.waitForSelector("#loading", { state: "detached", timeout: 120000 }).then(() => true, () => false);
 check("an old copy of a file failing its integrity is fetched afresh, and Caprice opens", renewed, `served ${served} times`);
 await old.close();
+
+// A phone on its side (R32): its screen's short side under 600, the window wide. While the writer
+// writes, the keyboard leaves a strip and the docks are away: the page shows where the toolbar was.
+const sidewaysContext = await browser.newContext({ viewport: { width: 830, height: 340 }, screen: { width: 915, height: 412 }, hasTouch: true });
+const sideways = await sidewaysContext.newPage();
+sideways.on("pageerror", e => errors.push(e.message.split("\n")[0]));
+await sideways.goto(url);
+await started(sideways);
+await click(130, 320, sideways);
+await sideways.waitForTimeout(2500);
+const bright = ([r, g, b]) => r > 220 && g > 220 && b > 220;
+const toolbarBefore = await pixelAt(415, 38, sideways);
+await sideways.touchscreen.tap(415, 200);
+await sideways.waitForTimeout(800);
+await sideways.keyboard.type("It was a dark and stormy night.");
+await sideways.setViewportSize({ width: 830, height: 150 });
+await sideways.waitForTimeout(1500);
+const toolbarAfter = await pixelAt(415, 38, sideways);
+await sideways.screenshot({ path: `${out}/13-sideways-writing.png` });
+check("a phone on its side puts the docks away while writing", !bright(toolbarBefore) && bright(toolbarAfter), `${toolbarBefore} then ${toolbarAfter}`);
+await sidewaysContext.close();
 
 // When it cannot open, the page says why instead of "opening" for good: a phone has no console.
 const broken = await browser.newPage({ viewport: { width: 412, height: 839 } });

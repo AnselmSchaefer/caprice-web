@@ -3,7 +3,7 @@
 use eframe::egui::{self, Id, Key, Modifiers, Rect, Sense, Vec2, pos2, vec2};
 
 use crate::App;
-use crate::ui::{BarSide, DOCK_GAP, RESERVED};
+use crate::ui::{BarSide, DOCK_GAP, Held, RESERVED};
 
 pub const MIN_ZOOM: f32 = 0.3;
 pub const MAX_ZOOM: f32 = 4.0;
@@ -17,6 +17,9 @@ const SWIPE_PAGE: f32 = 50.0;
 /// the width with it instead, and it scrolls up and down. Not "taller than wide": a phone's
 /// keyboard takes half the height, and the page must not shrink when it comes up.
 pub const NARROW: f32 = 600.0;
+/// The most a page is fitted at on a phone on its side, where it fills the width up to it: as on a
+/// computer at 100%. Larger, fewer lines show above the keyboard, and they grow too long to read.
+pub const SIDEWAYS_MOST: f32 = 1.0;
 /// Room kept between the caret and the top or bottom of the view, when the view follows it.
 const CARET_ROOM: f32 = 24.0;
 
@@ -31,8 +34,12 @@ pub fn fit(view: Rect, size: Vec2) -> f32 {
 }
 
 impl App {
-    /// The area between the docks: under the toolbar, and above the page bar or beside it.
+    /// The area between the docks: under the toolbar, and above the page bar or beside it. While
+    /// they are away, all of the window: the tools' round button stands beside the text.
     fn view_area(&self, area: Rect) -> Rect {
+        if self.docks_away {
+            return area;
+        }
         let mut view = Rect::from_min_max(pos2(area.left(), area.top() + RESERVED), pos2(area.right(), area.bottom() - RESERVED));
         match self.bar.side {
             BarSide::Bottom => {}
@@ -143,14 +150,21 @@ impl App {
 
     /// Pinch / Ctrl+scroll to zoom around the pointer, two-finger scroll up and down to pan. Returns the page rectangle.
     /// The zoom at which the page fits the view in `area`, as "Fit" shows it.
+    /// On a phone on its side, the whole page would be too small to read (a third of its size): it
+    /// fills the width, as upright, but no larger than `SIDEWAYS_MOST`.
     pub fn fitting_zoom(&self, area: Rect) -> f32 {
-        fit(self.view_area(area), self.doc.setup.size())
+        let (view, size) = (self.view_area(area), self.doc.setup.size());
+        if self.holding == Held::Sideways {
+            ((view.width() - 16.0) / size.x).clamp(MIN_ZOOM, SIDEWAYS_MOST)
+        } else {
+            fit(view, size)
+        }
     }
 
     pub fn page_rect(&mut self, ctx: &egui::Context, area: Rect) -> Rect {
         let view = self.view_area(area);
         let size = self.doc.setup.size();
-        let narrow = view.width() < NARROW;
+        let narrow = view.width() < NARROW || self.holding == Held::Sideways;
         let fit = self.fitting_zoom(area);
         // Fitted, the page is in the middle; on a phone, only across: up and down it stays where it
         // was scrolled to, its top no lower than the view's and its foot no higher.
