@@ -1248,7 +1248,10 @@ test("a theme sent to the gallery is checked by the worker and waits for the own
 });
 
 test("what is not a theme the gallery can build and play is refused before anything is kept", async t => {
-  const mf = await start(t, GALLERY);
+  // A limit of 200 kB, above the themes sent here: a body over 3 MB, refused by its length before
+  // it was all sent, sometimes broke the connection under it (EPIPE) instead of being answered.
+  const most = 200_000;
+  const mf = await start(t, { ...GALLERY, GALLERY_FILE_BYTES: String(most) });
   const ada = await writer(mf, "1", "Ada");
   const refusedFor = async (parts, said) => {
     const got = await send(ada, Buffer.isBuffer(parts) ? parts : zipped(parts));
@@ -1271,7 +1274,7 @@ test("what is not a theme the gallery can build and play is refused before anyth
   assert.deepEqual(await inR2(mf), [], "nothing kept");
   assert.deepEqual((await (await ada("/api/gallery/mine")).json()).themes, []);
 
-  const big = await ada("/api/gallery", { method: "POST", body: Buffer.alloc(3_000_001) });
+  const big = await ada("/api/gallery", { method: "POST", body: Buffer.alloc(most + 1) });
   assert.equal(big.status, 413);
 });
 
