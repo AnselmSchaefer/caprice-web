@@ -626,7 +626,25 @@ scratchpad's text is the document's (`Doc::scratchpad`, saved, R9); whether it s
   reach every menu; `Harness::width` narrows it. A new tool that makes them too wide shows as a
   test failing to find a menu of the last group ("Scene"). A new toggle goes in the page bar (like Fit and Scratchpad)
   or into a menu.
-- **The document's name is always at the toolbar's right end.** The tools get the room first, but
+- **On a phone the docks are laid out for a finger (`ui::phone`: narrower than `view::NARROW`,
+  where the page fills the width too).** The toolbar holds File, Undo and Redo (`history_tools`:
+  a phone has no keys for them), the name in the middle of the dock and "⋯" at its right end; all
+  the other groups are in the second row, so the row has no room left empty after "⋯". The page
+  bar lying down holds the page count ("2 / 9", with room for the widest it can be, so nothing
+  moves as pages turn), the track, then "+", Fit and the scratchpad as a pad, and no zoom (two
+  fingers set it); short of room the track goes first, then the count, the scratchpad and "+", and
+  without the track what is left stands together in the middle (`phone_scrollbar`, its own sums).
+  While the writer writes on a touch screen (`writing_by_finger`: `writing`, kept by
+  `hold_keyboard`, and a touch screen; on a desktop typing sets `writing` too), the page bar holds
+  bold, italic, underline and the paragraph's tools instead, just above the keyboard
+  (`phone_strip`, sliding sideways when too short; its width measured as the toolbar's groups are);
+  the keyboard put away takes them with it. They call the same tools and `apply_tools` as the
+  toolbar. Something new for a phone's page bar goes into `phone_scrollbar` or `phone_strip`.
+  Guarded by `on_a_phone_the_toolbar_holds_file_undo_and_redo_with_the_name_in_the_middle_and_the_rest_under_more`,
+  `on_a_phone_the_page_bar_holds_the_count_the_track_and_small_buttons_with_no_room_left_empty`,
+  `on_a_phone_while_writing_the_page_bar_holds_the_formatting_over_the_keyboard`, and at every
+  width by the two tests below.
+- **The document's name is always at the toolbar's right end** (on a phone, between the tools and "⋯"). The tools get the room first, but
   the name keeps about four of its characters' width; when it has less than it needs it runs past
   in a loop (`NAME_SPEED`), resting with its start showing between passes (`NAME_PAUSE`); it
   repaints about 30 times a second while it moves. Guarded by
@@ -656,7 +674,7 @@ scratchpad's text is the document's (`Doc::scratchpad`, saved, R9); whether it s
   scratchpad as a drawn pad, Fit, the zoom, New page as "+", the track running down and the page
   number at the top (`standing_scrollbar`, its own sums); the track and thumb are one piece for
   both (`page_track`), and `App::last_track` is the thumb's stretch as two points, whichever way it
-  runs. A new tool in the page bar needs a place in both. The side is kept in the data folder
+  runs. A new tool in the page bar needs a place in both, and in `phone_scrollbar`. The side is kept in the data folder
   (`page_bar.json`, like the theme), and `Harness` keeps it nowhere (`BarPlace::kept_in(None)`).
   Guarded by `the_page_bar_stands_at_the_side_its_grip_is_dragged_to_and_stays_there`.
 - **The thumb counts a page sliding in only as it arrives** (`page_track`: `slide_in`, and a page
@@ -2767,8 +2785,8 @@ on the contents pages with `Harness::long_contents`.
 either row. The order of `GROUPS` is the order they go into "⋯", the last first.
 
 **A new tool in a dock:** in the toolbar, inside a group in `tool_group`, nothing in it depending on
-where the group is (R: the toolbar's groups); in the page bar, room in the sums in `scrollbar` and
-`standing_scrollbar` and a place in the order things go. `at_any_width_the_docks_settle_and_hold_their_tools_apart` then checks
+where the group is (R: the toolbar's groups); in the page bar, room in the sums in `scrollbar`,
+`standing_scrollbar` and `phone_scrollbar` and a place in the order things go. `at_any_width_the_docks_settle_and_hold_their_tools_apart` then checks
 it at every width.
 
 **A new window over the pages:** a toggle in the page bar or a menu, not the toolbar (R16); its
@@ -3168,5 +3186,12 @@ result sent back, a stand-in answer in `api.test.mjs` and in `cloud::stand_in` (
   compiler and the preview that are there already, and no token sits in a browser. The first step
   is the loop alone (send, review, sign, list, Use); votes, reports, remixes, taking a theme out
   and Claude's opinion before the owner's come after.
+- **2026-11-18 — On a phone the docks are redesigned, not replaced.** The desktop's docks,
+  shrunk, left a phone with File and "⋯" over a wide gap, a "+" between gaps below, and the
+  formatting two taps away. A phone's own kind of bar was weighed against the docks laid out
+  again: the floating docks are part of how Caprice and its themes look, and the narrow width,
+  the keyboard's state and the second row were all there already. So under `view::NARROW` the
+  toolbar is File, Undo, Redo, the name and "⋯"; the page bar is the count, the track and small
+  buttons, and the formatting while writing, over the keyboard, where the thumbs are.
 - **No `.docx` import.** Export only.
 - **Contents heading is "Contents"** (English), in the app and in Word.

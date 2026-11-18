@@ -114,6 +114,19 @@ const NAME_GAP: f32 = 16.0;
 const NAME_SPEED: f32 = 18.0;
 /// How long a name too long for its room stands still between passes, in seconds.
 const NAME_PAUSE: f32 = 3.0;
+/// Undo and Redo on a phone's toolbar, with the room before them.
+const HISTORY_W: f32 = TOOL_GAP + 30.0 + 4.0 + 30.0;
+
+/// Whether the docks are laid out for a phone held upright (narrower than `view::NARROW`, where the
+/// page fills the width too). The desktop's toolbar there held File and "⋯" with a wide gap
+/// after them, its page bar a "+" with gaps on either side, and the formatting two taps away.
+/// So on a phone the toolbar holds File, Undo and Redo, the name in the middle and "⋯" at the
+/// right end, opening every other tool; the page bar holds the page count, the track and the
+/// buttons as icons, and while the writer writes on a touch screen (the keyboard up) it holds the
+/// look of the letters and the paragraph instead, just above the keyboard.
+pub fn phone(area: Rect) -> bool {
+    area.width() < crate::view::NARROW
+}
 /// A paragraph-format change picked in the toolbar.
 #[derive(Clone, Copy)]
 enum ParaChange {
@@ -130,6 +143,8 @@ enum Icon {
     Numbers,
     Brush,
     Pad,
+    /// An arrow curving back (`false`, undo) or on (`true`, redo).
+    History(bool),
 }
 
 /// Draw an icon into a 30x30 square.
@@ -169,6 +184,22 @@ fn paint_icon(p: &egui::Painter, rect: Rect, icon: Icon, ink: Color32) {
             let x = area.center().x;
             p.line_segment([pos2(x, t), pos2(x, b - 8.5)], Stroke::new(3.0, ink));
         }
+        Icon::History(on) => {
+            // A hook: along the top, round and back underneath; the arrowhead at the top's start.
+            // Drawn for undo in a 14-point square and turned round for redo.
+            let at = |x: f32, y: f32| {
+                let x = if on { 14.0 - x } else { x };
+                pos2(area.left() + x * area.width() / 14.0, area.top() + y * area.height() / 14.0)
+            };
+            let mut hook = vec![at(1.5, 4.5)];
+            hook.extend((0..=10).map(|k| {
+                let a = -std::f32::consts::FRAC_PI_2 + std::f32::consts::PI * k as f32 / 10.0;
+                at(8.5 + 3.75 * a.cos(), 8.25 + 3.75 * a.sin())
+            }));
+            hook.push(at(4.0, 12.0));
+            p.add(egui::Shape::line(hook, stroke));
+            p.add(egui::Shape::line(vec![at(4.5, 1.5), at(1.5, 4.5), at(4.5, 7.5)], stroke));
+        }
         Icon::Pad => {
             // A pad of paper: the sheet, its binding along the top, and lines written on it.
             let sheet = area.shrink2(vec2(1.0, 0.0));
@@ -185,8 +216,8 @@ fn paint_icon(p: &egui::Painter, rect: Rect, icon: Icon, ink: Color32) {
 /// A square toolbar button with a drawn icon.
 fn icon_button(ui: &mut egui::Ui, icon: Icon, selected: bool, tip: &str) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::click());
-    let fill = if selected { pal().accent } else if resp.hovered() { pal().btn_hover } else { pal().btn };
-    let ink = if selected { pal().on_accent } else { pal().text };
+    let fill = if selected { pal().accent } else if resp.hovered() && ui.is_enabled() { pal().btn_hover } else { pal().btn };
+    let ink = if selected { pal().on_accent } else if ui.is_enabled() { pal().text } else { pal().text_dim };
     ui.painter().rect_filled(rect, 8.0, fill);
     paint_icon(ui.painter(), rect, icon, ink);
     resp.on_hover_text(tip)
@@ -541,6 +572,8 @@ struct Tools {
     insert: Option<InsertAction>,
     add_note: bool,
     find: bool,
+    /// Undo (`false`) or redo (`true`), from a phone's toolbar.
+    history: Option<bool>,
 }
 
 /// Whether group `g` has a line before it (see `tool_group`).
@@ -583,7 +616,8 @@ impl App {
     }
 
     /// The formatting dock: one row of tools in groups, the document's name at its right end. Groups
-    /// that do not fit, the last first, go into a second row that "⋯" opens under it.
+    /// that do not fit, the last first, go into a second row that "⋯" opens under it. On a phone
+    /// (`phone`) the row holds File, Undo and Redo, the name in the middle and "⋯" at the right end.
     pub fn format_bar(&mut self, ui: &mut egui::Ui, area: Rect) {
         let ctx = ui.ctx().clone();
         let rect = Self::dock_rect(area, true);
@@ -599,16 +633,20 @@ impl App {
         let w = self.tool_w;
         // A group's width with the room before it, which holds a line unless the group starts a row.
         let cost = |g: usize, first: bool| w[g] + if first { 0.0 } else { TOOL_GAP + if has_line(g) { LINE_W + TOOL_GAP } else { 0.0 } };
-        let room = inner.width() - NAME_GAP - four;
+        let phone = phone(area);
+        // On a phone the name has room on both sides, being between the tools and "⋯".
+        let room = inner.width() - NAME_GAP - four - if phone { NAME_GAP } else { 0.0 };
         let all = (0..GROUPS).map(|g| cost(g, g == 0)).sum::<f32>();
-        let shown = if all <= room + 0.5 {
+        let shown = if all <= room + 0.5 && !phone {
             GROUPS
         } else {
             let mut used = MORE_W;
-            (0..GROUPS).take_while(|&g| { used += cost(g, false); used <= room + 0.5 }).count()
+            (0..if phone { 1 } else { GROUPS }).take_while(|&g| { used += cost(g, false); used <= room + 0.5 }).count()
         };
         // With no room even for "⋯", the tools are put away until the window is wider.
         let more_fits = shown == GROUPS || MORE_W <= room + 0.5;
+        // On a phone Undo and Redo come after File, if there is room for them too.
+        let history = phone && shown == 1 && MORE_W + cost(0, false) + HISTORY_W <= room + 0.5;
         if shown == GROUPS || !more_fits {
             self.more_tools = false;
         }
@@ -623,12 +661,20 @@ impl App {
                 for g in 0..shown {
                     self.tool_group(ui, g, g == 0, &mut tools);
                 }
-                if shown < GROUPS && more_fits {
+                if history {
+                    self.history_tools(ui, &mut tools);
+                }
+                if shown < GROUPS && more_fits && !phone {
                     more = Some(more_button(ui, self.more_tools));
                 }
                 end = ui.min_rect().right();
             },
         );
+        if phone && more_fits {
+            let at = Rect::from_min_max(pos2(inner.right() - MORE_W, inner.top()), inner.max);
+            let layout = egui::Layout::right_to_left(egui::Align::Center);
+            more = Some(ui.scope_builder(UiBuilder::new().max_rect(at).layout(layout), |ui| more_button(ui, self.more_tools)).inner);
+        }
         let more_rect = more.as_ref().map(|r| r.rect);
         if more.is_some_and(|r| r.clicked()) {
             self.more_tools = !self.more_tools;
@@ -685,15 +731,22 @@ impl App {
         self.apply_tools(&ctx, tools);
 
         // The name takes the room right of the tools, no more than it needs; if that is too little
-        // for all of it, it runs past slowly, over and over.
-        let slot_left = more_rect.map_or(end, |r| r.right()) + NAME_GAP;
-        let slot = Rect::from_min_max(pos2(slot_left.max(inner.right() - name_w), inner.top()), inner.max);
+        // for all of it, it runs past slowly, over and over. On a phone it is between the tools and
+        // "⋯", in the middle of the dock as far as it can be.
+        let slot = if phone {
+            let right = more_rect.map_or(inner.right(), |r| r.left() - NAME_GAP);
+            Rect::from_min_max(pos2(end + NAME_GAP, inner.top()), pos2(right.max(end + NAME_GAP), inner.bottom()))
+        } else {
+            let slot_left = more_rect.map_or(end, |r| r.right()) + NAME_GAP;
+            Rect::from_min_max(pos2(slot_left.max(inner.right() - name_w), inner.top()), inner.max)
+        };
         let y = rect.center().y - galley.size().y / 2.0;
         let p = ui.painter().with_clip_rect(ui.clip_rect().intersect(slot.expand2(vec2(0.0, 6.0))));
         if slot.width() <= 0.0 {
             // No room for any of it.
         } else if name_w <= slot.width() + 0.5 {
-            p.galley(pos2(inner.right() - name_w, y), galley, pal().text_dim);
+            let x = if phone { (rect.center().x - name_w / 2.0).min(slot.right() - name_w).max(slot.left()) } else { inner.right() - name_w };
+            p.galley(pos2(x, y), galley, pal().text_dim);
         } else {
             // The gap between one pass and the next is narrower than the room, so the room is never empty.
             let lap = name_w + (NAME_GAP * 2.0).min(slot.width() * 0.6);
@@ -722,8 +775,15 @@ impl App {
     pub fn page_bar(&mut self, ui: &mut egui::Ui, area: Rect) {
         let rect = self.bar_rect(area, self.bar.side);
         Self::paint_dock(ui, rect);
+        let lying = self.bar.side == BarSide::Bottom;
+        if lying && phone(area) && self.writing_by_finger(ui.ctx()) {
+            self.phone_strip(ui, rect.shrink2(vec2(10.0, 0.0)));
+            return;
+        }
         self.bar_grip(ui, area, rect);
-        if self.bar.side == BarSide::Bottom {
+        if lying && phone(area) {
+            self.phone_scrollbar(ui, rect.shrink2(vec2(18.0, 0.0)));
+        } else if lying {
             self.scrollbar(ui, rect.shrink2(vec2(18.0, 0.0)));
         } else {
             self.standing_scrollbar(ui, rect.shrink2(vec2(0.0, 18.0)));
@@ -841,6 +901,23 @@ impl App {
         }
     }
 
+    /// Undo and Redo, as arrows: on a phone there are no keys for them.
+    fn history_tools(&mut self, ui: &mut egui::Ui, out: &mut Tools) {
+        let can = self.can_edit();
+        let both = [(false, "Undo", "Undo (Ctrl+Z)", self.doc.history.can_undo()), (true, "Redo", "Redo (Ctrl+Y)", self.doc.history.can_redo())];
+        // Close together, as a pair, the room before them as before any tool.
+        ui.scope(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            for (redo, name, tip, has) in both {
+                let resp = ui.add_enabled_ui(can && has, |ui| icon_button(ui, Icon::History(redo), false, tip)).inner;
+                resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, can && has, name));
+                if resp.clicked() {
+                    out.history = Some(redo);
+                }
+            }
+        });
+    }
+
     fn file_tools(&mut self, ui: &mut egui::Ui, out: &mut Tools) {
         egui::containers::menu::MenuButton::new("File").ui(ui, |ui| {
             ui.set_min_width(210.0);
@@ -897,9 +974,14 @@ impl App {
         }
     }
 
-    /// The look of the letters, close together as one group.
-    fn letter_tools(&mut self, ui: &mut egui::Ui, out: &mut Tools) {
-        let t = &self.tool_style();
+    /// Whether the writer is writing on a touch screen, the keyboard up (`writing`, kept by
+    /// `hold_keyboard`).
+    pub fn writing_by_finger(&self, ctx: &egui::Context) -> bool {
+        self.writing.is_some() && ctx.input(|i| i.has_touch_screen())
+    }
+
+    /// Bold, italic and underline, close together.
+    fn letter_toggles(ui: &mut egui::Ui, t: &Style, out: &mut Tools) {
         let small = vec2(28.0, 30.0);
         ui.spacing_mut().item_spacing.x = 3.0;
         let b = egui::Button::new(egui::RichText::new("B").strong()).selected(t.bold).min_size(small);
@@ -908,6 +990,12 @@ impl App {
         out.italic ^= ui.add(i).on_hover_text("Italic (Ctrl+I)").clicked();
         let u = egui::Button::new(egui::RichText::new("U").underline()).selected(t.underline).min_size(small);
         out.underline ^= ui.add(u).on_hover_text("Underline (Ctrl+U)").clicked();
+    }
+
+    /// The look of the letters, close together as one group.
+    fn letter_tools(&mut self, ui: &mut egui::Ui, out: &mut Tools) {
+        let t = &self.tool_style();
+        Self::letter_toggles(ui, t, out);
         out.color = color_dropdown(ui, t.color).or(out.color);
         let tip = "Copy formatting: take up the look here, then select where it goes (Esc: put it down)";
         let brush = icon_button(ui, Icon::Brush, self.brush.is_some(), tip);
@@ -1125,6 +1213,9 @@ impl App {
         }
         if out.find {
             self.open_search();
+        }
+        if let Some(redo) = out.history {
+            self.step_history(ctx, redo);
         }
         match out.insert {
             Some(InsertAction::Picture) => {
@@ -1433,6 +1524,104 @@ impl App {
         if show_track {
             self.page_track(ui, track, false);
         }
+    }
+
+    /// The page bar lying on a phone: the page count, the track, then New page ("+"), Fit and the
+    /// scratchpad (a pad). No zoom: two fingers set it, and Fit takes it back. Short of room the
+    /// track goes first, then the count, the scratchpad and "+"; without the track what is left
+    /// stands together in the middle, so no room is left empty on one side.
+    fn phone_scrollbar(&mut self, ui: &mut egui::Ui, r: Rect) {
+        const GAP: f32 = 8.0;
+        // A little clear of the grip, the count being its neighbour.
+        let r = Rect::from_min_max(r.min + vec2(4.0, 0.0), r.max);
+        let n = self.doc.pages();
+        let cy = r.center().y;
+        let page = self.scrub_page().filter(|_| self.appearance == Appearance::Paperstack).unwrap_or(self.pos.round() as usize) + 1;
+        let font = FontId::proportional(13.0);
+        // Room for the widest count there can be, so nothing moves as the pages turn.
+        let label_w = ui.painter().layout_no_wrap(format!("{n} / {n}"), font.clone(), pal().text_dim).size().x;
+        let show_fit = r.width() >= 48.0;
+        let show_new = r.width() >= 48.0 + GAP + 30.0;
+        let show_scratch = r.width() >= 48.0 + 2.0 * (GAP + 30.0);
+        let tools_w = if show_fit { 48.0 } else { 0.0 } + if show_new { GAP + 30.0 } else { 0.0 } + if show_scratch { GAP + 30.0 } else { 0.0 };
+        let show_label = r.width() >= label_w + 16.0 + tools_w && show_scratch;
+        let show_track = r.width() >= label_w + 12.0 + 60.0 + 16.0 + tools_w && show_label;
+        let label_room = if show_label { label_w + 16.0 } else { 0.0 };
+        let mut x = if show_track { r.right() - tools_w } else { r.center().x - (label_room + tools_w) / 2.0 + label_room };
+        if show_label {
+            let left = if show_track { r.left() } else { x - label_room };
+            ui.painter().text(pos2(left, cy), egui::Align2::LEFT_CENTER, format!("{page} / {n}"), font, pal().text_dim);
+        }
+        if show_track {
+            let track = Rect::from_min_max(pos2(r.left() + label_w + 12.0, cy - 4.0), pos2(x - 16.0, cy + 4.0));
+            self.page_track(ui, track, false);
+        }
+        let mut next = |w: f32| {
+            let b = Rect::from_min_max(pos2(x, cy - 15.0), pos2(x + w, cy + 15.0));
+            x += w + GAP;
+            b
+        };
+        if show_new && ui.put(next(30.0), egui::Button::new("+")).on_hover_text("New page").clicked() {
+            let cur = self.target;
+            let ctx = ui.ctx().clone();
+            self.insert_page_after(&ctx, cur);
+        }
+        let fit_tip = "Show the full page (Ctrl+0). Ctrl+drag moves the page.";
+        if show_fit && ui.put(next(48.0), egui::Button::new("Fit").selected(self.fit)).on_hover_text(fit_tip).clicked() {
+            self.fit = true;
+            self.fit_settling = true;
+        }
+        if show_scratch {
+            let tip = "Scratchpad: plain notes beside the pages, saved with the document";
+            let open = self.scratchpad_open;
+            let resp = ui.scope_builder(UiBuilder::new().max_rect(next(30.0)), |ui| icon_button(ui, Icon::Pad, open, tip)).inner;
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Scratchpad"));
+            if resp.clicked() {
+                self.toggle_scratchpad();
+            }
+        }
+    }
+
+    /// While the writer writes on a phone, the page bar holds the look of the letters and the
+    /// paragraph instead: bold, italic, underline, alignment, lists and Chapter, just above the
+    /// keyboard, where the thumbs are. In the middle of the dock, sliding sideways when it is too
+    /// short for them. Put away, the keyboard takes it with it, and the page bar is back.
+    fn phone_strip(&mut self, ui: &mut egui::Ui, r: Rect) {
+        if r.width() < 60.0 {
+            return;
+        }
+        let ctx = ui.ctx().clone();
+        let mut tools = Tools::default();
+        // Following another device (R34), they are greyed, as in the toolbar.
+        let can = self.can_edit();
+        let style = self.tool_style();
+        let wide = Id::new("phone_strip_w");
+        let was = ui.data(|d| d.get_temp::<f32>(wide)).unwrap_or(r.width());
+        let row = Rect::from_center_size(r.center(), vec2(r.width(), 30.0));
+        let width = ui.scope_builder(UiBuilder::new().max_rect(row), |ui| {
+            let scroll = egui::ScrollArea::horizontal().id_salt("phone_strip");
+            scroll.scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.add_space(((row.width() - was) / 2.0).max(0.0));
+                    ui.add_enabled_ui(can, |ui| {
+                        ui.horizontal(|ui| {
+                            // As tight as the toolbar, the two groups a little apart: at 360 points,
+                            // a usual phone, they all fit.
+                            ui.spacing_mut().item_spacing.x = TOOL_GAP;
+                            ui.scope(|ui| Self::letter_toggles(ui, &style, &mut tools));
+                            ui.add_space(4.0);
+                            ui.scope(|ui| self.paragraph_tools(ui, &mut tools));
+                        }).response.rect.width()
+                    }).inner
+                }).inner
+            }).inner
+        }).inner;
+        // Measured this frame, used the next; a changed width asks for one more frame.
+        if (width - was).abs() > 0.5 {
+            ui.data_mut(|d| d.insert_temp(wide, width));
+            ctx.request_repaint();
+        }
+        self.apply_tools(&ctx, tools);
     }
 
     /// The page bar standing at a side of the window. From the foot up: the scratchpad (as a pad,
