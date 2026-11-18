@@ -67,14 +67,10 @@ jobs:
       - name: Chromium for the smoke test
         working-directory: web
         # Before deploying, so that a failure here leaves the live site as it was (a deploy once went
-        # live, then rolled back for it). The runner has the libraries Chromium needs; --with-deps
-        # also fetches fonts from Ubuntu's mirrors, which have failed to resolve for minutes at a
-        # time. The smoke test needs none of them (Caprice draws with its own fonts), so without
-        # them it goes on with the browser alone.
-        run: |
-          timeout 300 npx playwright-core install --with-deps chromium && exit 0
-          echo "::warning::Chromium's extra packages could not be fetched; installing the browser alone"
-          npx playwright-core install chromium
+        # live, then rolled back for it). The browser alone, as in ci.yml: the runner has the
+        # libraries Chromium needs, and the fonts and Mesa --with-deps added from Ubuntu's mirrors,
+        # often minutes late, the smoke test needs none of.
+        run: npx playwright-core install chromium
       - name: The version live now, to go back to
         working-directory: web
         run: |
