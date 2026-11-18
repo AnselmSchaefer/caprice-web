@@ -144,6 +144,20 @@ pub fn page_hidden() -> bool {
     false
 }
 
+/// The shorter side of the screen, in points, whichever way it is held: in the browser the
+/// device's screen (`screen`), never the window, which a phone's keyboard shortens and which turns
+/// with it; on the desktop the monitor's, when the system tells it. A phone's is under
+/// `view::NARROW` held either way (`ui::held`).
+pub fn screen_short_side(ctx: &egui::Context) -> Option<f32> {
+    #[cfg(target_arch = "wasm32")]
+    return web_sys::window().and_then(|w| w.screen().ok()).and_then(|s| {
+        let (w, h) = (s.width().ok()?, s.height().ok()?);
+        Some(w.min(h) as f32 / ctx.zoom_factor())
+    });
+    #[cfg(not(target_arch = "wasm32"))]
+    ctx.input(|i| i.viewport().monitor_size).map(|s| s.min_elem())
+}
+
 /// In the browser: a frame as soon as the page is hidden or shown, so the app sees it at once
 /// (`App::page_hidden`) rather than at its next frame, which may come too late for a tab closing.
 #[cfg(target_arch = "wasm32")]

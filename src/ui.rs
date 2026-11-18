@@ -117,16 +117,33 @@ const NAME_PAUSE: f32 = 3.0;
 /// Undo and Redo on a phone's toolbar, with the room before them.
 const HISTORY_W: f32 = TOOL_GAP + 30.0 + 4.0 + 30.0;
 
-/// Whether the docks are laid out for a phone held upright (narrower than `view::NARROW`, where the
-/// page fills the width too). The desktop's toolbar there held File and "⋯" with a wide gap
-/// after them, its page bar a "+" with gaps on either side, and the formatting two taps away.
-/// So on a phone the toolbar holds File, Undo and Redo, the name in the middle and "⋯" at the
-/// right end, opening every other tool; the page bar holds the page count, the track and the
-/// buttons as icons, and while the writer writes on a touch screen (the keyboard up) it holds the
-/// look of the letters and the paragraph instead, just above the keyboard.
-pub fn phone(area: Rect) -> bool {
-    area.width() < crate::view::NARROW
+/// How the screen is held, which lays out the docks and fits the page (R32).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Held {
+    /// A computer's window, or a tablet's screen.
+    #[default]
+    Desk,
+    /// A window narrower than `view::NARROW`: a phone held upright.
+    Upright,
+    /// A phone on its side: wider than that, but its screen's short side is not. The keyboard
+    /// leaves the page a strip, so while the writer writes the docks are put away.
+    Sideways,
 }
+
+/// How the window in `area` is held. By the width and the device's screen, never the height: a
+/// phone's keyboard takes half of it, and the docks changed when it came up.
+pub fn held(ctx: &egui::Context, area: Rect) -> Held {
+    if area.width() < crate::view::NARROW {
+        Held::Upright
+    } else if crate::platform::screen_short_side(ctx).is_some_and(|s| s < crate::view::NARROW) {
+        Held::Sideways
+    } else {
+        Held::Desk
+    }
+}
+
+/// The round button that brings the tools back on a phone on its side, while they are away.
+const TOOLS_BUTTON: f32 = 40.0;
 /// A paragraph-format change picked in the toolbar.
 #[derive(Clone, Copy)]
 enum ParaChange {
@@ -617,9 +634,17 @@ impl App {
 
     /// The formatting dock: one row of tools in groups, the document's name at its right end. Groups
     /// that do not fit, the last first, go into a second row that "⋯" opens under it. On a phone
-    /// (`phone`) the row holds File, Undo and Redo, the name in the middle and "⋯" at the right end.
+    /// (`Held`) the row holds File, Undo and Redo, the name in the middle and "⋯" at the right end.
+    /// The desktop's toolbar there held File and "⋯" with a wide gap after them, and the formatting
+    /// was two taps away. While the docks are away, only the round button that brings them back.
     pub fn format_bar(&mut self, ui: &mut egui::Ui, area: Rect) {
         let ctx = ui.ctx().clone();
+        if self.docks_away {
+            self.more_tools = false;
+            self.tools_bottom = area.top();
+            self.tools_button(&ctx, area);
+            return;
+        }
         let rect = Self::dock_rect(area, true);
         Self::paint_dock(ui, rect);
         let inner = rect.shrink2(vec2(14.0, 0.0));
@@ -633,7 +658,7 @@ impl App {
         let w = self.tool_w;
         // A group's width with the room before it, which holds a line unless the group starts a row.
         let cost = |g: usize, first: bool| w[g] + if first { 0.0 } else { TOOL_GAP + if has_line(g) { LINE_W + TOOL_GAP } else { 0.0 } };
-        let phone = phone(area);
+        let phone = self.holding != Held::Desk;
         // On a phone the name has room on both sides, being between the tools and "⋯".
         let room = inner.width() - NAME_GAP - four - if phone { NAME_GAP } else { 0.0 };
         let all = (0..GROUPS).map(|g| cost(g, g == 0)).sum::<f32>();
@@ -772,16 +797,23 @@ impl App {
         Rect::from_min_max(pos2(x, top), pos2(x + DOCK_H, (area.bottom() - DOCK_GAP).max(top)))
     }
 
+    /// The page bar. On a phone it holds the page count, the track and the buttons as icons, and
+    /// while the writer writes upright (the keyboard up) the look of the letters and the paragraph
+    /// instead, just above the keyboard. On its side, writing, it is away with the toolbar.
     pub fn page_bar(&mut self, ui: &mut egui::Ui, area: Rect) {
+        if self.docks_away {
+            return;
+        }
         let rect = self.bar_rect(area, self.bar.side);
         Self::paint_dock(ui, rect);
         let lying = self.bar.side == BarSide::Bottom;
-        if lying && phone(area) && self.writing_by_finger(ui.ctx()) {
+        let phone = self.holding != Held::Desk;
+        if lying && phone && self.writing_by_finger(ui.ctx()) {
             self.phone_strip(ui, rect.shrink2(vec2(10.0, 0.0)));
             return;
         }
         self.bar_grip(ui, area, rect);
-        if lying && phone(area) {
+        if lying && phone {
             self.phone_scrollbar(ui, rect.shrink2(vec2(18.0, 0.0)));
         } else if lying {
             self.scrollbar(ui, rect.shrink2(vec2(18.0, 0.0)));
@@ -972,6 +1004,33 @@ impl App {
         if size != shown.size {
             out.size = Some(size);
         }
+    }
+
+    /// While the docks are away, a round button at the top left brings them back. It puts the
+    /// keyboard away (`writing`), which leaves the room for them; a tap on the page brings the
+    /// keyboard back and puts them away again. It stands beside the text, in the page's margin or on
+    /// the desk, on a layer of its own so that the page under it takes no tap (R16).
+    fn tools_button(&mut self, ctx: &egui::Context, area: Rect) {
+        let at = area.min + vec2(DOCK_GAP - 4.0, DOCK_GAP - 4.0);
+        egui::Area::new(Id::new("tools_button")).order(egui::Order::Middle).fixed_pos(at).show(ctx, |ui| {
+            let (rect, resp) = ui.allocate_exact_size(vec2(TOOLS_BUTTON, TOOLS_BUTTON), Sense::click());
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Show the tools"));
+            let p = ui.painter();
+            let r = TOOLS_BUTTON / 2.0;
+            for k in 1..=4 {
+                p.circle_filled(rect.center() + vec2(0.0, 3.0), r + k as f32 * 1.5, Color32::from_black_alpha(20));
+            }
+            p.circle_filled(rect.center(), r, if resp.hovered() { pal().btn_hover } else { pal().dock });
+            p.circle_stroke(rect.center(), r - 0.5, Stroke::new(1.0, pal().dock_edge));
+            let ink = if resp.hovered() { pal().text_hot } else { pal().text };
+            for k in [-1.0, 0.0, 1.0] {
+                let y = rect.center().y + k * 5.0;
+                p.line_segment([pos2(rect.center().x - 7.0, y), pos2(rect.center().x + 7.0, y)], Stroke::new(1.6, ink));
+            }
+            if resp.clicked() {
+                self.writing = None;
+            }
+        });
     }
 
     /// Whether the writer is writing on a touch screen, the keyboard up (`writing`, kept by

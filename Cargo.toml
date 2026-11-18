@@ -41,7 +41,7 @@ rfd = "0.18.0"
 js-sys = "0.3.107"
 wasm-bindgen = "0.2.130"
 wasm-bindgen-futures = "0.4.80"
-web-sys = { version = "0.3.107", features = ["Window", "Document", "Element", "HtmlElement", "Node", "EventTarget", "HtmlCanvasElement", "Worker", "WorkerOptions", "WorkerType", "console", "PointerEvent", "MessageEvent", "ErrorEvent"] }
+web-sys = { version = "0.3.107", features = ["Window", "Document", "Element", "HtmlElement", "Node", "EventTarget", "HtmlCanvasElement", "Worker", "WorkerOptions", "WorkerType", "console", "PointerEvent", "MessageEvent", "ErrorEvent", "Screen"] }
 
 # The themes played in the tests in place of their modules (R36) are optimized, as their modules
 # are: unoptimized, a frame of the Magic Vineyard took 32 ms, nearly the built-in one's own.

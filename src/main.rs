@@ -228,6 +228,10 @@ pub struct App {
     pub writing: Option<f32>,
     /// The window's size last frame, to tell a keyboard put away from a phone turned round.
     pub screen: egui::Vec2,
+    /// How the screen is held this frame (`ui::held`): the docks and the page's fit follow it.
+    pub holding: ui::Held,
+    /// The docks are put away this frame: a phone on its side while the writer writes (`ui::Held`).
+    pub docks_away: bool,
     /// The caret drawn last frame, the document's version then, and its rectangle on its page in page points.
     pub caret_seen: Option<(usize, u64, Rect)>,
     /// The caret and version the view last kept in sight, and the view's height then (`follow_caret`).
@@ -382,6 +386,8 @@ impl App {
             ime: None,
             writing: None,
             screen: egui::Vec2::ZERO,
+            holding: ui::Held::Desk,
+            docks_away: false,
             textures: HashMap::new(),
             startup_file: None,
             again: again::Again::new(),
@@ -653,6 +659,9 @@ impl App {
         let ctx = ui.ctx().clone();
         let area = ui.max_rect();
         self.eggs.desk = area;
+        // Not while a field in a window has the keys: the toolbar may have opened it (the search).
+        self.holding = ui::held(&ctx, area);
+        self.docks_away = self.holding == ui::Held::Sideways && self.writing_by_finger(&ctx) && !ctx.egui_wants_keyboard_input();
         platform::keep_awake(&ctx);
         self.themes.show(&ctx);
         theme::paint_desk(ui.painter(), area);
@@ -919,6 +928,8 @@ mod tests {
         height: f32,
         /// Whether each frame asked for text input (a phone's keyboard), the last frame last.
         ime: Vec<bool>,
+        /// The size of the screen the window is on, when the system tells it (a phone's: `ui::Held`).
+        monitor: Option<egui::Vec2>,
     }
 
     impl Harness {
@@ -933,7 +944,7 @@ mod tests {
             app.themes = theme::Themes::kept_in(None);
             app.bar = ui::BarPlace::kept_in(None);
             app.again = again::Again::kept_in(None);
-            Self { ctx, app, time: 0.0, mods: Modifiers::NONE, access: None, painted: Vec::new(), width: 1240.0, height: 900.0, ime: Vec::new() }
+            Self { ctx, app, time: 0.0, mods: Modifiers::NONE, access: None, painted: Vec::new(), width: 1240.0, height: 900.0, ime: Vec::new(), monitor: None }
         }
 
         fn frames(&mut self, n: usize, events: Vec<egui::Event>, modifiers: Modifiers) {
@@ -946,6 +957,7 @@ mod tests {
                     screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(self.width, self.height))),
                     ..Default::default()
                 };
+                input.viewports.entry(egui::ViewportId::ROOT).or_default().monitor_size = self.monitor;
                 if modifiers != self.mods {
                     self.mods = modifiers;
                     input.events.push(egui::Event::ModifiersChanged(modifiers));
@@ -2127,6 +2139,59 @@ mod tests {
         h.height = 780.0;
         h.frames(5, vec![], Modifiers::NONE);
         assert!(h.widget_rect("Fit").is_some() && h.widget_rect("B").is_none());
+    }
+
+    #[test]
+    fn on_a_phone_on_its_side_the_page_fills_the_width_and_the_docks_go_away_while_writing() {
+        let mut h = Harness::new();
+        // A phone's screen on its side, less the browser's own bars.
+        (h.width, h.height, h.monitor) = (830.0, 340.0, Some(egui::vec2(915.0, 412.0)));
+        let touch = |id: u64, phase, pos| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(id), phase, pos, force: None };
+        let desk = egui::pos2(4.0, 200.0);
+        h.frames(1, vec![touch(1, egui::TouchPhase::Start, desk)], Modifiers::NONE);
+        h.frames(30, vec![touch(1, egui::TouchPhase::End, desk)], Modifiers::NONE);
+        // A phone's docks, and the page across the window, its top in sight, not a third of it.
+        assert!(h.widget_rect("More tools").is_some() && h.widget_rect("B").is_none(), "the phone's toolbar");
+        assert!(h.widget_rect("Fit").is_some() && h.widget_rect("Show the tools").is_none());
+        let page = h.app.last_page_rect;
+        assert!((page.width() - h.app.doc.setup.size().x * view::SIDEWAYS_MOST).abs() < 1.0, "{page:?}");
+        assert!(page.top() > 0.0 && page.top() < ui::RESERVED + 10.0 && page.bottom() > 340.0, "{page:?}");
+
+        // A tap on the page brings the keyboard, which leaves a strip: the docks go away for the text.
+        h.click_in_page(egui::vec2(10.0, 10.0));
+        h.height = 150.0;
+        h.frames(5, vec![], Modifiers::NONE);
+        for name in ["More tools", "Fit", "B", "+"] {
+            assert!(h.widget_rect(name).is_none(), "{name} is away");
+        }
+        let button = h.widget_rect("Show the tools").expect("the round button");
+        assert!(button.left() < 20.0 && button.top() < 20.0, "at the top left: {button:?}");
+        h.type_text("It was a dark and stormy night; the rain fell in torrents. ".repeat(12).trim_end());
+        let (_, _, caret) = h.app.caret_seen.expect("the caret drawn");
+        let y = h.app.last_page_rect.top() + caret.center().y * h.app.zoom;
+        assert!(y > 20.0 && y < 130.0, "the caret is in sight above the keyboard at {y}");
+        let (written, caret) = (h.app.doc.flow.text.clone(), h.app.caret);
+        assert!(h.ime.last() == Some(&true));
+
+        // The button puts the keyboard away, and the docks are back as it goes; the text is as it was.
+        h.tap_widget("Show the tools");
+        assert!(h.ime.last() == Some(&false), "the keyboard is put away");
+        h.height = 340.0;
+        h.frames(5, vec![], Modifiers::NONE);
+        assert!(h.widget_rect("More tools").is_some() && h.widget_rect("Fit").is_some());
+        assert!(h.widget_rect("Show the tools").is_none());
+        assert_eq!((h.app.doc.flow.text.as_str(), h.app.caret), (written.as_str(), caret));
+
+        // A tap on the page brings the keyboard back, and puts them away again.
+        h.click_in_page(egui::vec2(10.0, 10.0));
+        h.height = 150.0;
+        h.frames(5, vec![], Modifiers::NONE);
+        assert!(h.ime.last() == Some(&true) && h.widget_rect("Fit").is_none() && h.widget_rect("Show the tools").is_some());
+
+        // A tablet's screen is a desk, held either way: its docks stay while the writer writes.
+        h.monitor = Some(egui::vec2(1280.0, 800.0));
+        h.frames(5, vec![], Modifiers::NONE);
+        assert!(h.widget_rect("Show the tools").is_none() && h.widget_rect("B").is_some());
     }
 
     #[test]
