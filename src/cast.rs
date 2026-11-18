@@ -427,6 +427,7 @@ impl App {
         }
         let drawing = self.cast_panel.job.as_ref().map(|j| (j.look, j.peek));
         let panel = &self.cast_panel;
+        let mut closed = false;
         egui::Window::new("Cast")
             .id(Id::new("cast"))
             .open(&mut open)
@@ -435,6 +436,7 @@ impl App {
             .default_height(620.0)
             .collapsible(false)
             .show(ctx, |ui| {
+                closed = crate::ui::finger_close(ui, Id::new("cast"));
                 // Another device holds the pen (R34): the cast is read here, not changed.
                 if !can {
                     ui.disable();
@@ -560,6 +562,7 @@ impl App {
                     }
                 });
             });
+        open &= !closed;
         self.cast_panel.open = open;
         match action {
             Some(Do::Add) => {
@@ -633,6 +636,7 @@ impl App {
             self.cast_panel.example = false;
             return;
         };
+        let mut closed = false;
         egui::Window::new("The cast at work")
             .id(Id::new("cast_example"))
             .open(&mut open)
@@ -640,6 +644,7 @@ impl App {
             .default_height(640.0)
             .collapsible(false)
             .show(ctx, |ui| {
+                closed = crate::ui::finger_close(ui, Id::new("cast_example"));
                 let about = "Four passages that only name Mara, painted three ways. From the passage alone she is \
                              someone else every time. Described in the cast, her clothes stay but her build and \
                              drawing change. With her model sheet she is the same figure throughout, posed for each \
@@ -652,6 +657,7 @@ impl App {
                     ui.add(egui::Image::new((texture.id(), texture.size_vec2() * (w / texture.size_vec2().x))));
                 });
             });
+        open &= !closed;
         self.cast_panel.example = open;
     }
 }

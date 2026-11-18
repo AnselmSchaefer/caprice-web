@@ -379,7 +379,7 @@ a `TOC` field (Caprice's page numbers are only its cached result, and Word updat
 | No bending of text | Tessellate galleys, move vertices | `render.rs`, `book.rs`, `notes.rs` |
 | Modifiers unreliable on Hyprland | Track Ctrl from key events | `view.rs` |
 | In a window that sizes itself (`Modal`, `Area`), `with_layout` takes all the height left: a row centred in it, or anything after it, makes the window grow every frame | Give such rows their height with `allocate_ui_with_layout`. `keep_or_drop_keeps_its_size_with_the_hint_under_its_buttons` | `leave.rs::leave_dialog` |
-| The UI font has no symbols like ✕, → or ⋯ (drawn as an empty box) | Draw icons with lines, labelled for tests; in words, › stands for an arrow ("File › Versions"). `Harness::missing_glyphs` lists what was painted without its letters: the tests of the page numbers menu, the leaving dialog and the review check it is empty | `ui.rs::paint_icon`, `search.rs::bar_button`, the ✕ of a page numbering change in `ui.rs` |
+| The UI font has no symbols like ✕, → or ⋯ (drawn as an empty box) | Draw icons with lines, labelled for tests; in words, › stands for an arrow ("File › Versions"). A ⋯ standing alone (a theme's menu in Yours, the backups in Versions) is in the monospace face, Hack, which has it (`RichText::monospace`). `Harness::missing_glyphs` lists what was painted without its letters: the tests of the page numbers menu, the leaving dialog, the review and Yours check it is empty. egui's `has_glyph` says no for every letter of the face holding its empty box, which in the monospace family is all of Hack: the helper tells those by their drawing (`missing_glyph`) | `ui.rs::paint_icon`, `search.rs::bar_button`, the ✕ of a page numbering change in `ui.rs` |
 | `ctx.fonts_mut` inside `ctx.fonts_mut` hangs (the context's lock is taken twice) | Build a job (`paragraph_job`, `run_format`, which ask the fonts for a row's height) before taking the fonts to lay it out. Drop caps with line spacing hung: `a_new_novel_begins_on_book_pages_at_chapter_one_and_a_journal_at_today` | `dropcap.rs::drop_cap` |
 | Justified rows are lined up by their first and last letters: whitespace in front goes out to the left, a tab or space at a paragraph's end gives the caret no room | `justified_edges` moves the glyphs (and their quads) back: the whitespace in front keeps its room, a stretched row still ends at the margin, the last row is as wide as all its chars. Underlines and highlights of such a row are not moved. `justified_text_keeps_a_tab_before_it_and_after_it` | `layout.rs::justified_edges` |
 | Tab moves egui's keyboard focus to the next widget, even when the page took the key | The editor cancels the move when it types a tab (`move_focus(FocusDirection::None)`); the caret is hidden while a widget has the keyboard. `a_tab_typed_beside_a_drop_cap_moves_the_caret_at_once` | `editor.rs` (keys) |
@@ -1780,6 +1780,19 @@ whole page, centred, as always.
   window's place on the screen, not its width; the question before leaving, 440 wide, lost its
   buttons off both sides. A new window or dialog with a width of its own uses them. The test helper
   `tap_widget` taps as eframe tells a finger's tap.
+- **A finger closes a window by tapping near its cross** (`ui::finger_close`, first in the window's
+  contents). egui's cross answers for itself alone, an icon's width, and a window that cannot be
+  moved takes every click on itself: a finger a few points off closed nothing, and the gallery
+  closed only after several taps. While `platform::pressed_by_finger`, the title bar's corner
+  around the cross, and a little beyond the window's edge, closes it too; with a mouse the cross is
+  left as egui draws it. A tap there closes; a drag from there still moves a window that moves.
+  Every `egui::Window` with a cross has it, its `closed` taken from `open` after `show`; a new one
+  does too. `a_finger_tapping_beside_the_gallery_s_cross_closes_it` (one that cannot move),
+  `a_finger_tapping_beside_a_window_s_cross_closes_it_whether_the_window_moves_or_not`.
+- **A row with a name and a button in a narrow column puts the button first** (`egui::Sides` with
+  `shrink_left().truncate()`): a label followed by a right-to-left layout gave the button no room of
+  its own, and a long author's name ran under it and out of the window.
+  `a_long_name_under_a_gallery_theme_is_cut_short_before_its_button`.
 - **Zooming stops at the fitting size only on the way through it**, never whenever near it: a slow
   pinch changes the zoom by a hair each frame, and stayed fitted.
 - **The keyboard shrinks the page in the browser**: `interactive-widget=resizes-content` in
@@ -2759,7 +2772,8 @@ where the group is (R: the toolbar's groups); in the page bar, room in the sums 
 it at every width.
 
 **A new window over the pages:** a toggle in the page bar or a menu, not the toolbar (R16); its
-scrolling must not move the pages (R16); its stored text in `Doc` and `DocFile` (R9).
+scrolling must not move the pages (R16); its stored text in `Doc` and `DocFile` (R9); its width
+through `ui::window_width`, and `ui::finger_close` first in its contents if it has a cross (R32).
 
 **Something new sent with a scene** (like the cast): build it in `scene_prompt` from the subject
 only (R13, R17), check it in `Backdrop::asked` in a test.

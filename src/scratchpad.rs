@@ -26,6 +26,7 @@ impl App {
         let bar = if self.bar.side == crate::ui::BarSide::Right { crate::ui::DOCK_H + crate::ui::DOCK_GAP } else { 0.0 };
         let at = pos2(screen.right() - size.x - 24.0 - bar, screen.top() + 70.0);
         let mut open = true;
+        let mut closed = false;
         egui::Window::new("Scratchpad")
             .id(Id::new("scratchpad"))
             .open(&mut open)
@@ -33,6 +34,7 @@ impl App {
             .resizable(true)
             .collapsible(false)
             .show(ctx, |ui| {
+                closed = crate::ui::finger_close(ui, Id::new("scratchpad"));
                 egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                     // The field fills the window, so a click anywhere in it starts writing.
                     let field = egui::TextEdit::multiline(&mut self.doc.scratchpad)
@@ -46,6 +48,7 @@ impl App {
                     ui.add(field);
                 });
             });
+        open &= !closed;
         self.scratchpad_open = open;
     }
 }

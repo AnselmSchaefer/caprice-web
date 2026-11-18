@@ -199,6 +199,7 @@ impl App {
         let (_, _, what) = self.review_stretch();
         let mut open = true;
         let (mut check, mut show, mut apply, mut drop) = (false, None, None, None);
+        let mut closed = false;
         egui::Window::new("Review")
             .id(Id::new("review"))
             .open(&mut open)
@@ -206,6 +207,7 @@ impl App {
             .resizable(true)
             .collapsible(false)
             .show(ctx, |ui| {
+                closed = crate::ui::finger_close(ui, Id::new("review"));
                 let busy = self.review.pending.is_some();
                 ui.horizontal(|ui| {
                     let tip = "Claude reads it for spelling, grammar and style, and for places that want more detail or say too much";
@@ -269,6 +271,7 @@ impl App {
                     }
                 });
             });
+        open &= !closed;
         self.review.open = open;
         if check {
             self.start_review(ctx);

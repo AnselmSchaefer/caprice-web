@@ -142,6 +142,7 @@ impl App {
         let words = self.passage(self.ideas_from(), self.caret).split_whitespace().count();
         let mut open = true;
         let (mut ask, mut keep, mut more) = (false, None, None);
+        let mut closed = false;
         egui::Window::new("What next")
             .id(Id::new("ideas"))
             .open(&mut open)
@@ -149,6 +150,7 @@ impl App {
             .resizable(true)
             .collapsible(false)
             .show(ctx, |ui| {
+                closed = crate::ui::finger_close(ui, Id::new("ideas"));
                 let busy = self.ideas.pending.is_some();
                 let hint = "Where should it go? (optional: darker, more about Mia, a twist…)";
                 ui.add(egui::TextEdit::singleline(&mut self.ideas.steer).hint_text(hint).desired_width(f32::INFINITY));
@@ -189,6 +191,7 @@ impl App {
                     }
                 });
             });
+        open &= !closed;
         self.ideas.open = open;
         if ask {
             self.start_ideas(ctx);

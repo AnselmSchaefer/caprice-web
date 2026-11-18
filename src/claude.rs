@@ -555,13 +555,16 @@ impl App {
     /// The story notes, kept with the document and sent with every question about the story.
     pub fn story_notes_window(&mut self, ctx: &egui::Context) {
         let mut open = self.story_notes_open;
+        let mut closed = false;
         egui::Window::new("Story notes").id(Id::new("story_notes")).open(&mut open).default_width(crate::ui::window_width(ctx, 420.0)).show(ctx, |ui| {
+            closed = crate::ui::finger_close(ui, Id::new("story_notes"));
             let about = "Claude reads these whenever it reviews, answers about or connects parts of the story.";
             ui.label(egui::RichText::new(about).size(12.0).color(pal().text_dim));
             let hint = "Who is who, what has happened so far, what the reader must not learn yet…";
             let field = egui::TextEdit::multiline(&mut self.doc.story_notes).hint_text(hint).desired_width(f32::INFINITY);
             ui.add(field.desired_rows(14));
         });
+        open &= !closed;
         self.story_notes_open = open;
     }
 
@@ -792,6 +795,7 @@ impl App {
         let mut open = true;
         let (mut apply, mut pin, mut follow) = (false, false, None);
         let title = format!("Claude · {}", ans.command.title());
+        let mut closed = false;
         egui::Window::new(title)
             .id(Id::new("claude_answer"))
             .open(&mut open)
@@ -800,6 +804,7 @@ impl App {
             .resizable(true)
             .collapsible(false)
             .show(ctx, |ui| {
+                closed = crate::ui::finger_close(ui, Id::new("claude_answer"));
                 let font = FontId::proportional(14.0);
                 let ink = ui.visuals().text_color();
                 egui::ScrollArea::vertical().max_height(420.0).stick_to_bottom(true).show(ui, |ui| {
@@ -881,6 +886,7 @@ impl App {
                     }
                 }
             });
+        open &= !closed;
         if apply {
             self.apply_answer(ctx);
         } else if pin {

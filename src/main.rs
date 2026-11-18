@@ -5382,7 +5382,21 @@ mod tests {
                 _ => None,
             });
             let sections = jobs.flat_map(|job| job.sections.iter().map(|s| (&s.format.font_id, &job.text[s.byte_range.start.0..s.byte_range.end.0])));
-            sections.filter(|(font, text)| !self.ctx.fonts_mut(|f| f.has_glyphs(font, text))).map(|(_, text)| text.to_owned()).collect()
+            sections.filter(|(font, text)| text.chars().any(|c| self.missing_glyph(font, c))).map(|(_, text)| text.to_owned()).collect()
+        }
+
+        /// Whether `c` is drawn as egui's empty box in `font`. egui's `has_glyph` says no as well
+        /// for every letter of the face that has the box, which in the monospace family is the
+        /// whole face: those are told by their drawing.
+        fn missing_glyph(&self, font: &egui::FontId, c: char) -> bool {
+            self.ctx.fonts_mut(|f| {
+                if f.has_glyph(font, c) {
+                    return false;
+                }
+                let mut drawn = |c: char| f.layout_no_wrap(c.to_string(), font.clone(), egui::Color32::WHITE).rows.first()
+                    .and_then(|r| r.row.glyphs.first().map(|g| g.uv_rect));
+                drawn(c).is_some_and(|uv| Some(uv) == drawn('\u{25fb}'))
+            })
         }
     }
 
@@ -7416,15 +7430,15 @@ mod tests {
         assert!(yours == magic && magic == classic, "{yours} {magic} {classic}");
     }
 
-    #[test]
-    fn the_gallery_window_fits_a_phone_s_screen_and_goes_when_the_story_is_closed() {
-        let mut h = Harness::new();
+    /// The Gallery window open on a phone's screen, three themes in it by `author`.
+    fn gallery_on_a_phone(h: &mut Harness, name: &str, author: &str) -> (std::path::PathBuf, std::rc::Rc<cloud::stand_in::StandIn>) {
         h.width = 340.0;
-        let dir = with_shelf(&mut h, "gallery-phone");
-        let server = online(&mut h, &dir, true);
+        let dir = with_shelf(h, name);
+        let server = online(h, &dir, true);
         h.frames(12, vec![], Modifiers::NONE);
         let public = |id: &str| {
-            let b = bundle::open(SNOW_FILE, "snow").unwrap().bundle;
+            let mut b = bundle::open(SNOW_FILE, "snow").unwrap().bundle;
+            b.manifest.author = author.into();
             cloud::stand_in::Sent { id: id.into(), user: "bea".into(), file: bundle::write(&b).unwrap(), manifest: b.manifest, module: b.module,
                 source: String::new(), state: "public".into(), why: String::new(), signature: String::new() }
         };
@@ -7433,6 +7447,14 @@ mod tests {
         h.app.open_gallery(&ctx);
         h.frames_until("the gallery listed", |a| !a.gallery.busy());
         h.frames(4, vec![], Modifiers::NONE);
+        (dir, server)
+    }
+
+    #[test]
+    fn the_gallery_window_fits_a_phone_s_screen_and_goes_when_the_story_is_closed() {
+        let mut h = Harness::new();
+        let (dir, _server) = gallery_on_a_phone(&mut h, "gallery-phone", "Bea");
+        let ctx = h.ctx.clone();
         let window = h.ctx.memory(|m| m.area_rect(egui::Id::new("theme_gallery_window"))).unwrap();
         assert!(h.ctx.content_rect().contains_rect(window), "all of it on the screen: {window:?}");
         let uses: Vec<_> = h.painted.iter().filter_map(|cs| match &cs.shape {
@@ -7446,6 +7468,76 @@ mod tests {
         h.frames(3, vec![], Modifiers::NONE);
         assert!(h.app.start.open && !h.app.gallery.open, "closed with the story");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_long_name_under_a_gallery_theme_is_cut_short_before_its_button() {
+        let mut h = Harness::new();
+        let (dir, _server) = gallery_on_a_phone(&mut h, "gallery-long-name", "Anselm Benedikt Schaefer of the Lighthouse");
+        let painted = |h: &Harness, which: &dyn Fn(&str) -> bool| -> Vec<egui::Rect> {
+            h.painted.iter().filter_map(|cs| match &cs.shape {
+                egui::Shape::Text(t) if which(&t.galley.job.text) => Some(t.galley.rect.translate(t.pos.to_vec2())),
+                _ => None,
+            }).collect()
+        };
+        let names = painted(&h, &|t| t.starts_with("by "));
+        let buttons = painted(&h, &|t| t == "Use");
+        let window = h.ctx.memory(|m| m.area_rect(egui::Id::new("theme_gallery_window"))).unwrap();
+        assert!(names.len() == 3 && buttons.len() == 3, "each theme says who made it, and offers itself: {names:?}");
+        assert!(names.iter().all(|n| n.width() > 20.0 && window.contains_rect(*n)), "some of the name, in the window: {names:?}");
+        assert!(names.iter().all(|n| buttons.iter().all(|b| !n.intersects(*b))), "no name runs under a button: {names:?}, {buttons:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_finger_tapping_beside_the_gallery_s_cross_closes_it() {
+        let mut h = Harness::new();
+        platform::set_pressed_by_finger(true);
+        let (dir, _server) = gallery_on_a_phone(&mut h, "gallery-finger", "Bea");
+        tap_beside_the_cross(&mut h);
+        assert!(!h.app.gallery.open, "closed by the tap");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A finger's tap where it lands meaning the cross of the one window open: a little to its
+    /// left, in the title bar, off the cross itself.
+    fn tap_beside_the_cross(h: &mut Harness) {
+        let cross = h.widget_rect("Close window").expect("the window's cross");
+        let at = cross.center() - egui::vec2(cross.width() / 2.0 + 10.0, -3.0);
+        assert!(!cross.contains(at));
+        finger_down(h, at);
+        finger_up(h, at);
+        h.frames(2, vec![], Modifiers::NONE);
+    }
+
+    #[test]
+    fn a_finger_tapping_beside_a_window_s_cross_closes_it_whether_the_window_moves_or_not() {
+        let mut h = Harness::new();
+        platform::set_pressed_by_finger(true);
+        // One that moves and is resized, and one that moves; the gallery does neither.
+        h.click_widget("Scratchpad");
+        assert!(h.app.scratchpad_open);
+        // Dragged from there, it is moved, not closed. Dragged by the pointer: the tests' finger
+        // moves no window, from anywhere on its title bar.
+        let window = || egui::Id::new("scratchpad");
+        let before = h.ctx.memory(|m| m.area_rect(window())).unwrap();
+        let cross = h.widget_rect("Close window").unwrap();
+        let from = cross.center() - egui::vec2(cross.width() / 2.0 + 10.0, -3.0);
+        h.press_at(from, true);
+        for k in 1..=6 {
+            h.frames(1, vec![egui::Event::PointerMoved(from - egui::vec2(10.0 * k as f32, 0.0))], Modifiers::NONE);
+        }
+        h.press_at(from - egui::vec2(60.0, 0.0), false);
+        h.frames(2, vec![], Modifiers::NONE);
+        let after = h.ctx.memory(|m| m.area_rect(window())).unwrap();
+        assert!(h.app.scratchpad_open && after.left() < before.left() - 40.0, "moved: {before:?} to {after:?}");
+        tap_beside_the_cross(&mut h);
+        assert!(!h.app.scratchpad_open, "the scratchpad closed by the tap");
+        h.click_widget("File");
+        h.click_widget("Versions\u{2026} ");
+        assert!(h.app.keep.open);
+        tap_beside_the_cross(&mut h);
+        assert!(!h.app.keep.open, "the versions closed by the tap");
     }
 
     #[test]
@@ -7484,6 +7576,7 @@ mod tests {
         h.click_widget("Page");
         h.click_widget(&format!("{} \u{23f5}", h.app.themes.name()));
         h.click_widget("Yours");
+        assert_eq!(h.missing_glyphs(), Vec::<String>::new(), "every letter is in its font, the \u{22ef} of each theme's menu too");
         let at = |h: &Harness, s: &str| h.painted_at(s).unwrap_or_else(|| panic!("no {s:?}")).y;
         let (gallery, claude, svg) = (at(&h, "From Gallery"), at(&h, "Made for you"), at(&h, "From SVG"));
         assert!(gallery < claude && claude < svg, "in that order");

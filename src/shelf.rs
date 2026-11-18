@@ -108,6 +108,7 @@ impl App {
         let mut delete = None;
         let shown = self.path.clone();
         let title = if matches!(asking, Asking::Name { .. }) { "Save in this browser" } else { "Open a story" };
+        let mut closed = false;
         egui::Window::new(title)
             .id(Id::new("shelf"))
             .open(&mut open)
@@ -115,81 +116,85 @@ impl App {
             .default_width(crate::ui::window_width(ctx, 320.0))
             .resizable(false)
             .collapsible(false)
-            .show(ctx, |ui| match asking {
-                Asking::Name { name, focused, .. } => {
-                    ui.label("Stories are kept in this browser, under a name of their own:");
-                    ui.add_space(4.0);
-                    let edit = egui::TextEdit::singleline(name).hint_text("Name of the story").desired_width(f32::INFINITY);
-                    let field = ui.add(edit);
-                    if !*focused {
-                        field.request_focus();
-                        *focused = true;
-                    }
-                    // Another story of that name is never replaced: this one goes beside it, under a
-                    // name of its own, so that no words are lost here or online (where the other's
-                    // copy would be replaced too). Only the story's own file is saved over.
-                    let mut path = dir.join(format!("{}.caprice", file_name(name)));
-                    if crate::platform::fs::exists(&path) && shown.as_deref() != Some(path.as_path()) {
-                        path = crate::platform::free_name(&dir, &format!("{}.caprice", file_name(name)));
-                        let beside = path.file_stem().map_or(String::new(), |s| s.to_string_lossy().into_owned());
-                        ui.weak(format!("Another story is kept under that name: this one is saved beside it as \u{201c}{beside}\u{201d}."));
-                    }
-                    let entered = field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        if ui.button("Save").clicked() || entered {
-                            let _ = crate::platform::fs::create_dir_all(&dir);
-                            answer = Some(Some(path));
+            .show(ctx, |ui| {
+                closed = crate::ui::finger_close(ui, Id::new("shelf"));
+                match asking {
+                    Asking::Name { name, focused, .. } => {
+                        ui.label("Stories are kept in this browser, under a name of their own:");
+                        ui.add_space(4.0);
+                        let edit = egui::TextEdit::singleline(name).hint_text("Name of the story").desired_width(f32::INFINITY);
+                        let field = ui.add(edit);
+                        if !*focused {
+                            field.request_focus();
+                            *focused = true;
                         }
-                        if ui.button("Cancel").clicked() {
-                            answer = Some(None);
+                        // Another story of that name is never replaced: this one goes beside it, under a
+                        // name of its own, so that no words are lost here or online (where the other's
+                        // copy would be replaced too). Only the story's own file is saved over.
+                        let mut path = dir.join(format!("{}.caprice", file_name(name)));
+                        if crate::platform::fs::exists(&path) && shown.as_deref() != Some(path.as_path()) {
+                            path = crate::platform::free_name(&dir, &format!("{}.caprice", file_name(name)));
+                            let beside = path.file_stem().map_or(String::new(), |s| s.to_string_lossy().into_owned());
+                            ui.weak(format!("Another story is kept under that name: this one is saved beside it as \u{201c}{beside}\u{201d}."));
                         }
-                    });
-                }
-                Asking::Open { stories, deleting, .. } => {
-                    if stories.is_empty() {
-                        ui.weak("No story is kept in this browser yet.");
+                        let entered = field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            if ui.button("Save").clicked() || entered {
+                                let _ = crate::platform::fs::create_dir_all(&dir);
+                                answer = Some(Some(path));
+                            }
+                            if ui.button("Cancel").clicked() {
+                                answer = Some(None);
+                            }
+                        });
                     }
-                    let now = crate::platform::since_epoch().as_secs();
-                    egui::ScrollArea::vertical().id_salt("shelf_stories").max_height(320.0).show(ui, |ui| {
-                        for k in stories.iter() {
-                            if deleting.as_ref() == Some(&k.path) {
-                                ui.label(format!("Delete \u{201c}{}\u{201d} here, and online on every device? It stays under File \u{203a} Versions.", k.name));
+                    Asking::Open { stories, deleting, .. } => {
+                        if stories.is_empty() {
+                            ui.weak("No story is kept in this browser yet.");
+                        }
+                        let now = crate::platform::since_epoch().as_secs();
+                        egui::ScrollArea::vertical().id_salt("shelf_stories").max_height(320.0).show(ui, |ui| {
+                            for k in stories.iter() {
+                                if deleting.as_ref() == Some(&k.path) {
+                                    ui.label(format!("Delete \u{201c}{}\u{201d} here, and online on every device? It stays under File \u{203a} Versions.", k.name));
+                                    ui.horizontal(|ui| {
+                                        if ui.button(egui::RichText::new("Delete").color(crate::leave::WARN)).clicked() {
+                                            delete = Some(k.path.clone());
+                                        }
+                                        if ui.button("Keep").clicked() {
+                                            *deleting = None;
+                                        }
+                                    });
+                                    continue;
+                                }
                                 ui.horizontal(|ui| {
-                                    if ui.button(egui::RichText::new("Delete").color(crate::leave::WARN)).clicked() {
-                                        delete = Some(k.path.clone());
+                                    if ui.button(&k.name).on_hover_text("Open this story").clicked() {
+                                        answer = Some(Some(k.path.clone()));
                                     }
-                                    if ui.button("Keep").clicked() {
-                                        *deleting = None;
+                                    if let Some(at) = k.changed {
+                                        ui.weak(crate::versions::ago(at, now));
+                                    }
+                                    if let Some(online) = k.online {
+                                        ui.weak(format!("\u{00b7} {online}"));
+                                    }
+                                    // Not the story open: it is being written in.
+                                    let gone = egui::Button::new(egui::RichText::new("Delete\u{2026}").weak()).frame(false);
+                                    if shown.as_ref() != Some(&k.path) && ui.add(gone).on_hover_text("Delete this story here and online").clicked() {
+                                        *deleting = Some(k.path.clone());
                                     }
                                 });
-                                continue;
                             }
-                            ui.horizontal(|ui| {
-                                if ui.button(&k.name).on_hover_text("Open this story").clicked() {
-                                    answer = Some(Some(k.path.clone()));
-                                }
-                                if let Some(at) = k.changed {
-                                    ui.weak(crate::versions::ago(at, now));
-                                }
-                                if let Some(online) = k.online {
-                                    ui.weak(format!("\u{00b7} {online}"));
-                                }
-                                // Not the story open: it is being written in.
-                                let gone = egui::Button::new(egui::RichText::new("Delete\u{2026}").weak()).frame(false);
-                                if shown.as_ref() != Some(&k.path) && ui.add(gone).on_hover_text("Delete this story here and online").clicked() {
-                                    *deleting = Some(k.path.clone());
-                                }
-                            });
+                        });
+                        ui.add_space(6.0);
+                        let tip = "A .caprice file from your computer: it is kept in this browser from then on";
+                        if cfg!(target_arch = "wasm32") && ui.button("Upload a .caprice file\u{2026}").on_hover_text(tip).clicked() {
+                            upload = true;
                         }
-                    });
-                    ui.add_space(6.0);
-                    let tip = "A .caprice file from your computer: it is kept in this browser from then on";
-                    if cfg!(target_arch = "wasm32") && ui.button("Upload a .caprice file\u{2026}").on_hover_text(tip).clicked() {
-                        upload = true;
                     }
                 }
             });
+        open &= !closed;
         if !open || ctx.input(|i| i.key_pressed(Key::Escape)) {
             answer = answer.or(Some(None));
         }

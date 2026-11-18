@@ -545,8 +545,11 @@ impl App {
         let wide = crate::ui::window_width(ctx, 500.0);
         let gap = if wide < 500.0 { 8.0 } else { 12.0 };
         let columns = (((wide + gap) / (150.0 + gap)).floor() as usize).clamp(1, 3);
-        egui::Window::new("Gallery").id(egui::Id::new("theme_gallery_window")).open(&mut open).collapsible(false).resizable(false).default_width(wide)
+        let id = egui::Id::new("theme_gallery_window");
+        let mut closed = false;
+        egui::Window::new("Gallery").id(id).open(&mut open).collapsible(false).resizable(false).default_width(wide)
             .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0)).show(ctx, |ui| {
+            closed = crate::ui::finger_close(ui, id);
             ui.set_max_width(wide);
             if !signed_in {
                 ui.label("Themes made in Caprice for writers using it, looked at by Caprice before they show here. The gallery is for writers signed in.");
@@ -597,14 +600,14 @@ impl App {
                                     if crate::ui::theme_tile(ui, &t.name, &t.about, palette, g.pictures.get(&t.id).map(|p| p.id()), false) {
                                         act = Some(GalleryAct::Take(t.clone()));
                                     }
-                                    ui.horizontal(|ui| {
+                                    // The button keeps its room; a long name is cut short before it, whole when pointed at.
+                                    egui::Sides::new().shrink_left().truncate().show(ui, |ui| {
                                         ui.label(egui::RichText::new(format!("by {}", t.author)).size(11.0).color(pal().text_dim));
-                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                            let word = if on_shelf { "On your shelf" } else { "Use" };
-                                            if ui.add_enabled(g.taking.is_none(), egui::Button::new(word).small()).clicked() {
-                                                act = Some(GalleryAct::Take(t.clone()));
-                                            }
-                                        });
+                                    }, |ui| {
+                                        let word = if on_shelf { "On your shelf" } else { "Use" };
+                                        if ui.add_enabled(g.taking.is_none(), egui::Button::new(word).small()).clicked() {
+                                            act = Some(GalleryAct::Take(t.clone()));
+                                        }
                                     });
                                 });
                                 if k % columns == columns - 1 {
@@ -616,7 +619,7 @@ impl App {
                 }
                 Tab::Mine => {
                     if g.mine.is_empty() {
-                        ui.label(egui::RichText::new("You have sent no theme. Send one from Yours: its \u{22ef} menu, \u{201c}Send to the gallery\u{2026}\u{201d}.").color(pal().text_dim));
+                        ui.label(egui::RichText::new("You have sent no theme. Send one from Yours: in the menu beside its name, \u{201c}Send to the gallery\u{2026}\u{201d}.").color(pal().text_dim));
                     }
                     for m in &g.mine {
                         let state = match m.state.as_str() {
@@ -633,7 +636,7 @@ impl App {
                 Tab::Waiting => waiting_tab(ui, g, &mut act),
             }
         });
-        self.gallery.open &= open;
+        self.gallery.open &= open && !closed;
         match act {
             Some(GalleryAct::SignIn) => self.cloud.open = true,
             Some(GalleryAct::List) => self.list_gallery(ctx),
@@ -654,8 +657,10 @@ impl App {
         let (mut send, mut done) = (false, false);
         let wide = crate::ui::window_width(ctx, 420.0);
         let field = (wide - 140.0).clamp(100.0, 280.0);
-        egui::Window::new("Send to the gallery").id(egui::Id::new("gallery_sending")).open(&mut open).collapsible(false).resizable(false).default_width(wide)
+        let id = egui::Id::new("gallery_sending");
+        egui::Window::new("Send to the gallery").id(id).open(&mut open).collapsible(false).resizable(false).default_width(wide)
             .anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0)).show(ctx, |ui| {
+            done |= crate::ui::finger_close(ui, id);
             ui.set_max_width(wide);
             ui.label(WHAT_HAPPENS);
             ui.add_space(4.0);

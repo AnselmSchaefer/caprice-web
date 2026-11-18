@@ -1249,6 +1249,7 @@ impl App {
         let (mut open, mut draw) = (true, false);
         let (can_paint, online) = (self.can_paint(), !self.claude);
         let b = &mut self.backdrop;
+        let mut closed = false;
         egui::Window::new("Describe the scene")
             .id(Id::new("scene_panel"))
             .open(&mut open)
@@ -1256,6 +1257,7 @@ impl App {
             .resizable(true)
             .collapsible(false)
             .show(ctx, |ui| {
+                closed = crate::ui::finger_close(ui, Id::new("scene_panel"));
                 ui.label(egui::RichText::new("What should Claude paint behind this part of the story?").color(pal().text_dim));
                 let field = egui::TextEdit::multiline(&mut b.description)
                     .hint_text("A rural village in a valley between the mountains and the sea, at dusk\u{2026}")
@@ -1278,6 +1280,7 @@ impl App {
                 let tip = "Have Claude paint this scene, from the caret's paragraph on (Ctrl+Enter)";
                 draw |= ui.add_enabled(can, egui::Button::new("Draw")).on_hover_text(tip).clicked();
             });
+        open &= !closed;
         if !open || draw {
             b.panel = false;
         }
@@ -1309,6 +1312,7 @@ impl App {
         let mut scenes: Vec<&Scene> = self.doc.scenes.iter().filter(|s| !s.versions.is_empty()).collect();
         scenes.sort_by_key(|s| (s.at, s.id));
         let here = self.scene_here().map(|s| s.id);
+        let mut closed = false;
         egui::Window::new("Scenes")
             .id(Id::new("scene_list"))
             .open(&mut open)
@@ -1316,6 +1320,7 @@ impl App {
             .default_height(480.0)
             .collapsible(false)
             .show(ctx, |ui| {
+                closed = crate::ui::finger_close(ui, Id::new("scene_list"));
                 egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, |ui| {
                     for s in &scenes {
                         let key = (s.id, s.shown);
@@ -1388,6 +1393,7 @@ impl App {
                     }
                 });
             });
+        open &= !closed;
         self.backdrop.list = open;
         // Another device holds the pen (R34): the list only goes to a scene.
         if !self.can_edit() && !matches!(action, Some(Do::GoTo(_))) {

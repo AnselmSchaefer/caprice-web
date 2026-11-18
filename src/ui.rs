@@ -34,6 +34,29 @@ pub fn window_width(ctx: &egui::Context, w: f32) -> f32 {
     let m = ctx.global_style().spacing.window_margin;
     fit_width(ctx, w, (m.leftf() + m.rightf()) / 2.0 + 1.0)
 }
+
+/// How wide the corner is that closes a window under a finger: about a fingertip.
+const FINGER_CLOSE: f32 = 44.0;
+
+/// Whether a finger tapped near the cross of the window `window` (its `Window::id`), to close it.
+/// egui's cross answers for itself alone, an icon's width, and a finger on a phone misses it more
+/// often than not: the window around it takes the tap, and nothing happens. While the pointer is a
+/// finger, the corner of the title bar around the cross, and a little beyond the window's edge,
+/// closes the window too. With a mouse the cross is left as it is, lit when it is pointed at.
+/// Call it first in the window's contents, which begin under the title bar.
+pub fn finger_close(ui: &mut egui::Ui, window: Id) -> bool {
+    if !crate::platform::pressed_by_finger() {
+        return false;
+    }
+    let Some(outer) = ui.ctx().memory(|m| m.area_rect(window)) else { return false };
+    let reach = 8.0;
+    let corner = Rect::from_min_max(pos2(outer.right() - FINGER_CLOSE, outer.top() - reach), pos2(outer.right() + reach, ui.max_rect().top()));
+    // In the window's layer, over the window itself; outside the window's own rect it is clipped
+    // away unless the corner is its clip.
+    let mut over = ui.new_child(UiBuilder::new().max_rect(corner));
+    over.set_clip_rect(corner);
+    over.interact(corner, window.with("finger_close"), Sense::click()).clicked()
+}
 /// Where the page bar is docked: lying under the pages, or standing at the left or right.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub enum BarSide {
@@ -401,7 +424,8 @@ fn yours_section<'a>(ui: &mut egui::Ui, title: &str, entries: impl Iterator<Item
                     ui.set_width(150.0);
                     ui.label(egui::RichText::new(e.shown_name()).size(12.0).color(pal().text_dim));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.menu_button(egui::RichText::new("\u{22ef}").size(12.0), |ui| {
+                        // The UI's font has no "⋯"; its monospace face has.
+                        ui.menu_button(egui::RichText::new("\u{22ef}").size(12.0).monospace(), |ui| {
                             // A drawing goes to a file; a program only to the gallery (R36), once.
                             if !e.program && ui.button("Export\u{2026}").on_hover_text("Save its drawing, to change it or give it to someone").clicked() {
                                 *ask = Some(Ask::Export(e.id.clone()));
