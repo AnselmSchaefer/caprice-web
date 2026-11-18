@@ -2010,6 +2010,126 @@ mod tests {
     }
 
     #[test]
+    fn on_a_phone_the_toolbar_holds_file_undo_and_redo_with_the_name_in_the_middle_and_the_rest_under_more() {
+        let mut h = Harness::new();
+        h.app.path = Some(std::path::PathBuf::from("/tmp/Hatch.caprice"));
+        h.frames(3, vec![], Modifiers::NONE);
+        assert!(h.widget_rect("Undo").is_none() && h.widget_rect("More tools").is_none(), "on a desktop, every tool and no arrows");
+
+        (h.width, h.height) = (390.0, 800.0);
+        h.frames(3, vec![], Modifiers::NONE);
+        let top = App::dock_rect(Rect::from_min_size(Pos2::ZERO, egui::vec2(390.0, 800.0)), true);
+        let [file, undo, redo, more] = ["File", "Undo", "Redo", "More tools"].map(|n| h.widget_rect(n).unwrap_or_else(|| panic!("{n} in the toolbar")));
+        assert!(file.right() < undo.left() && undo.right() < redo.left(), "{file:?} {undo:?} {redo:?}");
+        assert!(top.right() - more.right() < 20.0, "⋯ at the right end: {more:?} in {top:?}");
+        let (at, _) = painted_name(&h);
+        assert_eq!(at.len(), 1, "the whole name");
+        assert!(at[0].left() > redo.right() && at[0].right() < more.left(), "between them: {at:?}");
+        assert!((at[0].center().x - top.center().x).abs() < 2.0, "in the middle of the dock: {at:?}");
+
+        // Everything else is under "⋯", which opens under the toolbar.
+        assert!(h.widget_rect("Chapter").is_none() && h.widget_rect("Scene").is_none());
+        h.click_widget("More tools");
+        for name in ["Chapter", "Page", "Insert", "Note", "Find", "Scene", "Text colour"] {
+            let at = h.widget_rect(name).unwrap_or_else(|| panic!("{name} under ⋯"));
+            assert!(at.top() > top.bottom(), "{name} {at:?}");
+        }
+        h.app.more_tools = false;
+
+        // The arrows undo and redo, there being no keys for them.
+        h.type_text("Hello");
+        h.time += 5.0;
+        h.type_text(" there");
+        h.click_widget("Undo");
+        assert_eq!(h.text(), "Hello");
+        h.click_widget("Undo");
+        assert_eq!(h.text(), "");
+        h.click_widget("Redo");
+        assert_eq!(h.text(), "Hello");
+    }
+
+    #[test]
+    fn on_a_phone_the_page_bar_holds_the_count_the_track_and_small_buttons_with_no_room_left_empty() {
+        let mut h = Harness::new();
+        (h.width, h.height) = (390.0, 800.0);
+        h.frames(3, vec![], Modifiers::NONE);
+        h.click_widget("+");
+        h.click_widget("+");
+        h.frames(90, vec![], Modifiers::NONE);
+        let bottom = App::dock_rect(Rect::from_min_size(Pos2::ZERO, egui::vec2(390.0, 800.0)), false);
+        let [new, fit, pad] = ["+", "Fit", "Scratchpad"].map(|n| h.widget_rect(n).unwrap_or_else(|| panic!("{n} in the page bar")));
+        assert!(new.right() < fit.left() && fit.right() < pad.left(), "{new:?} {fit:?} {pad:?}");
+        assert!(pad.width() <= 30.0, "the scratchpad as a pad, not its name");
+        assert!(bottom.right() - pad.right() < 24.0, "at the bar's end: {pad:?} {bottom:?}");
+        let count = h.painted.iter().find_map(|cs| match &cs.shape {
+            egui::Shape::Text(t) if t.galley.job.text == "3 / 3" => Some(t.visual_bounding_rect()),
+            _ => None,
+        });
+        let count = count.expect("the page count, short");
+        assert!(count.left() - bottom.left() < 30.0, "at the bar's start: {count:?}");
+        // The track takes the room between, and turns the pages.
+        let (a, b) = h.app.last_track;
+        assert!(a.x > count.right() && b.x < new.left() && b.x - a.x > 60.0, "{a:?} {b:?}");
+        h.scrub_to(0, 3);
+        assert_eq!(h.shown(), 0);
+        assert!(!painted_texts(&h).iter().any(|t| t.ends_with('%')), "no zoom: two fingers set it");
+
+        // Narrower, the track goes, and what is left stands in the middle.
+        h.width = 250.0;
+        h.frames(3, vec![], Modifiers::NONE);
+        let bottom = App::dock_rect(Rect::from_min_size(Pos2::ZERO, egui::vec2(250.0, 800.0)), false);
+        let [new, pad] = ["+", "Scratchpad"].map(|n| h.widget_rect(n).unwrap_or_else(|| panic!("{n} in the page bar")));
+        let count = h.painted.iter().find_map(|cs| match &cs.shape {
+            egui::Shape::Text(t) if t.galley.job.text == "1 / 3" => Some(t.visual_bounding_rect()),
+            _ => None,
+        });
+        let (left, right) = (count.map_or(new.left(), |c| c.left()), pad.right());
+        assert!(((left - bottom.left()) - (bottom.right() - right)).abs() < 12.0, "{left} and {right} in {bottom:?}");
+    }
+
+    #[test]
+    fn on_a_phone_while_writing_the_page_bar_holds_the_formatting_over_the_keyboard() {
+        let mut h = Harness::new();
+        (h.width, h.height) = (390.0, 780.0);
+        let touch = |id: u64, phase, pos| egui::Event::Touch { device_id: egui::TouchDeviceId(1), id: egui::TouchId(id), phase, pos, force: None };
+        let desk = egui::pos2(4.0, 300.0);
+        h.frames(1, vec![touch(1, egui::TouchPhase::Start, desk)], Modifiers::NONE);
+        h.frames(30, vec![touch(1, egui::TouchPhase::End, desk)], Modifiers::NONE);
+        assert!(h.widget_rect("Fit").is_some() && h.widget_rect("B").is_none(), "not writing: the page bar");
+
+        // A tap on the page brings the keyboard, and the window is shorter by it.
+        h.click_in_page(egui::vec2(10.0, 10.0));
+        h.height = 460.0;
+        h.frames(5, vec![], Modifiers::NONE);
+        let bottom = App::dock_rect(Rect::from_min_size(Pos2::ZERO, egui::vec2(390.0, 460.0)), false);
+        assert!(h.widget_rect("Fit").is_none() && h.widget_rect("+").is_none());
+        for name in ["B", "I", "U", "Chapter"] {
+            let at = h.widget_rect(name).unwrap_or_else(|| panic!("{name} over the keyboard"));
+            assert!(bottom.shrink(4.0).contains_rect(at), "{name} {at:?} in {bottom:?}");
+        }
+        // On a usual phone, 360 points wide, they all fit too.
+        h.width = 360.0;
+        h.frames(5, vec![], Modifiers::NONE);
+        let narrow = App::dock_rect(Rect::from_min_size(Pos2::ZERO, egui::vec2(360.0, 460.0)), false);
+        let (b, chapter) = (h.widget_rect("B").unwrap(), h.widget_rect("Chapter").unwrap());
+        assert!(narrow.shrink(4.0).contains_rect(b.union(chapter)), "{b:?} to {chapter:?} in {narrow:?}");
+        h.width = 390.0;
+
+        // Bold, and a chapter title, while the keyboard stays up.
+        h.click_widget("B");
+        h.type_text("Night");
+        assert!((0..5).all(|c| h.app.doc.flow.styles[c].bold), "written in bold");
+        h.click_widget("Chapter");
+        assert!(h.app.doc.para_attrs_at(h.app.caret).is_chapter_title());
+        assert!(h.ime.last() == Some(&true), "the keyboard is still up");
+
+        // Put away, it takes the formatting with it.
+        h.height = 780.0;
+        h.frames(5, vec![], Modifiers::NONE);
+        assert!(h.widget_rect("Fit").is_some() && h.widget_rect("B").is_none());
+    }
+
+    #[test]
     fn the_page_bar_stands_at_the_side_its_grip_is_dragged_to_and_stays_there() {
         let dir = std::env::temp_dir().join(format!("caprice-bar-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);

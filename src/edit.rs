@@ -122,6 +122,16 @@ impl Default for History {
 
 impl History {
     const MAX: usize = 1000;
+
+    /// Whether there is a step to undo, or to redo: the toolbar greys its buttons otherwise.
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+
     /// Edits closer together than this, and contiguous, undo as one step.
     const GROUP_GAP: f64 = 1.0;
 
