@@ -64,8 +64,8 @@ and played by Caprice in a sandbox. It can only draw shapes; Caprice decides eve
   `gamma_multiply`, `lerp`). A gradient is a mesh, its colour at each vertex.
 - **Points cost.** A frame may draw at most 450 000 points (a polygon's points, a path's points, a
   mesh's vertices; a circle or a line counts one), but every point is paid for in the writer's own
-  frame, on their phone too. Keep a frame within about 100 000 points on a phone's desk and 200 000
-  on a computer's, zoomed out included. A field of many small fills is cheaper as one mesh.
+  frame, on their phone too. Keep a frame within 100 000 points on a phone's desk and 320 000
+  on a computer's, zoomed out included: a theme that draws more is sent back to be made lighter. A field of many small fills is cheaper as one mesh.
   Polygons cost the most: egui smooths every edge.
 
 ## What you may not do
@@ -93,6 +93,8 @@ Answer with exactly two fenced blocks and nothing else of length:
 
 It is built with Rust 1.99 (edition 2024): `rustc --crate-type cdylib --target
 wasm32-unknown-unknown -O` against the SDK. If it does not build, you are shown the compiler's
-messages and give the whole file again, fixed. If it builds, you are shown pictures of it at a few
+messages and give the whole file again, fixed. If it builds but does not pass Caprice's checks
+(the module's load check, playing a story through without trapping or going silent, the points
+above), you are told what they found and do the same. If it builds and passes them, you are shown pictures of it at a few
 moments of a story (begun; three chapters written; a chapter finishing; a title carried, if it
 carries titles) and its points on a phone's desk and a computer's, and asked to make it better.

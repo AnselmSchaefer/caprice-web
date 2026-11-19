@@ -292,8 +292,9 @@ export class Ledger extends DurableObject {
     const old = this.rows("SELECT id FROM theme_talks WHERE made <= ?", now - l.THEME_DAYS * DAY);
     for (const o of old) this.sql.exec("DELETE FROM theme_turns WHERE id = ?", o.id);
     this.sql.exec("DELETE FROM theme_talks WHERE made <= ?", now - l.THEME_DAYS * DAY);
-    const most = { errors: l.THEME_ERRORS_ROUNDS, frames: l.THEME_FRAMES_ROUNDS, change: l.THEME_CHANGE_ROUNDS };
-    const column = { errors: "errors", frames: "frames", change: "changes" };
+    // A fix is a fix whichever kind: the compiler's errors, or what Caprice's checks found.
+    const most = { errors: l.THEME_ERRORS_ROUNDS, checks: l.THEME_ERRORS_ROUNDS, frames: l.THEME_FRAMES_ROUNDS, change: l.THEME_CHANGE_ROUNDS };
+    const column = { errors: "errors", checks: "errors", frames: "frames", change: "changes" };
     let talk = null;
     if (id !== null) {
       talk = this.rows("SELECT * FROM theme_talks WHERE id = ? AND user = ?", id, user)[0];

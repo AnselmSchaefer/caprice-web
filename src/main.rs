@@ -7918,6 +7918,78 @@ mod tests {
         assert!(h.app.themes.own.entries.is_empty(), "nothing kept");
     }
 
+    /// Sources the tests' compiler builds to modules of the world's exports written by hand, each
+    /// standing for a program that misbehaves: one that stops while playing, one the load check
+    /// refuses, one that draws a point more than a phone's desk is asked to keep within (a mesh of
+    /// no triangles, cheap to draw: the points are what is counted). Its points.
+    fn misbehaving_sources() -> u32 {
+        use platform::program::{Stand, stand_in};
+        let world = |frame: &str, import: &str| wat::parse_str(format!(r#"(module {import} (memory (export "memory") 10 512)
+            (func (export "cabi_realloc") (param i32 i32 i32 i32) (result i32) i32.const 600000)
+            (func (export "events") (param i32 i32))
+            (func (export "frame") (param i32) (result i32) {frame} i32.const 1024)
+            (func (export "cabi_post_frame") (param i32)))"#)).unwrap();
+        let (failing, heavy) = (world("unreachable", ""), world("nop", ""));
+        let unloadable = world("nop", r#"(import "env" "now" (func))"#);
+        assert!(eggs::program::check(&unloadable).is_err());
+        stand_in(&failing, || Stand::Fails("unreachable"));
+        let points = gallery::BUDGET.0 as u32 + 1;
+        let words = [vec![1, 0, 0, 0, 0, 0, 0, 0, 4, points, 0], vec![0; 3 * points as usize]].concat();
+        stand_in(&heavy, move || Stand::Words(words.clone()));
+        let built = |source: &str, module: &[u8]| {
+            platform::compiler::stand_in(source, Ok(platform::compiler::Built::Module { module: module.to_vec(), toolchain: "the tests' stand-in".into(), ms: 1 }))
+        };
+        built("// stops", &failing);
+        built("// will not load", &unloadable);
+        built("// heavy", &heavy);
+        points
+    }
+
+    #[test]
+    fn what_caprice_finds_of_a_program_that_built_goes_back_to_claude_as_checks_unseen_by_the_writer() {
+        // Stopped while playing, refused by the load check, too heavy: each goes back as `checks`,
+        // in Caprice's words, and the light version after them is shown to Claude and the writer.
+        let points = misbehaving_sources();
+        let mut h = Harness::new();
+        let answers = vec![written("// stops", "Jars"), written("// will not load", "Jars"), written("// heavy", "Jars"), written(FIREFLIES_SOURCE, "Jars"), written(FIREFLIES_SOURCE, "Jars")];
+        let server = make_with_claude(&mut h, "checked", answers, "Jars of light");
+        until_made(&mut h);
+        let rounds = server.0.borrow().theme_rounds.clone();
+        let kinds: Vec<Option<&str>> = rounds.iter().map(|r| r.1.as_deref()).collect();
+        assert_eq!(kinds, [None, Some("checks"), Some("checks"), Some("checks"), Some("frames")]);
+        let said: Vec<String> = rounds.iter().map(|r| String::from_utf8_lossy(&r.2).into_owned()).collect();
+        assert!(said[1].starts_with("Caprice stopped it while playing the story: it failed"), "{}", said[1]);
+        assert!(said[2].starts_with("Caprice will not play its program:") && said[2].contains("env"), "{}", said[2]);
+        assert!(said[3].contains(&format!("at most {points} points a frame on a phone's desk")) && said[3].contains("within 100000 and 320000"), "{}", said[3]);
+        assert!(h.painted_at("Keep it").is_some(), "the version that passed");
+        assert!(painted_texts(&h).iter().all(|t| !t.contains("points a frame") && !t.contains("Caprice stopped it")), "never the checks to the writer");
+    }
+
+    #[test]
+    fn a_theme_too_heavy_however_often_it_is_sent_back_is_still_offered_to_keep() {
+        // When the fixes run out, the writer still has the near miss, rather than nothing.
+        misbehaving_sources();
+        let mut h = Harness::new();
+        let server = make_with_claude(&mut h, "heavy", (0..5).map(|_| written("// heavy", "Heavy")).collect(), "Something heavy");
+        until_made(&mut h);
+        let kinds: Vec<Option<String>> = server.0.borrow().theme_rounds.iter().map(|r| r.1.clone()).collect();
+        assert_eq!(kinds.iter().map(Option::as_deref).collect::<Vec<_>>(), [None, Some("checks"), Some("checks"), Some("checks"), Some("frames")]);
+        assert!(h.painted_at("Keep it").is_some() && h.painted_at(making::NEVER_WORKED).is_none());
+    }
+
+    #[test]
+    fn a_lighter_version_is_not_lost_to_a_heavier_one_that_cannot_be_made_lighter() {
+        misbehaving_sources();
+        let mut h = Harness::new();
+        let answers = vec![written(FIREFLIES_SOURCE, "Jars"), written("// heavy", "Heavy"), written("// heavy", "Heavy"), written("// heavy", "Heavy"), written("// heavy", "Heavy")];
+        let server = make_with_claude(&mut h, "lighter", answers, "Jars of light");
+        until_made(&mut h);
+        let kinds: Vec<Option<String>> = server.0.borrow().theme_rounds.iter().map(|r| r.1.clone()).collect();
+        assert_eq!(kinds.iter().map(Option::as_deref).collect::<Vec<_>>(), [None, Some("frames"), Some("checks"), Some("checks"), Some("checks")]);
+        assert!(h.painted_at("The newest version draws more than a writer's desk can carry. This is the version before.").is_some());
+        assert!(h.painted_at("Jars").is_some() && h.painted_at("Heavy").is_none() && h.painted_at("Keep it").is_some(), "the light one");
+    }
+
     #[test]
     fn a_theme_is_made_only_for_a_writer_signed_in_and_what_the_server_says_is_shown() {
         let mut h = Harness::new();

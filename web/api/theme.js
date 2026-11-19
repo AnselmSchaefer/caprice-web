@@ -7,7 +7,7 @@
 // It must never become a way to ask Claude anything on Caprice's key. So the Worker writes the whole
 // prompt (the guide written for this, the SDK, the built-in themes ported as examples), the writer's
 // words are one capped field in it, the conversation is kept here (in the Ledger) so the browser
-// cannot write Claude's side of it, a round is one of three kinds (`errors`, `frames`, `change`),
+// cannot write Claude's side of it, a round is one of four kinds (`errors`, `checks`, `frames`, `change`),
 // each capped in size and in number, and what goes back is only the program's source and its
 // palette, never Claude's free text. The Ledger counts every round before Claude is asked, and the
 // request fixes the most it can cost.
@@ -83,6 +83,9 @@ function pictures(bytes) {
 const asked = {
   begin: (said) => `<request>\n${said}\n</request>\n\nWrite this theme. Answer as the guide says: the palette's json block, then the whole rust file.`,
   errors: (said) => `It did not build. The compiler said:\n\n\`\`\`\n${said}\n\`\`\`\n\nFix it, and give the palette and the whole file again.`,
+  // It built, but Caprice found it does not do what every theme must (the load check, playing a
+  // story through, the budget of points): what it found, in its own words.
+  checks: (said) => `It built, but Caprice's checks found:\n\n<checks>\n${said}\n</checks>\n\nFix it, and give the palette and the whole file again.`,
   change: (said) => `The writer asks for a change:\n\n<change>\n${said}\n</change>\n\nMake it, and give the palette and the whole file again.`,
   frames: (moments, points) => `It built. Here it is as Caprice drew it, at these moments of a story: ${moments.join(", ")}. `
     + `At most ${points.phone} points a frame on a phone's desk, ${points.computer} on a computer's (zoomed out included). `
@@ -96,7 +99,7 @@ export async function themeProgram(request, env, user, id) {
   if (!env.ANTHROPIC_API_KEY) return text(503, "Making themes is not set up", { "Retry-After": "3600" });
   const l = limits(env);
   const kind = id ? request.headers.get("X-Caprice-Kind") : "begin";
-  const most = { begin: l.THEME_REQUEST_BYTES, change: l.THEME_REQUEST_BYTES, errors: l.THEME_ERRORS_BYTES, frames: l.THEME_FRAMES_BYTES }[kind];
+  const most = { begin: l.THEME_REQUEST_BYTES, change: l.THEME_REQUEST_BYTES, errors: l.THEME_ERRORS_BYTES, checks: l.THEME_ERRORS_BYTES, frames: l.THEME_FRAMES_BYTES }[kind];
   if (!most) return text(400, "Not a kind of round");
   const got = await body(request, most);
   if (got.error) return refused(got);

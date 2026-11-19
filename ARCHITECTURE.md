@@ -2060,8 +2060,9 @@ ask Claude anything else** (`/api/theme-program`, `web/api/theme.js`, R36, the p
   the tests' Miniflare loads them from the checkout's root). So **a change to the SDK, its world
   or a ported theme changes the prompt too**: keep `GUIDE.md` true to it.
 - **A round is one of a few kinds, each capped in size and number**: begun (the writer's request,
-  `THEME_REQUEST_BYTES`), `errors` (the compiler's words, `THEME_ERRORS_BYTES`, at most
-  `THEME_ERRORS_ROUNDS` a theme), `frames` (the preview's PNGs as bytes, checked to be PNGs of a
+  `THEME_REQUEST_BYTES`), `errors` (the compiler's words, `THEME_ERRORS_BYTES`), `checks` (what
+  Caprice's checks found of a program that built, in Caprice's words, as large; with `errors` at
+  most `THEME_ERRORS_ROUNDS` a theme, a fix being a fix whichever kind), `frames` (the preview's PNGs as bytes, checked to be PNGs of a
   desk's size, never decoded, made base64 here, with their moments and points; `THEME_FRAMES_BYTES`,
   `THEME_FRAMES_ROUNDS`), `change` (the writer's words, `THEME_CHANGE_ROUNDS`). The writer's words
   are one field in a sentence the Worker wrote. Anything else is refused before Claude is asked.
@@ -2093,7 +2094,8 @@ ask Claude anything else** (`/api/theme-program`, `web/api/theme.js`, R36, the p
 
 Tests: "a theme is begun from the writer's words, and only its source and palette come back", "the
 next round tells claude the compiler's words, with the whole conversation kept by the worker",
-"pictures go to claude as images, and are kept in the conversation as words only", "what is not one
+"what caprice's checks found of a program that built goes to claude as a fix, counted with the
+compiler's", "pictures go to claude as images, and are kept in the conversation as words only", "what is not one
 of its kinds, too big, or not pictures is refused before claude is asked", "rounds of each kind run
 out for a theme, and themes for a writer, and claude is not asked again", "the site's rounds for the
 day run out for everyone, and a round that fails still counts", "without a key, or switched off, no
@@ -2668,9 +2670,15 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   Yours, for a writer signed in, saying the words go to an AI model by Anthropic) starts the compiler first, so a
   browser that cannot build says so before Claude is asked, and the toolchain loads while Claude
   writes. Each answer (only a source and a palette) is built, checked (`eggs::program::check`) and
-  played off screen (`eggs::preview`); what goes wrong (the compiler's words, a program Caprice will
-  not play, one stopped while playing) goes back to Claude as an `errors` round, at most `FIXES`
-  (the server's `THEME_ERRORS_ROUNDS`), and **the writer never sees the compiler's words**. The
+  played off screen (`eggs::preview`). **A version is done only when it passed everything a writer
+  would meet** (the owner's decisions for step 5): what goes wrong goes back to Claude, the
+  compiler's words as an `errors` round, a program Caprice will not play, one stopped while playing
+  the preview's story and one that draws more than `gallery::BUDGET` as a `checks` round in
+  Caprice's words, at most `FIXES` of either (the server's `THEME_ERRORS_ROUNDS`), and **the writer
+  never sees the compiler's words nor the checks**. The budget is the one the gallery's review
+  shows and the guide names (`GUIDE.md`, "Points cost"): change them together. A version over it
+  that plays is a near miss: kept to fall back on while there is no version within it, offered to
+  keep when the fixes run out, never put in place of a lighter one. The
   first version that plays is shown to Claude as its pictures and points (`frames`, `LOOKS` times:
   each costs about as much as writing it); then the writer sees its pictures, keeps it, starts
   again, or asks for a change (`change`). **A version that worked is never lost to one that did
@@ -2681,6 +2689,9 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   to build. Closing the window only hides it. Tests:
   `a_theme_made_with_claude_is_built_shown_to_claude_once_changed_and_kept_when_the_writer_says`,
   `mistakes_go_back_to_claude_unseen_and_a_theme_that_never_works_says_so_keeping_nothing`,
+  `what_caprice_finds_of_a_program_that_built_goes_back_to_claude_as_checks_unseen_by_the_writer`,
+  `a_theme_too_heavy_however_often_it_is_sent_back_is_still_offered_to_keep`,
+  `a_lighter_version_is_not_lost_to_a_heavier_one_that_cannot_be_made_lighter`,
   `a_theme_is_made_only_for_a_writer_signed_in_and_what_the_server_says_is_shown` (the stand-in
   server answers the rounds, `Online::theme_answers`); in the browser `smoke.mjs` makes one with a
   stand-in Claude, built in the tab.

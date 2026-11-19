@@ -24,7 +24,9 @@ use crate::platform::{Answer, Request, Waker};
 use crate::theme::{Theme, pal};
 
 /// The points a frame of a theme is asked to keep within (the plan's step 5): about the Magic
-/// Vineyard's, on a phone's desk and on a computer's, zoomed out included.
+/// Vineyard's, on a phone's desk and on a computer's, zoomed out included. A version made with
+/// Claude that draws more goes back to be made lighter (`making.rs`), and the guide names the same
+/// numbers (`theme-sdk/GUIDE.md`).
 pub const BUDGET: (usize, usize) = (100_000, 320_000);
 /// What a writer sending a theme is told of what happens to it.
 pub const WHAT_HAPPENS: &str = "Caprice builds it again from its source, plays it and looks at it before it shows in the \
