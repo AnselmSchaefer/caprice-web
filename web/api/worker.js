@@ -76,7 +76,8 @@ async function route(request, env) {
   if (live) return connect(request, env, url, live[1]);
 
   // For the site's owner, with ADMIN_TOKEN, from a terminal: not the app, and no session.
-  if (path === "/api/admin/scenes") return admin(request, env);
+  if (path === "/api/admin/scenes") return admin(request, env, ledger => ledger.sceneDays());
+  if (path === "/api/admin/themes") return admin(request, env, ledger => ledger.themeCosts());
 
   // Everything else is asked by the app itself: a link or a form on another site sends no such
   // header, and the browser will not let another site's script add it without CORS, which we never allow.
@@ -122,10 +123,16 @@ async function signedIn(request, env, url, session) {
   if (path === "/api/scene") return method === "POST" ? scene(request, env, session.u) : text(405, "POST only");
   if (path === "/api/scenes") return method === "GET" ? waiting(url, env, session.u) : text(405, "GET only");
   // Making a theme program with Claude (theme.js): begun, then a round at a time.
-  const making = path.match(/^\/api\/theme-program(?:\/([^/]+))?$/);
+  const making = path.match(/^\/api\/theme-program(?:\/([^/]+))?(\/kept)?$/);
   if (making) {
     if (method !== "POST") return text(405, "POST only");
     if (making[1] !== undefined && !THEME_ID.test(making[1])) return text(400, "Not a theme's id");
+    // The writer kept it: counted, Claude not asked.
+    if (making[2]) {
+      if (making[1] === undefined) return text(404, "No such request");
+      const kept = await env.LEDGER.get(env.LEDGER.idFromName("ledger")).themeKept(session.u, making[1]);
+      return kept.ok ? new Response(null, { status: 204 }) : text(kept.error, kept.message);
+    }
     return themeProgram(request, env, session.u, making[1]);
   }
   // The gallery of theme programs (gallery.js): sent, listed, read, and decided by the owner.
@@ -370,9 +377,11 @@ async function connect(request, env, url, key) {
   return room.fetch("https://room/", { headers });
 }
 
-// The scenes painted lately, by hashed id: `curl -H "Authorization: Bearer $TOKEN" <site>/api/admin/scenes`.
-// Without a long enough ADMIN_TOKEN (a secret) there is no such request at all.
-async function admin(request, env) {
+// For the owner, from a terminal: `curl -H "Authorization: Bearer $TOKEN" <site>/api/admin/scenes`
+// (the scenes painted lately, by hashed id) or `/api/admin/themes` (what themes made with Claude
+// cost, a day at a time, and how many were kept). Without a long enough ADMIN_TOKEN (a secret)
+// there is no such request at all.
+async function admin(request, env, asked) {
   const token = env.ADMIN_TOKEN ?? "";
   if (token.length < 32) return text(404, "No such request");
   if (request.method !== "GET") return text(405, "GET only");
@@ -380,8 +389,7 @@ async function admin(request, env) {
   // Compared as hashes, in time that does not depend on how much of it was right.
   const [a, b] = await Promise.all([given, token].map(t => crypto.subtle.digest("SHA-256", new TextEncoder().encode(t))));
   if (!crypto.subtle.timingSafeEqual(a, b)) return text(401, "Not the site's owner");
-  const ledger = env.LEDGER.get(env.LEDGER.idFromName("ledger"));
-  return json(await ledger.sceneDays());
+  return json(await asked(env.LEDGER.get(env.LEDGER.idFromName("ledger"))));
 }
 
 // Deleting costs nothing in R2; it takes up to a thousand keys at once.

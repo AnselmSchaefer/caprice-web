@@ -21,6 +21,10 @@ import { limits } from "./ledger.js";
 import { COLOURS } from "./theme-file.js";
 
 const WRITER = "claude-opus-5-5";
+// What a token costs, in dollars a million (Anthropic's prices, 2026-11): input, the cache written
+// for an hour (twice the input's), read from the cache, and output (thinking included). A round the
+// platform's refusal fallback answered with another model is counted at the writer's prices.
+const PRICES = { "claude-opus-5-5": { input: 4, written: 8, read: 0.2, output: 20 } };
 // A theme's id, given by the Ledger when one is begun.
 export const THEME_ID = /^[0-9a-f]{16}$/;
 // The palette's names (src/own.rs, NAMES), and "light".
@@ -125,10 +129,11 @@ export async function themeProgram(request, env, user, id) {
   const round = await ledger.themeRound(user, id ?? null, kind);
   if (!round.ok) return refused(round);
   const answer = (async () => {
-    let answered = null;
+    let answered = null, spent = null;
     try {
       const messages = [...round.turns.map(t => ({ role: t.role, content: t.text })), { role: "user", content }];
       const written = await write(messages, env, l.THEME_TOKENS);
+      spent = written.spent ?? null;
       if (written.error) return written;
       answered = { asked: kept, answer: written.reply };
       return { theme: { theme: round.id, ...written.theme, left: round.left } };
@@ -136,7 +141,7 @@ export async function themeProgram(request, env, user, id) {
       console.error("theme: the round failed", String(e).slice(0, 200));
       return { error: 502, message: "Something went wrong while the theme was written: try again" };
     } finally {
-      await ledger.themeAnswered(user, round.id, answered);
+      await ledger.themeAnswered(user, round.id, answered, spent);
     }
   })();
   return keptAlive(answer, Number(env.THEME_BEAT_MS) || BEAT_MS);
@@ -207,15 +212,24 @@ async function write(messages, env, most) {
       : { error: 502, message: "The theme could not be begun just now: try again later" };
   }
   const message = await sent.json();
-  // What the round cost, for `wrangler tail`: whether the cache was read or written again.
-  const u = message.usage ?? {};
-  const spent = { input: u.input_tokens, written: u.cache_creation_input_tokens, read: u.cache_read_input_tokens, output: u.output_tokens };
+  // What the round cost, kept in the Ledger with the theme (and for `wrangler tail`): whether the
+  // cache was read or written again.
+  const spent = cost(message.usage ?? {});
   console.log("theme: a round", JSON.stringify(spent));
-  if (message.stop_reason === "refusal") return { error: 422, message: "This theme cannot be made: ask for something else" };
+  if (message.stop_reason === "refusal") return { error: 422, message: "This theme cannot be made: ask for something else", spent };
   const reply = (message.content ?? []).filter(b => b.type === "text").map(b => b.text).join("");
   const theme = read(reply);
-  if (!theme) return { error: 502, message: message.stop_reason === "max_tokens" ? "The theme grew too long to finish: ask for something simpler" : "Something went wrong while the theme was written: try again" };
-  return { theme, reply };
+  if (!theme) return { error: 502, message: message.stop_reason === "max_tokens" ? "The theme grew too long to finish: ask for something simpler" : "Something went wrong while the theme was written: try again", spent };
+  return { theme, reply, spent };
+}
+
+// A round's tokens, and what they cost in millionths of a dollar.
+export function cost(u) {
+  const n = v => (Number.isInteger(v) && v > 0 ? v : 0);
+  const spent = { input: n(u.input_tokens), written: n(u.cache_creation_input_tokens), read: n(u.cache_read_input_tokens), output: n(u.output_tokens) };
+  const p = PRICES[WRITER];
+  spent.micro = Math.round(spent.input * p.input + spent.written * p.written + spent.read * p.read + spent.output * p.output);
+  return spent;
 }
 
 // The program and its palette out of Claude's reply, and nothing else of it: the last rust block,

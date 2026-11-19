@@ -29,7 +29,7 @@ async function painted(request) {
   if (claude.broke) return Response.json({ type: "error", error: { type: "invalid_request_error", message: claude.broke.said } }, { status: claude.broke.status });
   // Thinking first, as Opus answers, then the text in two blocks.
   const content = [{ type: "thinking", thinking: "" }, { type: "text", text: claude.writes.slice(0, 9) }, { type: "text", text: claude.writes.slice(9) }];
-  return Response.json({ type: "message", role: "assistant", content, stop_reason: claude.stop, usage: { input_tokens: 10, output_tokens: 20 } });
+  return Response.json({ type: "message", role: "assistant", content, stop_reason: claude.stop, usage: claude.usage ?? { input_tokens: 10, output_tokens: 20 } });
 }
 
 function providers(request) {
@@ -1106,6 +1106,45 @@ test("what is not one of its kinds, too big, or not pictures is refused before c
   assert.equal((await round(api, theme, "frames", framed([png(800, 600)]), { "X-Caprice-Moments": "begun,written", "X-Caprice-Points": "1,2" })).status, 400, "a moment for each picture");
   assert.equal((await api("/api/theme-program/not-an-id", { method: "POST", body: "x" })).status, 400);
   assert.equal(claude.asked.length, 1, "only the theme begun reached Claude");
+});
+
+test("what each theme costs is kept with it, and the owner sees it a day at a time with how many were kept", async t => {
+  const token = "the owner's token, long enough to be one";
+  const mf = await start(t, { ADMIN_TOKEN: token });
+  const ada = await writer(mf, "1", "Ada");
+  const bob = await writer(mf, "2", "Bob");
+  // A round as measured: the prompt written to the cache for an hour, and most of it thinking.
+  claude.usage = { input_tokens: 1000, cache_creation_input_tokens: 50_000, cache_read_input_tokens: 0, output_tokens: 40_000 };
+  claude.writes = THEME_REPLY;
+  const { theme } = await (await begin(ada)).json();
+  assert.equal((await round(ada, theme, "errors", "error: one")).status, 200);
+  // Claude is paid for a reply without a program too.
+  claude.writes = "I would rather not write any code today.";
+  assert.equal((await begin(bob)).status, 502);
+  claude.usage = undefined;
+
+  const kept = id => ada(`/api/theme-program/${id}/kept`, { method: "POST" });
+  assert.equal((await kept(theme)).status, 204);
+  assert.equal((await kept(theme)).status, 204, "once is enough, and twice is no harm");
+  assert.equal((await bob(`/api/theme-program/${theme}/kept`, { method: "POST" })).status, 404, "only its writer keeps it");
+  assert.equal((await kept("0123456789abcdef")).status, 404);
+  assert.equal(claude.asked.length, 3, "keeping asks nothing of Claude");
+
+  const ask = authorization => mf.dispatchFetch(`${SITE}/api/admin/themes`, { headers: authorization ? { Authorization: authorization } : {} });
+  assert.equal((await ask("Bearer not it")).status, 401);
+  const { days, total } = await (await ask(`Bearer ${token}`)).json();
+  assert.equal(days.length, 1);
+  // A round: 1 000 × $4 + 50 000 × $8 + 40 000 × $20 a million tokens, $1.204.
+  assert.deepEqual({ ...total, day: undefined }, {
+    day: undefined, begun: 2, kept: 1, rounds: 3, tokens: { input: 3000, written: 150_000, read: 0, output: 120_000 },
+    dollars: 3.61, keptDollars: 2.41, costPerKept: 3.61,
+  });
+  assert.ok(!JSON.stringify(days).includes("Ada") && !JSON.stringify(days).includes(theme), "nobody's, and no theme's");
+
+  // Ada deletes what she has online: the numbers stay, but say no more that the theme was hers.
+  assert.equal((await ada("/api/stories", { method: "DELETE" })).status, 204);
+  assert.equal((await (await ask(`Bearer ${token}`)).json()).total.dollars, 3.61);
+  assert.equal((await kept(theme)).status, 404);
 });
 
 test("rounds of each kind run out for a theme, and themes for a writer, and claude is not asked again", async t => {

@@ -7447,6 +7447,7 @@ mod tests {
         h.click_widget("Have one made\u{2026}");
         h.frames(2, vec![], Modifiers::NONE);
         assert!(h.labels().contains(making::GOES_OUT), "the writer is told where their words go");
+        assert!(h.labels().contains(making::FREE), "and that it is free, for now");
         h.click_widget("A lighthouse on a cliff by the sea, a window lit for each page, a boat for each chapter");
         h.type_text(request);
         h.click_widget("Make it");
@@ -7867,6 +7868,8 @@ mod tests {
         }
         assert!(h.painted_at("Fireflies at dusk").is_some() && h.painted_at("Keep it").is_some(), "shown to the writer");
         assert!(h.app.themes.own.entries.is_empty(), "nothing kept before the writer says");
+        assert!(h.painted_at(making::FREE).is_some(), "free, said beside Keep it too");
+        assert!(server.0.borrow().themes_kept.is_empty());
 
         // A change: asked, built, shown, not shown to Claude again.
         h.click_widget("Or say what to change");
@@ -7888,6 +7891,7 @@ mod tests {
         assert!(h.app.themes.own.source(&id).is_some_and(|s| s.contains("The Magic Snow, as a theme program")));
         assert!(h.app.themes.own.thumb(&id).is_some(), "its picture, from its preview");
         assert!(!h.app.making.open && !h.app.making.busy(), "the window closes");
+        assert_eq!(server.0.borrow().themes_kept, ["0123456789abcdef"], "the server is told it was kept, once");
         h.frames_until("the program's first frame", |a| a.eggs.program.seen.as_ref().is_some_and(|s| s.frames > 0));
         assert!(program_seen(&h).stopped.is_none());
     }

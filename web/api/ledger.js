@@ -122,6 +122,8 @@ export class Ledger extends DurableObject {
       CREATE TABLE IF NOT EXISTS theme_talks (id TEXT PRIMARY KEY, user TEXT, made INTEGER, errors INTEGER, frames INTEGER,
         changes INTEGER, busy INTEGER);
       CREATE TABLE IF NOT EXISTS theme_turns (id TEXT, n INTEGER, role TEXT, text TEXT, PRIMARY KEY (id, n));
+      CREATE TABLE IF NOT EXISTS theme_costs (id TEXT PRIMARY KEY, user TEXT, begun INTEGER, rounds INTEGER, input INTEGER,
+        written INTEGER, read INTEGER, output INTEGER, micro INTEGER, kept INTEGER);
       CREATE TABLE IF NOT EXISTS gallery (id TEXT PRIMARY KEY, user TEXT, name TEXT, about TEXT, author TEXT, colours TEXT,
         module TEXT, source TEXT, toolchain TEXT, size INTEGER, at INTEGER, state TEXT, why TEXT, signature TEXT, decided INTEGER);
     `);
@@ -316,6 +318,7 @@ export class Ledger extends DurableObject {
       this.bump(now, `themes:${user}`);
       id = [...crypto.getRandomValues(new Uint8Array(8))].map(b => b.toString(16).padStart(2, "0")).join("");
       this.sql.exec("INSERT INTO theme_talks VALUES (?, ?, ?, 0, 0, 0, 0)", id, user, now);
+      this.sql.exec("INSERT INTO theme_costs VALUES (?, ?, ?, 0, 0, 0, 0, 0, 0, 0)", id, user, now);
     } else {
       this.sql.exec(`UPDATE theme_talks SET ${column[kind]} = ${column[kind]} + 1 WHERE id = ?`, id);
     }
@@ -327,9 +330,15 @@ export class Ledger extends DurableObject {
 
   // A round done: what was asked and what Claude answered kept, whole, if it answered; the theme
   // free for its next round either way.
-  themeAnswered(user, id, answered) {
+  // What the round cost (`spent`, its tokens and millionths of a dollar) is added to the theme's
+  // costs whether or not a theme came of it: Claude was paid either way.
+  themeAnswered(user, id, answered, spent = null) {
     const talk = this.rows("SELECT 1 FROM theme_talks WHERE id = ? AND user = ?", id, user)[0];
     if (!talk) return { ok: true };
+    if (spent) {
+      this.sql.exec(`UPDATE theme_costs SET rounds = rounds + 1, input = input + ?, written = written + ?, read = read + ?,
+        output = output + ?, micro = micro + ? WHERE id = ?`, spent.input, spent.written, spent.read, spent.output, spent.micro, id);
+    }
     if (answered) {
       const n = this.rows("SELECT COUNT(*) AS n FROM theme_turns WHERE id = ?", id)[0].n;
       this.sql.exec("INSERT INTO theme_turns VALUES (?, ?, 'user', ?)", id, n, answered.asked);
@@ -337,6 +346,35 @@ export class Ledger extends DurableObject {
     }
     this.sql.exec("UPDATE theme_talks SET busy = 0 WHERE id = ?", id);
     return { ok: true };
+  }
+
+  // The writer kept the theme (put it on their shelf): what billing will hang on, and what the
+  // free time is measured by. Once; only by the writer who began it.
+  themeKept(user, id, now = Date.now()) {
+    if (!this.known(user)) return { error: 401, message: "Not signed in" };
+    const theme = this.rows("SELECT kept FROM theme_costs WHERE id = ? AND user = ?", id, user)[0];
+    if (!theme) return { error: 404, message: "No such theme" };
+    if (!theme.kept) this.sql.exec("UPDATE theme_costs SET kept = ? WHERE id = ?", now, id);
+    return { ok: true };
+  }
+
+  // What themes cost, a day at a time (by the day they were begun), for the owner: begun, kept,
+  // Claude's rounds, tokens and dollars, all of them and those of the themes kept.
+  themeCosts(now = Date.now(), days = 30) {
+    const since = now - days * DAY;
+    const rows = this.rows(`SELECT date(begun / 1000, 'unixepoch') AS day, COUNT(*) AS begun, SUM(kept > 0) AS kept,
+      SUM(rounds) AS rounds, SUM(input) AS input, SUM(written) AS written, SUM(read) AS read, SUM(output) AS output,
+      SUM(micro) AS micro, SUM(CASE WHEN kept > 0 THEN micro ELSE 0 END) AS kept_micro
+      FROM theme_costs WHERE begun > ? GROUP BY day ORDER BY day`, since);
+    const dollars = m => Math.round(m / 10_000) / 100;
+    const out = r => ({ day: r.day, begun: r.begun, kept: r.kept, rounds: r.rounds,
+      tokens: { input: r.input, written: r.written, read: r.read, output: r.output },
+      dollars: dollars(r.micro), keptDollars: dollars(r.kept_micro) });
+    const sum = rows.reduce((t, r) => {
+      for (const k of ["begun", "kept", "rounds", "input", "written", "read", "output", "micro", "kept_micro"]) t[k] += r[k];
+      return t;
+    }, { day: `last ${days} days`, begun: 0, kept: 0, rounds: 0, input: 0, written: 0, read: 0, output: 0, micro: 0, kept_micro: 0 });
+    return { days: rows.map(out), total: { ...out(sum), costPerKept: sum.kept ? dollars(sum.micro / sum.kept) : null } };
   }
 
   // A theme sent to the gallery (gallery.js), checked by the Worker: allowed while the writer's day,
@@ -511,6 +549,8 @@ export class Ledger extends DurableObject {
     const gone = this.rows("SELECT id, version FROM versions WHERE user = ?", user);
     // Who painted how many goes too; the day's total for the site stays, so it is no way round the limit.
     for (const table of ["versions", "stories", "pending", "gone", "scene_days", "painted"]) this.sql.exec(`DELETE FROM ${table} WHERE user = ?`, user);
+    // What their themes cost stays in the site's numbers, but no longer says whose they were.
+    this.sql.exec("UPDATE theme_costs SET user = '' WHERE user = ?", user);
     // Themes sent to the gallery and not in it go too; those in it stay, as copies on shelves do.
     const unpublished = this.rows("SELECT id FROM gallery WHERE user = ? AND state != 'public'", user);
     this.sql.exec("DELETE FROM gallery WHERE user = ? AND state != 'public'", user);

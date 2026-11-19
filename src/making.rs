@@ -44,6 +44,9 @@ const FIXES: u8 = 3;
 const LOOKS: u8 = 1;
 /// What the writer is told of where their words go.
 pub const GOES_OUT: &str = "What you write here goes through Caprice's server to an AI model by Anthropic, which writes your theme.";
+/// What the writer is told of what a theme costs, while Caprice gives them away (the owner's call,
+/// 2026-11-19): the themes kept meanwhile stay the writer's whatever comes later.
+pub const FREE: &str = "Free while Caprice is new: a theme you keep now stays yours.";
 /// What the writer is told a theme takes, in minutes: two rounds of writing, about seven minutes
 /// each as measured (THEME_PROGRAMS_PLAN.md, step 5), and the building and trying between.
 pub const UP_TO_MINUTES: u32 = 15;
@@ -500,6 +503,12 @@ impl App {
     /// The version shown, put on the shelf and chosen.
     fn keep_made(&mut self, ctx: &egui::Context) {
         let Some(good) = self.making.good.take() else { return };
+        // The server counts it as kept (what themes cost is measured by, and billing will hang on);
+        // nothing waits for its answer.
+        if let (Some(server), Some(id)) = (self.cloud.server.clone(), &self.making.theme) {
+            let (tx, _) = channel::<Answer>();
+            server.send(Request { method: "POST", path: format!("/api/theme-program/{id}/kept"), headers: Vec::new(), body: None }, tx, Waker::new(ctx));
+        }
         let v = good.version;
         let manifest = crate::bundle::Manifest {
             world: crate::bundle::WORLD.into(), name: v.name.clone(), about: v.about, author: String::new(), colours: v.colours, toolchain: v.toolchain,
@@ -541,6 +550,7 @@ impl App {
                     ui.add(egui::TextEdit::multiline(&mut m.request).char_limit(MOST_REQUEST).desired_rows(3).desired_width(f32::INFINITY)
                         .hint_text("A lighthouse on a cliff by the sea, a window lit for each page, a boat for each chapter"));
                     ui.label(egui::RichText::new(GOES_OUT).color(pal().text_dim).size(12.0));
+                    ui.label(egui::RichText::new(FREE).color(pal().text_dim).size(12.0));
                     if !signed_in {
                         ui.label(egui::RichText::new("Sign in first: themes are made for writers signed in.").color(pal().accent));
                     }
@@ -606,6 +616,7 @@ impl App {
                             act = Some(Act::Again);
                         }
                     });
+                    ui.label(egui::RichText::new(FREE).color(pal().text_dim).size(12.0));
                     ui.add_space(4.0);
                     ui.add(egui::TextEdit::multiline(&mut m.change).char_limit(MOST_REQUEST).desired_rows(2).desired_width(f32::INFINITY).hint_text("Or say what to change"));
                     if ui.add_enabled(!m.change.trim().is_empty(), egui::Button::new("Change it")).clicked() {

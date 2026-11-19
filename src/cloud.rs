@@ -1335,6 +1335,8 @@ pub mod stand_in {
         /// with none left, too many themes are being made.
         pub theme_answers: VecDeque<Answer>,
         pub theme_rounds: Vec<Round>,
+        /// The themes the writer said they kept (`/api/theme-program/<id>/kept`).
+        pub themes_kept: Vec<String>,
         /// Claude still writing: rounds of a theme wait, each with whom to tell that the server
         /// is still at it, until `beat` tells them or `written` answers them.
         pub writing: bool,
@@ -1466,6 +1468,10 @@ pub mod stand_in {
                     return Answer::default();
                 }
                 return Answer { status: 200, headers: vec![("X-Caprice-Scenes-Left".into(), (50 - o.painted).to_string())], body: svg.into() };
+            }
+            if let Some(id) = r.path.strip_prefix("/api/theme-program/").and_then(|p| p.strip_suffix("/kept")) {
+                o.themes_kept.push(id.to_owned());
+                return Answer { status: 204, headers: Vec::new(), body: Vec::new() };
             }
             if r.path.starts_with("/api/theme-program") {
                 let kind = header("X-Caprice-Kind");
