@@ -23,6 +23,9 @@
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #2b2a29; }
   canvas { display: block; width: 100%; height: 100%; }
+  /* eframe's hidden text field for typing sits at the caret and keeps what was typed: its text
+     showed as a short line after the last letter. */
+  canvas ~ input { color: transparent; -webkit-text-fill-color: transparent; }
   #loading { position: fixed; inset: 0; display: grid; place-items: center; color: #d8d2c4;
              font: 18px Georgia, serif; pointer-events: none; padding: 0 24px; text-align: center; }
   #loading.failed { font-size: 16px; line-height: 1.5; pointer-events: auto; user-select: text; }

@@ -124,6 +124,27 @@ await page.keyboard.type("Once upon a time, in a city of towers, a dragon carrie
 await page.waitForTimeout(1000);
 await page.screenshot({ path: `${out}/2-typed.png` });
 
+// eframe's hidden text field sits at the caret and keeps what was typed: its text must not show
+// there (a short line after the last letter). Solid blocks in it are compared with it empty; the
+// value is set without an input event, so the app sees none of it. The caret's own blink is left
+// of the strip compared.
+const agent = await page.evaluate(() => {
+  const r = document.activeElement instanceof HTMLInputElement ? document.activeElement.getBoundingClientRect() : null;
+  return r && { x: Math.floor(r.x) + 2, y: Math.floor(r.y) - 1, width: Math.ceil(r.width) + 1, height: Math.ceil(r.height) + 2 };
+});
+const holding = (text) => page.evaluate((text) => {
+  const input = document.activeElement, was = input.value;
+  input.value = text;
+  input.setSelectionRange(text.length, text.length);
+  return was;
+}, text);
+const typed = agent && await holding("████");
+const shown = agent && await page.screenshot({ clip: agent });
+agent && await holding("");
+const without = agent && await page.screenshot({ clip: agent });
+agent && await holding(typed);
+check("the hidden text field at the caret shows nothing of what was typed", agent && shown.equals(without), JSON.stringify(agent));
+
 // A picture from the computer goes into the story.
 await page.keyboard.press("Enter");
 await upload(icon, [797, 38], [803, 75]);
