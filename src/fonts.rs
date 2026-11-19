@@ -238,10 +238,12 @@ impl FontBook {
         let (fetched, ctx) = (self.fetched.clone(), ctx.clone());
         let (family, file) = (family.to_owned(), (*file).to_owned());
         wasm_bindgen_futures::spawn_local(async move {
-            // The faces come in together, so a family is never loaded with some of them only.
+            // The faces come in together, so a family is never loaded with some of them only. They
+            // are asked for at once: one after another, a face that stalled held back the rest.
+            let urls = ["Regular", "Bold", "Italic", "BoldItalic"].map(|face| crate::platform::font_url(&format!("{file}-{face}.ttf")));
             let mut faces = Vec::new();
-            for face in ["Regular", "Bold", "Italic", "BoldItalic"] {
-                match crate::platform::fetch(&format!("fonts/{file}-{face}.ttf")).await {
+            for got in crate::platform::fetch_each(&urls).await {
+                match got {
                     Ok(bytes) => faces.push(bytes),
                     Err(e) => web_sys::console::error_1(&format!("Caprice could not fetch a font: {e}").into()),
                 }

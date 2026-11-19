@@ -620,6 +620,70 @@ const renewed = await old.waitForSelector("#loading", { state: "detached", timeo
 check("an old copy of a file failing its integrity is fetched afresh, and Caprice opens", renewed, `served ${served} times`);
 await old.close();
 
+// A connection that stalls (a hall's Wi-Fi): the first request for each font is never answered. The
+// app gives it up once nothing has come for a while and asks again (fetch_bytes), and the Magic
+// Garden, which waits for the story's fonts, grows its plant; the page is not reloaded for it. Once
+// a font that hung kept every theme's garden away until the connection came back (R21).
+const stalledContext = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+const stalled = await stalledContext.newPage();
+stalled.on("pageerror", e => errors.push(e.message.split("\n")[0]));
+stalled.on("console", m => { if (m.type() === "error") errors.push(m.text().split("\n")[0]); });
+await stalled.goto(url);
+await started(stalled);
+await stalled.evaluate(() => new Promise((done, failed) => {
+  const r = indexedDB.open("caprice", 1);
+  r.onsuccess = () => {
+    const t = r.result.transaction("files", "readwrite");
+    t.objectStore("files").put({ bytes: new TextEncoder().encode('"Garden"'), modified: 0 }, "/caprice/theme.json");
+    t.oncomplete = done;
+    t.onerror = () => failed(t.error);
+  };
+}));
+const asks = new Map();
+const hung = [];
+await stalled.route(/\/fonts\/.+\.ttf$/, r => {
+  const file = new URL(r.request().url()).pathname;
+  asks.set(file, (asks.get(file) ?? 0) + 1);
+  return asks.get(file) === 1 ? hung.push(r) : r.continue();
+});
+await stalled.reload();
+await started(stalled);
+await stalled.evaluate(() => { window.stillHere = true; });
+const fonts = await stalled.evaluate(() => document.querySelector('meta[name="caprice-fonts"]')?.content ?? "");
+await click(280, 340, stalled);
+for (let i = 0; i < 5; i++) await click(935, 822, stalled);
+// The plant's leaves, darker and greener than the sky and the lawn behind them, left of the page.
+const leaves = async () => {
+  const shot = (await stalled.screenshot({ clip: { x: 250, y: 450, width: 140, height: 340 } })).toString("base64");
+  return stalled.evaluate(async png => {
+    const img = new Image();
+    img.src = `data:image/png;base64,${png}`;
+    await img.decode();
+    const g = Object.assign(document.createElement("canvas"), { width: img.width, height: img.height }).getContext("2d");
+    g.drawImage(img, 0, 0);
+    const d = g.getImageData(0, 0, img.width, img.height).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i + 1] > d[i] + 40 && d[i + 1] > d[i + 2] + 40 && d[i + 1] < 190) n++;
+    return n;
+  }, shot);
+};
+let grown = 0;
+for (let waited = 0; waited < 40000 && grown < 200; waited += 2000) {
+  await stalled.waitForTimeout(2000);
+  grown = await leaves();
+}
+await stalled.screenshot({ path: `${out}/11-fonts-stalled.png` });
+const regular = [...asks].find(([file]) => file.endsWith("/LiberationSerif-Regular.ttf"));
+check("a font whose first request stalls is asked for again, and the garden grows without a reload",
+  grown >= 200 && (regular?.[1] ?? 0) >= 2 && hung.length >= 1 && await stalled.evaluate(() => window.stillHere === true),
+  `${grown} leaf pixels; ${regular?.[1] ?? 0} asks for ${regular?.[0]}; ${hung.length} hung`);
+// The fonts are in a folder named for their contents, which the browser keeps for good.
+const fontFile = await fetch(new URL(`${fonts}LiberationSerif-Regular.ttf`, url));
+check("the fonts are in a folder named for their contents, kept for good",
+  /^fonts\/[0-9a-f]{16}\/$/.test(fonts) && fontFile.ok && (fontFile.headers.get("cache-control") ?? "").includes("immutable"),
+  `${fonts}: ${fontFile.status} ${fontFile.headers.get("cache-control")}`);
+await stalledContext.close();
+
 // A phone on its side (R32): its screen's short side under 600, the window wide. While the writer
 // writes, the keyboard leaves a strip and the docks are away: the page shows where the toolbar was.
 const sidewaysContext = await browser.newContext({ viewport: { width: 830, height: 340 }, screen: { width: 915, height: 412 }, hasTouch: true });

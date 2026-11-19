@@ -875,6 +875,18 @@ Liberation Serif, and prints the same (R20 embeds the twin, as drawn).
   first time it is wanted, and loaded once they are all in (`take_fetched`, after the fonts of
   the frame before are made usable, never in the same frame: egui panics on a family it has not
   got yet).
+- **A font on its way must come, or be given up, soon**: until then every theme's garden waits
+  (R30). A demo on a hall's stalled Wi-Fi showed the desks of all themes bare until the request
+  happened to end. So the four faces are asked for at once (`platform::fetch_each`); a request
+  that has gone quiet for ten seconds is given up and asked again, three times in all, while a
+  slow one that is moving is waited for (`fetch_bytes` in `platform.rs`). The fonts are in a folder
+  named for their contents (`web/build.sh` names it in the page's `caprice-fonts` meta, which
+  `platform::font_url` reads), kept for good (`web/_headers`), and the page preloads Liberation
+  Serif's faces with the app. A font link failing never reloads the page (`data-font`, in
+  `web/index.html`'s error handler, which reloads for the app's own files). A font added to
+  `web/fonts` needs nothing more; a family the app starts in, other than Liberation Serif, is
+  preloaded in `web/index.html` too. Test: the smoke test's
+  "a font whose first request stalls is asked for again, and the garden grows without a reload".
 - Tests: `a_story_opened_in_a_font_not_yet_loaded_has_the_pages_that_font_gives`,
   `a_story_opened_before_its_font_has_come_grows_its_garden_with_every_page_added`,
   `a_story_in_a_font_not_installed_takes_the_pages_it_takes_in_its_twin_and_keeps_its_name`
@@ -1644,7 +1656,7 @@ them; it asks `platform` instead, whose desktop half does what Caprice always di
   files rather than share a lock. So versions (R22), the theme, the word goal and the stories
   last opened work the same, by path, under `platform::data_dir` (`/caprice` in the browser).
 - **Fonts** are installed on the desktop, and come with the app in the browser, fetched with
-  `platform::fetch` when first wanted (R21).
+  `platform::fetch_each` from `platform::font_url` when first wanted (R21).
 - **The time now** is `platform::since_epoch`, the time zone `platform::utc_offset` (`date` on the
   desktop, the page's `Date` in the browser), a run's id `platform::run_id`.
 - **File dialogs** are described, not shown, by the code that wants a path: a `platform::Dialog`

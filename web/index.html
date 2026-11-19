@@ -11,6 +11,15 @@
 <link data-trunk rel="copy-file" href="worker.js" />
 <link data-trunk rel="copy-file" href="theme-worker.js" />
 <link data-trunk rel="copy-dir" href="compiler" />
+<!-- The fonts are in a folder named for their contents, kept for good: web/build.sh puts them there
+     and names it in the paths below. The novel's font (Liberation Serif, the one a story
+     begins in) starts coming with the app, after it, rather than once the app has started: on a
+     slow connection the pages, and every theme's garden, waited for it (R21). -->
+<meta name="caprice-fonts" content="fonts/">
+<link rel="preload" data-font href="fonts/LiberationSerif-Regular.ttf" as="fetch" crossorigin fetchpriority="low">
+<link rel="preload" data-font href="fonts/LiberationSerif-Bold.ttf" as="fetch" crossorigin fetchpriority="low">
+<link rel="preload" data-font href="fonts/LiberationSerif-Italic.ttf" as="fetch" crossorigin fetchpriority="low">
+<link rel="preload" data-font href="fonts/LiberationSerif-BoldItalic.ttf" as="fetch" crossorigin fetchpriority="low">
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #2b2a29; }
   canvas { display: block; width: 100%; height: 100%; }
@@ -49,10 +58,13 @@
   // of them. Fetch every file the page loads afresh, past the browser's copies (not only the one
   // that failed: the next would fail after it), then reload once, which fetches the page afresh
   // too. If that does not help either, say which file, and let a reload try all of it again.
-  const fresh = () => Promise.all([...document.querySelectorAll("link[href], script[src]")]
+  const fresh = () => Promise.all([...document.querySelectorAll("link[href]:not([data-font]), script[src]")]
     .map((el) => el.href || el.src).filter((url) => url.startsWith(location.origin))
     .map((url) => fetch(url, { cache: "reload" }).catch(() => {})));
   addEventListener("error", (e) => {
+    // A font that did not come is the app's to ask for again (fetch_bytes), and it is drawn with
+    // another until then: the page is never reloaded for it, perhaps with a story open.
+    if (e.target instanceof HTMLLinkElement && e.target.hasAttribute("data-font")) return;
     const file = e.target instanceof HTMLScriptElement ? e.target.src : e.target instanceof HTMLLinkElement ? e.target.href : "";
     if (!file) return;
     if (!remembered()) {
