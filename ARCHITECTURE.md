@@ -2528,9 +2528,23 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   `draw_snow` and `draw_vineyard` zoom about theirs): `frame-output.ground` says how many units above
   the foot of the desk (the page bar's top when it lies along it) its ground is, and the point under
   the page's middle at that height (`desk.ground`) is what Caprice zooms about, so what stands on the
-  ground stays where it is on the screen and everything else comes nearer. The desk that shows, the
-  page, the bar, the carried title's place and a click are given unzoomed about that point, and all
-  it draws on the desk and over the page is zoomed back by `Shown::zoom`, the title's offset too.
+  ground stays where it is on the screen and everything else comes nearer. **The desk
+  (`desk.area`) and the bar are given as they lie at the fitting zoom**, under the page's middle
+  wherever the page has moved (`view_area`'s middle is where a fitted page's is), never what shows
+  at the zoom: the page, the carried title's place and a click are given unzoomed about that point,
+  and all it draws on the desk and over the page is zoomed back by `Shown::zoom`, the title's
+  offset too. What shows (`Input::shown`, for fills that reach the window's edges) the SDK works
+  out from `desk.window` zoomed back about the ground, so the world's interface did not change for
+  it. Until 2026-11-19 `desk.area` was what shows, as the world's comment said, while the SDK
+  and the guide said "as at the fitting zoom": the gallery's Magic Castle, placed a little in from
+  the desk's right, stayed by the window's edge as it grew, and slid about the mountains behind it
+  as the page moved with the pointer (the built-in themes' ports placed nothing from it and never
+  showed it). Its meaning was changed within `caprice:theme@1.0.0`, its comment with it, as the
+  only themes made were the owner's: a deliberate exception to the rule below, not to repeat once
+  others make themes. The off-screen
+  preview tells a theme the same desk (`preview::desk_of`). Test:
+  `a_program_theme_zoomed_about_the_pointer_beside_the_page_keeps_its_world_in_proportion` (a
+  stand-in placing a castle from `area` and a hill on its ground).
   The ground of the newest output is used for the next input and for drawing it, so a theme's very
   first frame is zoomed about the foot. What it puts in the window (`frame-output.window`: snow
   falling, not the hillside) is laid out on `desk.window`, the desk as it lies on the screen, and

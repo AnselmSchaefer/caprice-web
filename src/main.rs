@@ -8134,6 +8134,66 @@ mod tests {
         }
     }
 
+    /// A theme laid out as the guide says: a castle beside the page, a little in from the right of
+    /// the desk, and a hill on its ground under the page's middle.
+    struct Castle;
+
+    impl theme_sdk::Theme for Castle {
+        fn new() -> Castle {
+            Castle
+        }
+
+        fn frame(&mut self, input: &theme_sdk::Input, out: &mut theme_sdk::Out) {
+            let (u, ground) = (input.unit, input.ground);
+            out.ground = 20.0;
+            out.desk.circle(theme_sdk::pt(input.area.right() - 150.0 * u, ground.y - 80.0 * u), 30.0 * u, theme_sdk::Color::rgb(200, 0, 1));
+            out.desk.circle(theme_sdk::pt(ground.x - 300.0 * u, ground.y), 40.0 * u, theme_sdk::Color::rgb(1, 0, 200));
+        }
+    }
+
+    #[test]
+    fn a_program_theme_zoomed_about_the_pointer_beside_the_page_keeps_its_world_in_proportion() {
+        use platform::program::{Stand, stand_in};
+        // The desk it lays out on is the desk at the fitting zoom, whatever the zoom and wherever
+        // the page has moved: given the desk that shows instead, the castle stayed by the window's
+        // edge as it grew, and slid about the hill behind it.
+        let castle = wat::parse_str(r#"(module (memory (export "memory") 11 512)
+            (func (export "cabi_realloc") (param i32 i32 i32 i32) (result i32) i32.const 600000)
+            (func (export "events") (param i32 i32))
+            (func (export "frame") (param i32) (result i32) i32.const 1024)
+            (func (export "cabi_post_frame") (param i32)))"#).unwrap();
+        stand_in(&castle, || Stand::Theme(Box::new(theme_sdk::Running::<Castle>::new())));
+        let mut h = Harness::new();
+        in_program_theme(&mut h, &castle, 0.0);
+        h.app.eggs.painted = Some(Vec::new());
+        h.wait(1.0);
+        let circles = |h: &Harness| {
+            let shapes = h.app.eggs.painted.clone().unwrap_or_default();
+            let at = |c: egui::Color32| shapes.iter().find_map(|s| match s {
+                egui::Shape::Circle(k) if k.fill == c => Some((k.center, k.radius)),
+                _ => None,
+            }).expect("drawn");
+            (at(egui::Color32::from_rgb(200, 0, 1)), at(egui::Color32::from_rgb(1, 0, 200)))
+        };
+        let ((castle_at, castle_r), (hill_at, _)) = circles(&h);
+        let apart = castle_at - hill_at;
+        let mut zoomed = 1.0;
+        for k in 0..12 {
+            // Ctrl+scroll over the castle, then out again over the left of the desk.
+            let (over, by) = if k < 8 { (castle_at, 1.15) } else { (hill_at - egui::vec2(200.0, 0.0), 1.0 / 1.15) };
+            h.frames(1, vec![egui::Event::PointerMoved(over), egui::Event::Zoom(by)], Modifiers::NONE);
+            for _ in 0..3 {
+                let seen = program_seen(&h);
+                let ((c, r), (hill, _)) = circles(&h);
+                assert!(((c - hill) - apart * seen.zoom).length() < 0.5, "the castle as far from the hill as zoomed: {:?} {:?} at {}", c - hill, apart * seen.zoom, seen.zoom);
+                assert!((r - castle_r * seen.zoom).abs() < 0.1, "as large as zoomed");
+                zoomed = f32::max(zoomed, seen.zoom);
+                h.frames(1, vec![], Modifiers::NONE);
+            }
+        }
+        assert!(zoomed > 1.8, "zoomed in far: {zoomed}");
+    }
+
     #[test]
     fn a_program_theme_that_fails_or_draws_more_than_it_may_is_stopped_with_a_word_why() {
         use platform::program::{Stand, stand_in};

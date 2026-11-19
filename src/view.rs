@@ -36,7 +36,7 @@ pub fn fit(view: Rect, size: Vec2) -> f32 {
 impl App {
     /// The area between the docks: under the toolbar, and above the page bar or beside it. While
     /// they are away, all of the window: the tools' round button stands beside the text.
-    fn view_area(&self, area: Rect) -> Rect {
+    pub(crate) fn view_area(&self, area: Rect) -> Rect {
         if self.docks_away {
             return area;
         }

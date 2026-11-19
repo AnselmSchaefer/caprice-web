@@ -36,7 +36,9 @@ impl Theme for Fireflies {
     }
 
     fn frame(&mut self, input: &Input, out: &mut Out) {
-        let (area, page, u, t) = (input.area, input.page, input.unit, input.time);
+        // The sky and the meadow reach the edges of what shows; everything else is placed on the desk
+        // as it lies at the fitting zoom, so it stays where it is as the writer zooms.
+        let (area, shown, page, u, t) = (input.area, input.shown, input.page, input.unit, input.time);
         let seed = host::story_seed();
         let garden = host::garden();
         // This theme brings new chapter titles.
@@ -44,10 +46,10 @@ impl Theme for Fireflies {
 
         // The sky, light at its foot: one mesh.
         let mut sky = Mesh::new();
-        let a = sky.vertex(area.min, SKY_TOP);
-        let b = sky.vertex(pt(area.right(), area.top()), SKY_TOP);
-        let c = sky.vertex(area.max, SKY_FOOT);
-        let d = sky.vertex(pt(area.left(), area.bottom()), SKY_FOOT);
+        let a = sky.vertex(shown.min, SKY_TOP);
+        let b = sky.vertex(pt(shown.right(), shown.top()), SKY_TOP);
+        let c = sky.vertex(shown.max, SKY_FOOT);
+        let d = sky.vertex(pt(shown.left(), shown.bottom()), SKY_FOOT);
         sky.triangle(a, b, c);
         sky.triangle(a, c, d);
         out.desk.mesh(sky);
@@ -55,9 +57,10 @@ impl Theme for Fireflies {
         // about, so it stays where it is on the screen.
         out.ground = 30.0;
         let ground = input.ground.y;
-        out.desk.polygon(vec![pt(area.left(), ground), pt(area.right(), ground - 8.0 * u), area.max, pt(area.left(), area.bottom())], MEADOW);
+        out.desk.polygon(vec![pt(shown.left(), ground), pt(shown.right(), ground - 8.0 * u), shown.max, pt(shown.left(), shown.bottom())], MEADOW);
 
-        // A jar a chapter, beside the page, taking turns left and right and out from it.
+        // A jar a chapter, beside the page, taking turns left and right and out from it, where it is
+        // seen when its chapter begins (and there it stays).
         self.jars.tend(seed, &garden, LIGHTS, STEP, WARM, t);
         let finishing = self.jars.finishing(t, WARM);
         let (w, h) = (46.0 * u, 70.0 * u);
@@ -67,7 +70,7 @@ impl Theme for Fireflies {
         }).collect();
         let n = garden.len().max(1);
         for k in 0..n {
-            let at = places[self.jars.place(k, places.len(), |p| places[p] - w / 2.0 > area.left() && places[p] + w / 2.0 < area.right())];
+            let at = places[self.jars.place(k, places.len(), |p| places[p] - w / 2.0 > shown.left() && places[p] + w / 2.0 < shown.right())];
             let warm = match finishing {
                 Some((m, q)) if m == k => ease(q),
                 _ if k + 1 >= n => 0.0,

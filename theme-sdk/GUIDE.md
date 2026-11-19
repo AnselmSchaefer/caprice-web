@@ -38,11 +38,18 @@ and played by Caprice in a sandbox. It can only draw shapes; Caprice decides eve
 
 ## Laying it out
 
-- Lay everything out for the desk as it lies at the fitting zoom: `Input::area` (the desk that
-  shows), `Input::page`, `Input::bar`. Caprice zooms what you draw on the desk itself, about the
-  ground you name (`Out::ground`, in units above the foot of the desk, or the bar's top when the bar
-  lies along it); never zoom anything yourself. What belongs to the window rather than the world
-  (snow falling, rain) goes in `Out::window`, laid out on `Input::window` and never zoomed.
+- Lay everything out from the desk as it lies at the fitting zoom: `Input::area`, `Input::page`,
+  `Input::bar` and `Input::ground`. They stay the same as the writer zooms: Caprice zooms what you
+  draw on the desk itself, about the ground you name (`Out::ground`, in units above the foot of the
+  desk, or the bar's top when the bar lies along it), so the whole world comes nearer together.
+  Never zoom anything yourself.
+- `Input::shown` is what shows of the desk at the writer's zoom: bigger than `area` zoomed out,
+  smaller zoomed in, and beside it when the page has moved. Use it only for fills that must reach
+  the window's edges (a sky, a field, the sea) and for choosing where a new thing goes so it is
+  seen (`Tended::place` keeps it there). Never place anything from it: it would slide and stay
+  the same size on the screen while the rest of the world grows around it.
+- What belongs to the window rather than the world (snow falling, rain) goes in `Out::window`,
+  laid out on `Input::window` and never zoomed.
 - Size things by `Input::unit` (1 on a desk 900 points high), never by pixels: the same theme runs
   on a phone (a desk about 412 by 915, the page filling its width) and on a wide screen (1920 by
   1080 and more). On a phone there is little room beside the page: grow things above it and below

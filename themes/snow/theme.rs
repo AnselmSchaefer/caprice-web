@@ -592,7 +592,8 @@ impl Theme for Snow {
     }
 
     fn frame(&mut self, input: &Input, out: &mut Out) {
-        let (t, u, area, page) = (input.time, input.unit, input.area, input.page);
+        // The hillside's fills reach the edges of what shows, and an igloo is placed where it is seen.
+        let (t, u, shown, page) = (input.time, input.unit, input.shown, input.page);
         let (seed, garden) = (host::story_seed(), host::garden());
         let n = garden.len().max(1);
         out.ground = GROUND;
@@ -601,12 +602,12 @@ impl Theme for Snow {
         // falls and the lights flicker.
         out.next = if self.ice.tend(seed, &garden, BRICKS, HANG, FINISH, t) { 0 } else { 40 };
         let lake = Lake::of(input.window, ground, u);
-        hillside(&mut out.desk, seed, area, middle, ground, u, t);
+        hillside(&mut out.desk, seed, shown, middle, ground, u, t);
         lake.draw(&mut out.desk, seed, moon(seed, middle, ground, u).x, t);
         let places = places(seed, page, ground, u);
         let finishing = self.ice.finishing(t, FINISH);
         // Those further up the hill first, so the nearer stand in front.
-        let mut order: Vec<(usize, Place)> = (0..n).map(|k| (k, places[self.ice.place(k, places.len(), |p| places[p].in_view(area, page))])).collect();
+        let mut order: Vec<(usize, Place)> = (0..n).map(|k| (k, places[self.ice.place(k, places.len(), |p| places[p].in_view(shown, page))])).collect();
         order.sort_by(|a, b| a.1.foot.y.total_cmp(&b.1.foot.y).then(a.0.cmp(&b.0)));
         let (mut cut, mut carried) = (Layer::default(), Layer::default());
         for (k, place) in order {
