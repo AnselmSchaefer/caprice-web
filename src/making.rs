@@ -3,7 +3,8 @@
 //! `web/api/theme.js`), and it comes back as its source and its palette only. This browser builds
 //! it (`platform::compiler`), checks it as every program is checked, and plays it off screen
 //! (`eggs::preview`). What goes wrong on the way goes back to Claude without the writer seeing it:
-//! the compiler's words, a program Caprice will not play, one that stops. One that works is shown
+//! the compiler's words (`errors`); a program Caprice will not play, one that stops while playing
+//! the preview's story, one that draws more than `gallery::BUDGET` (`checks`). One that works is shown
 //! to Claude as pictures once, to be made better, and then to the writer, who keeps it or asks for
 //! a change. A version that worked is never lost to one that did not (the owner's decisions for
 //! step 5: a writer is never left with a broken theme).
@@ -27,6 +28,7 @@ use serde::Deserialize;
 
 use crate::App;
 use crate::eggs::preview::{Preview, Previewed};
+use crate::gallery::BUDGET;
 use crate::platform::compiler::{Built, Compiler, State};
 use crate::platform::{Answer, Request, Waker};
 use crate::theme::{Theme, pal};
@@ -56,6 +58,13 @@ pub const LOST_NETWORK: &str = "Lost network. The theme could not be finished: c
 pub const LOST_SERVER: &str = "Lost the connection to Caprice's server. The theme could not be finished: try again in a moment.";
 /// What the writer is told when no version would build and play.
 pub const NEVER_WORKED: &str = "The theme could not be made to work. Try again, perhaps with something simpler.";
+
+/// What Claude is told of a version that plays but draws more points a frame than `BUDGET`.
+fn over_budget(phone: usize, computer: usize) -> String {
+    format!("It plays, but draws too much: at most {phone} points a frame on a phone's desk and {computer} on a computer's \
+        (zoomed out included), where a theme keeps within {} and {}. Draw less: fewer shapes, fewer points in each, \
+        many small fills as one mesh.", BUDGET.0, BUDGET.1)
+}
 
 /// What the server answers a round that went wrong with, once it had begun answering (it sends
 /// spaces while Claude writes, so its status was sent before it knew).
@@ -101,6 +110,9 @@ struct Good {
 pub enum Kind {
     Begin,
     Errors,
+    /// It built, but did not pass what every theme must: the load check, playing the preview's
+    /// story through, the budget of points (the owner's decisions for step 5).
+    Checks,
     Frames,
     Change,
 }
@@ -110,6 +122,7 @@ impl Kind {
         match self {
             Kind::Begin => "begin",
             Kind::Errors => "errors",
+            Kind::Checks => "checks",
             Kind::Frames => "frames",
             Kind::Change => "change",
         }
@@ -187,7 +200,7 @@ impl Making {
             Step::Waiting(Kind::Begin) => "Writing the theme",
             Step::Waiting(Kind::Change) => "Making your change",
             Step::Starting(Kind::Frames, ..) | Step::Waiting(Kind::Frames) => "Looking it over, to make it lovelier",
-            Step::Starting(Kind::Errors, ..) | Step::Waiting(Kind::Errors) => "Putting a mistake right",
+            Step::Starting(Kind::Errors | Kind::Checks, ..) | Step::Waiting(Kind::Errors | Kind::Checks) => "Putting a mistake right",
             Step::Building if pass => "Building the better version",
             Step::Building => "Building it",
             Step::Picturing(_) if pass => "Trying the better version",
@@ -301,12 +314,13 @@ impl App {
         self.making.step = Step::Waiting(kind);
     }
 
-    /// What went wrong goes back to Claude to fix, while it may be; else the theme stops at the
-    /// last version that worked, or, with none, comes to nothing.
-    fn fix(&mut self, ctx: &egui::Context, said: &str) {
+    /// What went wrong goes back to Claude to fix, while it may be (the compiler's words as
+    /// `errors`, what Caprice found of a program that built as `checks`, both counted as fixes);
+    /// else the theme stops at the last version that worked, or, with none, comes to nothing.
+    fn fix(&mut self, ctx: &egui::Context, kind: Kind, said: &str) {
         if self.making.fixes_left > 0 {
             self.making.fixes_left -= 1;
-            self.round(ctx, Kind::Errors, cut(said, MOST_ERRORS).as_bytes().to_vec(), Vec::new());
+            self.round(ctx, kind, cut(said, MOST_ERRORS).as_bytes().to_vec(), Vec::new());
         } else {
             self.give_up(NEVER_WORKED.into());
         }
@@ -379,7 +393,7 @@ impl App {
             Step::Building => self.tend_making_build(ctx, now),
             Step::Picturing(preview) => match preview.tend(now) {
                 Some(Ok(previewed)) => self.pictured(ctx, previewed),
-                Some(Err(why)) => self.fix(ctx, &format!("It built, but Caprice stopped it while playing it: {why}.")),
+                Some(Err(why)) => self.fix(ctx, Kind::Checks, &format!("Caprice stopped it while playing the story: {why}.")),
                 None => ctx.request_repaint_after(std::time::Duration::from_millis(50)),
             },
             Step::Writing | Step::Ready | Step::Failed(_) => {}
@@ -441,9 +455,9 @@ impl App {
                     let palette = crate::own::with_colours(Theme::Midnight.palette(), &v.colours).0;
                     self.making.step = Step::Picturing(Box::new(Preview::start(&v.module, palette, Waker::new(ctx), now)));
                 }
-                Err(why) => self.fix(ctx, &format!("It built, but Caprice will not play its program: {}.", why.join("; "))),
+                Err(why) => self.fix(ctx, Kind::Checks, &format!("Caprice will not play its program: {}.", why.join("; "))),
             },
-            (Some(Built::Errors(said)), _) => self.fix(ctx, &said),
+            (Some(Built::Errors(said)), _) => self.fix(ctx, Kind::Errors, &said),
             (None, State::Failed { why, .. }) => self.give_up(why),
             (None, _) => ctx.request_repaint_after(std::time::Duration::from_millis(250)),
         }
@@ -452,11 +466,28 @@ impl App {
     /// A version that played: kept as the one to show, and shown to Claude while it may look.
     fn pictured(&mut self, ctx: &egui::Context, previewed: Previewed) {
         let Some(version) = self.making.trying.take() else { return };
-        let textures = previewed.pictures.iter().map(|p| ctx.load_texture(format!("making-{}", p.name), p.image.clone(), TextureOptions::LINEAR)).collect();
+        let (phone, computer) = (previewed.phone_points, previewed.computer_points);
+        let within = |phone: usize, computer: usize| phone <= BUDGET.0 && computer <= BUDGET.1;
+        // One that draws more than the budget is a near miss: kept to fall back on only while
+        // there is no version within it, and sent back to be made lighter while fixes are left.
+        let keep = within(phone, computer) || !self.making.good.as_ref().is_some_and(|g| within(g.previewed.phone_points, g.previewed.computer_points));
         let pngs: Vec<Vec<u8>> = previewed.pictures.iter().filter_map(|p| crate::eggs::preview::png(&p.image)).collect();
         let moments = previewed.pictures.iter().map(|p| p.name).collect::<Vec<_>>().join(",");
-        let points = format!("{},{}", previewed.phone_points, previewed.computer_points);
-        self.making.good = Some(Good { version, previewed, textures });
+        if keep {
+            let textures = previewed.pictures.iter().map(|p| ctx.load_texture(format!("making-{}", p.name), p.image.clone(), TextureOptions::LINEAR)).collect();
+            self.making.good = Some(Good { version, previewed, textures });
+        }
+        if !within(phone, computer) {
+            if self.making.fixes_left > 0 {
+                self.fix(ctx, Kind::Checks, &over_budget(phone, computer));
+                return;
+            }
+            if !keep {
+                self.give_up("The newest version draws more than a writer's desk can carry.".into());
+                return;
+            }
+        }
+        let points = format!("{phone},{computer}");
         if self.making.looks_left > 0 && pngs.len() == moments.split(',').count() {
             self.making.looks_left -= 1;
             self.round(ctx, Kind::Frames, pictures_body(&pngs), vec![("X-Caprice-Moments", moments), ("X-Caprice-Points", points)]);

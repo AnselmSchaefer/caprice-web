@@ -1057,6 +1057,23 @@ test("the next round tells claude the compiler's words, with the whole conversat
   assert.match(claude.asked[2].body.messages[4].content, /<change>\nMake the sea stormier\n<\/change>/);
 });
 
+test("what caprice's checks found of a program that built goes to claude as a fix, counted with the compiler's", async t => {
+  const mf = await start(t);
+  const api = await writer(mf, "1", "Ada");
+  claude.writes = THEME_REPLY;
+  const { theme } = await (await begin(api)).json();
+  const found = "It plays, but draws too much: at most 180000 points a frame on a phone's desk";
+  const checked = await round(api, theme, "checks", found);
+  assert.equal(checked.status, 200);
+  assert.deepEqual((await checked.json()).left, { errors: 2, frames: 2, change: 3 }, "a fix like any other");
+  assert.equal(claude.asked[1].body.messages[2].content, `It built, but Caprice's checks found:\n\n<checks>\n${found}\n</checks>\n\nFix it, and give the palette and the whole file again.`);
+  assert.equal((await round(api, theme, "errors", "error: one")).status, 200);
+  assert.deepEqual((await (await round(api, theme, "checks", "Caprice stopped it while playing the story: it failed")).json()).left.errors, 0);
+  const more = await round(api, theme, "checks", "Caprice will not play its program");
+  assert.equal(more.status, 429, "three fixes in all, of either kind");
+  assert.equal(claude.asked.length, 4);
+});
+
 test("pictures go to claude as images, and are kept in the conversation as words only", async t => {
   const mf = await start(t);
   const api = await writer(mf, "1", "Ada");
@@ -1083,6 +1100,7 @@ test("what is not one of its kinds, too big, or not pictures is refused before c
   const { theme } = await (await begin(api)).json();
   assert.equal((await round(api, theme, "chat", "What is the capital of France?")).status, 400, "no round of any other kind");
   assert.equal((await round(api, theme, "errors", "e".repeat(20_001))).status, 413);
+  assert.equal((await round(api, theme, "checks", "c".repeat(20_001))).status, 413);
   assert.equal((await round(api, theme, "frames", framed([png(20, 20)]), { "X-Caprice-Moments": "begun", "X-Caprice-Points": "1,2" })).status, 400, "too small to be a picture of a desk");
   assert.equal((await round(api, theme, "frames", Buffer.from("not pictures at all"), { "X-Caprice-Moments": "begun", "X-Caprice-Points": "1,2" })).status, 400);
   assert.equal((await round(api, theme, "frames", framed([png(800, 600)]), { "X-Caprice-Moments": "begun,written", "X-Caprice-Points": "1,2" })).status, 400, "a moment for each picture");
