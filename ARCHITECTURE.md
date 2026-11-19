@@ -2073,6 +2073,16 @@ ask Claude anything else** (`/api/theme-program`, `web/api/theme.js`, R36, the p
   everyone, `USER_THEMES_PER_DAY` begun and `USER_THEME_ROUNDS_PER_DAY` for one writer. A round
   counts whether or not a theme comes of it. `THEME_TOKENS` is `max_tokens`; the prompt (about
   40 000 tokens) is cached, and the conversation with it (`cache_control`).
+- **What each theme cost is kept, and whether it was kept** (`theme_costs`, `cost`, `themeKept`,
+  the owner's call of 2026-11-19: free at first, the numbers gathered for a price later). Every
+  round Claude answered adds its tokens and their price in millionths of a dollar (`PRICES`, the
+  writer's: change it with the model) to its theme, a theme or not; `POST
+  /api/theme-program/<id>/kept`, from the app when the writer keeps it, marks it once, for its
+  writer only, asking nothing of Claude. These outlive the conversation (`THEME_DAYS`); deleting a
+  writer's stories online takes their name off them, not the numbers. The owner reads them a day at
+  a time with `GET /api/admin/themes` and `ADMIN_TOKEN`, as `/api/admin/scenes`: begun, kept,
+  rounds, tokens, dollars, those of themes kept, and the cost of all per theme kept. Billing will
+  hang on the themes kept.
 - **Only the program's source and its palette go back** (`read`): the last ```rust block (it
   must name `theme!(`), and from the ```json block the name, a few words and the colours by the
   palette's names as `#rrggbb`; never Claude's own words. A reply without a program is 502.
@@ -2091,7 +2101,8 @@ ask Claude anything else** (`/api/theme-program`, `web/api/theme.js`, R36, the p
   spaces back to compress them. **What a writer may read** (the messages here and the Ledger's
   `themeRound`) never names Claude: it says what happened and what to do.
 
-Tests: "a theme is begun from the writer's words, and only its source and palette come back", "the
+Tests: "a theme is begun from the writer's words, and only its source and palette come back", "what
+each theme costs is kept with it, and the owner sees it a day at a time with how many were kept", "the
 next round tells claude the compiler's words, with the whole conversation kept by the worker",
 "pictures go to claude as images, and are kept in the conversation as words only", "what is not one
 of its kinds, too big, or not pictures is refused before claude is asked", "rounds of each kind run
@@ -2677,8 +2688,10 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   not**: a fix that never builds, or a look Claude cannot give, leaves the last good version shown,
   with a word why; with none, the window says nothing came of it, and nothing is kept. Nothing goes
   on the shelf until "Keep it" (then as a theme file would: its module, source, palette, toolchain
-  and its preview's picture, `App::keep_theme`). The compiler is ended once there is nothing more
-  to build. Closing the window only hides it. Tests:
+  and its preview's picture, `App::keep_theme`), and the server is told it was kept (R33's
+  `themeKept`; nothing waits for the answer). The window says it is free for now (`FREE`), where the
+  writer asks and beside "Keep it": a theme kept meanwhile stays theirs whatever comes later (§7).
+  The compiler is ended once there is nothing more to build. Closing the window only hides it. Tests:
   `a_theme_made_with_claude_is_built_shown_to_claude_once_changed_and_kept_when_the_writer_says`,
   `mistakes_go_back_to_claude_unseen_and_a_theme_that_never_works_says_so_keeping_nothing`,
   `a_theme_is_made_only_for_a_writer_signed_in_and_what_the_server_says_is_shown` (the stand-in
@@ -3229,5 +3242,11 @@ result sent back, a stand-in answer in `api.test.mjs` and in `cloud::stand_in` (
   top left brings them back by putting the keyboard away, and the formatting is one tap further
   than upright. The page fills the width up to 100%. Fullscreen, which gives back the browser's
   own bars, is the next step, apart: it rests on what the browser allows, and is checked on a phone.
+- **2026-11-19 — Themes made with Claude are free at first; what they cost is measured.** The
+  owner wants momentum before charging. Payment (a provider, VAT, terms) waits until prices can be
+  set from real numbers, rather than being built and left switched off: the Ledger keeps what each
+  theme cost and whether it was kept (R33), the daily limits bound what free costs, and the window
+  says it is free for now. Themes kept while it is free stay the writer's. Billing, when it comes,
+  is a free allowance and payment beyond it, charged for a theme kept, never for rounds.
 - **No `.docx` import.** Export only.
 - **Contents heading is "Contents"** (English), in the app and in Word.
