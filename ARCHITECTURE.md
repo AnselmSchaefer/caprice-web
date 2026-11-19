@@ -1845,6 +1845,14 @@ grew too long. Wider views fit the whole page, centred, as always.
 - **The keyboard shrinks the page in the browser**: `interactive-widget=resizes-content` in
   `web/index.html`'s viewport, so Android gives the canvas the height above the keyboard (Safari
   is not supported, §7), and the caret is followed up into it.
+- **eframe's hidden text field shows nothing.** In the browser, typing goes through an `<input>`
+  eframe puts beside the canvas and moves to the caret (the editor's `IMEOutput`). It is 1 px with
+  a transparent caret, but its padding leaves 5×3 px, and it keeps what was typed (only another
+  kind of input clears it), so the end of the text showed there as a short line after the last
+  letter. `web/index.html` makes its text transparent (`canvas ~ input`). When touching it: an
+  eframe update that styles the field differently, or a page that moves the canvas into another
+  element, is checked by `smoke.mjs`'s "the hidden text field at the caret shows nothing of what
+  was typed".
 - **The keyboard stays up while the writer writes** (`hold_keyboard`, at the end of `frame`). The
   story asks for text input only while the editable page draws its caret, and eframe hides a
   phone's keyboard in any frame without that ask, so a page sliding in or turning dropped it and
