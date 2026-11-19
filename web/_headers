@@ -41,6 +41,8 @@
 /compiler/*
   Cache-Control: no-cache
 
-# The fonts keep their names; a day, then asked again.
+# The fonts, in a folder named for their contents (web/build.sh): kept a year, never asked for again.
+# Kept a day, a laptop that had not opened Caprice since yesterday asked for them again on a hall's
+# slow Wi-Fi, and every theme's garden waited for them (R21).
 /fonts/*
-  Cache-Control: public, max-age=86400
+  Cache-Control: public, max-age=31536000, immutable

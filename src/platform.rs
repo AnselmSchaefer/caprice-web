@@ -519,6 +519,7 @@ pub fn go_to(path: &str) {
 
 #[cfg(target_arch = "wasm32")]
 mod browser {
+    use wasm_bindgen::JsCast;
     use wasm_bindgen::prelude::*;
 
     // What the page does for files: its picker, downloads, a PDF in a tab, and fetching its own.
@@ -611,10 +612,50 @@ mod browser {
             })();
         }
         export function online() { return navigator.onLine; }
-        export async function fetch_bytes(url) {
-            const r = await fetch(url);
-            if (!r.ok) throw new Error(`${url}: ${r.status}`);
-            return new Uint8Array(await r.arrayBuffer());
+        // A file from where the page came from. A request that has gone quiet for ten seconds,
+        // before its answer or within it, is given up and asked again, three times in all; one that
+        // is slow but moving is waited for. On a connection that had stalled (a hall's Wi-Fi) a font
+        // never came, and the garden of every theme waited for it (R21).
+        export async function fetch_bytes(url, quiet = 10000, tries = 3) {
+            for (let t = 1; ; t++) {
+                const stop = new AbortController();
+                let timer;
+                const moving = () => {
+                    clearTimeout(timer);
+                    timer = setTimeout(() => stop.abort(new Error(`${url}: nothing came for ${quiet / 1000} s`)), quiet);
+                };
+                try {
+                    moving();
+                    const r = await fetch(url, { signal: stop.signal });
+                    // The server's answer that there is no such file is not asked again.
+                    if (r.status >= 400 && r.status < 500) throw Object.assign(new Error(`${url}: ${r.status}`), { final: true });
+                    if (!r.ok) throw new Error(`${url}: ${r.status}`);
+                    const reader = r.body.getReader();
+                    const parts = [];
+                    for (let got = await reader.read(); !got.done; got = await reader.read()) {
+                        parts.push(got.value);
+                        moving();
+                    }
+                    const bytes = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+                    parts.reduce((at, p) => (bytes.set(p, at), at + p.length), 0);
+                    return bytes;
+                } catch (e) {
+                    const why = stop.signal.aborted ? stop.signal.reason : e;
+                    if (t >= tries || e.final) throw why;
+                    console.warn(`Caprice asks again for ${url} (${why.message ?? why})`);
+                    await new Promise(done => setTimeout(done, 1000 * t));
+                } finally {
+                    clearTimeout(timer);
+                }
+            }
+        }
+        // Each of `urls`, asked for all at once: its bytes, or why it did not come.
+        export function fetch_each(urls) {
+            return Promise.all(urls.map(url => fetch_bytes(url).catch(e => String(e?.message ?? e))));
+        }
+        // The folder the fonts are in, named for their contents (web/build.sh), as the page says.
+        export function fonts_dir() {
+            return document.querySelector('meta[name="caprice-fonts"]')?.content ?? "fonts/";
         }
         export function show_pdf(bytes) {
             const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: "application/pdf" }));
@@ -698,8 +739,10 @@ mod browser {
         pub fn on_back(wake: &js_sys::Function);
         #[wasm_bindgen(js_name = show_pdf)]
         fn js_show_pdf(bytes: &[u8]);
-        #[wasm_bindgen(js_name = fetch_bytes, catch)]
-        async fn js_fetch_bytes(url: &str) -> Result<JsValue, JsValue>;
+        #[wasm_bindgen(js_name = fetch_each)]
+        async fn js_fetch_each(urls: js_sys::Array) -> JsValue;
+        #[wasm_bindgen(js_name = fonts_dir)]
+        fn js_fonts_dir() -> String;
         pub fn live_open(path: &str, wake: &js_sys::Function) -> u32;
         fn live_send(id: u32, text: &str);
         fn live_take(id: u32) -> js_sys::Array;
@@ -764,10 +807,16 @@ mod browser {
         }
     }
 
-    /// The file at `url`, from where the page came from.
-    pub async fn fetch(url: &str) -> Result<Vec<u8>, String> {
-        let bytes = js_fetch_bytes(url).await.map_err(|e| format!("{e:?}"))?;
-        Ok(js_sys::Uint8Array::new(&bytes).to_vec())
+    /// The files at `urls`, from where the page came from, asked for all at once: each one's
+    /// bytes, or why it did not come. A request gone quiet is asked again (`fetch_bytes`).
+    pub async fn fetch_each(urls: &[String]) -> Vec<Result<Vec<u8>, String>> {
+        let got = js_sys::Array::from(&js_fetch_each(urls.iter().map(|u| JsValue::from_str(u)).collect()).await);
+        got.iter().map(|g| g.dyn_into::<js_sys::Uint8Array>().map(|b| b.to_vec()).map_err(|e| e.as_string().unwrap_or_default())).collect()
+    }
+
+    /// The font file `name`: in a folder named for the fonts' contents, kept for good (`web/build.sh`).
+    pub fn font_url(name: &str) -> String {
+        format!("{}{name}", js_fonts_dir())
     }
 
     /// The file the writer picks: its name and bytes.
@@ -791,4 +840,4 @@ mod browser {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) use browser::{download, fetch, show_pdf};
+pub(crate) use browser::{download, fetch_each, font_url, show_pdf};
