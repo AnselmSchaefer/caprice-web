@@ -596,6 +596,44 @@ mod tests {
         assert_eq!(check(&module("", "1 512", "")), Ok(()), "the world written by hand");
     }
 
+    /// The gallery signs core modules, and a theme is never built again. So that Caprice can still
+    /// make one a component when it wants (a desktop host on Wasmtime, a browser that runs components
+    /// itself), each module carries the world's type, put there by the SDK's bindings in its
+    /// `component-type` sections; `wit-component` wraps it with that alone, as `wasm-tools component
+    /// new` does.
+    #[test]
+    fn the_sdk_s_themes_wrap_into_components_of_the_world_as_they_are_built() {
+        use wit_component::{ComponentEncoder, DecodedWasm};
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut themes = 0;
+        for dir in std::fs::read_dir(root.join("themes")).unwrap() {
+            let dir = dir.unwrap().path();
+            if !dir.join("theme.rs").exists() {
+                continue;
+            }
+            let name = dir.file_name().unwrap().to_string_lossy().into_owned();
+            let module = std::fs::read(root.join(format!("tests/fixtures/{name}.wasm"))).unwrap();
+            let mut encoder = ComponentEncoder::default();
+            let component = encoder.module(&module).and_then(|e| e.validate(true).encode())
+                .unwrap_or_else(|e| panic!("{name} does not wrap into a component: {e:#}"));
+            let Ok(DecodedWasm::Component(resolve, world)) = wit_component::decode(&component) else {
+                panic!("{name} wrapped is not a component");
+            };
+            let world = &resolve.worlds[world];
+            let mut exports: Vec<String> = world.exports.keys().map(|k| resolve.name_world_key(k)).collect();
+            exports.sort();
+            assert_eq!(exports, ["events", "frame"], "{name}");
+            // Beside its interfaces a world names the types it uses (`event`, `frame-input`), without a package.
+            let imports: Vec<String> = world.imports.keys().map(|k| resolve.name_world_key(k)).filter(|i| i.contains(':')).collect();
+            assert!(imports.contains(&"caprice:theme/types@1.0.0".to_string()), "{name} imports {imports:?}");
+            for import in imports {
+                assert!(import.starts_with("caprice:theme/") && import.ends_with("@1.0.0"), "{name} imports {import}");
+            }
+            themes += 1;
+        }
+        assert!(themes >= 4, "the themes of themes/ were not found");
+    }
+
     #[test]
     fn a_module_that_asks_for_anything_but_caprice_s_host_is_refused_saying_why() {
         let why = refused(&module(r#"(import "wasi_snapshot_preview1" "fd_write" (func (param i32 i32 i32 i32) (result i32)))"#, "1 512", ""));
