@@ -170,9 +170,10 @@ pub struct Carried {
     pub title: Rect,
 }
 
-/// The desk as a program is told of it (the world's `desk`): as much of it as shows, the page and
-/// the bar, laid out as at the fitting zoom; the zoom and the size of things; the desk on the
-/// screen; and the point it is zoomed about.
+/// The desk as a program is told of it (the world's `desk`): the desk and the bar as they lie at
+/// the fitting zoom, under the page where it is; the page; the zoom and the size of things; the
+/// desk on the screen; and the point it is zoomed about. What shows of the world at this zoom is
+/// the desk on the screen zoomed back about that point: the SDK works it out (`Input::shown`).
 #[derive(Clone, Copy, Debug)]
 pub struct Desk {
     pub area: Rect,
@@ -499,7 +500,12 @@ impl App {
         let hidden = if self.bar.side == crate::ui::BarSide::Bottom { area.bottom() - self.bar_rect(area, self.bar.side).top() } else { 0.0 };
         let anchor = pos2(page.center().x, area.bottom() - hidden - self.eggs.program.drawn.ground * unit);
         let unzoom = |r: Rect| Rect::from_min_max(anchor + (r.min - anchor) / z, anchor + (r.max - anchor) / z);
-        let bar = Some(unzoom(self.bar_rect(area, self.bar.side)));
+        // The desk and the bar as at the fitting zoom, where the page's middle is now: what a
+        // theme places from them stays put on the desk, and comes nearer with it. Given what shows
+        // at this zoom instead, a castle a little in from the desk's right stayed by the window's
+        // edge as it grew, out of step with the hills behind it.
+        let fitted = vec2(anchor.x - self.view_area(area).center().x, 0.0);
+        let bar = Some(self.bar_rect(area, self.bar.side).translate(fitted));
         let carried = self.eggs.lift.filter(|l| matches!(l.by, Carrier::Program { .. })).zip(self.eggs.place).map(|(lift, place)| {
             let pose = pose_of(lift.by, (now - lift.started) as f32, lift.duck.map(|d| (d - lift.started) as f32));
             let Carrier::Program { right } = lift.by else { unreachable!() };
@@ -518,7 +524,7 @@ impl App {
         let p = &mut self.eggs.program;
         let now_at = egui::emath::TSTransform::new(anchor.to_vec2() * (1.0 - z), z);
         let ask = Ask {
-            input: input_bytes(now, &Desk { area: unzoom(area), page: unzoom(page), bar, zoom: z, unit, window: area, ground: anchor }, carried),
+            input: input_bytes(now, &Desk { area: area.translate(fitted), page: unzoom(page), bar, zoom: z, unit, window: area, ground: anchor }, carried),
             events: event_bytes(&p.events),
             seed: story_seed(&self.story_id),
             garden: self.doc.garden.clone(),

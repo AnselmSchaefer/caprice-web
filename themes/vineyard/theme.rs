@@ -19,7 +19,7 @@
 //! would be then, so Caprice zooms the whole of it at once and nothing in it can zoom differently
 //! from the rest. The country is laid out from that middle as far as `REACH` either side, never from
 //! what shows, so zooming only makes it bigger or smaller and moves nothing; only its plain fills
-//! reach the edges of what shows (`Input::area`).
+//! reach the edges of what shows (`Input::shown`).
 //!
 //! The leaves are thousands: they are meshes, a few for each row, never polygons, which egui
 //! smooths at every edge.
@@ -836,7 +836,8 @@ impl Theme for Vineyard {
     }
 
     fn frame(&mut self, input: &Input, out: &mut Out) {
-        let (now, u, area, page) = (input.time, input.unit, input.area, input.page);
+        // The plain fills reach the edges of what shows, and a stretch is planted where it is seen.
+        let (now, u, shown, page) = (input.time, input.unit, input.shown, input.page);
         let (seed, garden) = (host::story_seed(), host::garden());
         let n = garden.len().max(1);
         out.ground = GROUND;
@@ -846,9 +847,9 @@ impl Theme for Vineyard {
         let land = Land { middle: input.ground.x, ground: input.ground.y, u };
         let rows = Rows::new(seed, land);
         let l = &mut out.desk;
-        landscape(l, seed, area, &land, now);
+        landscape(l, seed, shown, &land, now);
         let all = places(seed, page, &rows);
-        let placed: Vec<Place> = (0..n).map(|k| all[self.vines.place(k, all.len(), |p| all[p].in_view(&rows, area, page))]).collect();
+        let placed: Vec<Place> = (0..n).map(|k| all[self.vines.place(k, all.len(), |p| all[p].in_view(&rows, shown, page))]).collect();
         let turning = self.vines.finishing(now, TURN);
         // How far each chapter's stretch has turned: not the newest, the one before as it turns,
         // every other all the way.
@@ -861,7 +862,7 @@ impl Theme for Vineyard {
         // grapes on its stretches, and the leaves fallen in front of it.
         for row in (0..DEPTHS).rev() {
             let on = |x: f32| placed.iter().zip(&turned).filter(|(p, _)| p.level == row).map(|(p, &a)| a * p.within(x, u)).fold(0.0, f32::max);
-            vines(l, seed, row, &rows, area, &on);
+            vines(l, seed, row, &rows, shown, &on);
             for (k, place) in placed.iter().enumerate().filter(|(_, p)| p.level == row) {
                 let all = bunches(seed, k, place, &rows);
                 let pages = garden.get(k).map_or(1, |&p| (p as usize).min(BUNCHES));

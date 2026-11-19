@@ -223,11 +223,18 @@ impl<T: Theme> Running<T> {
 pub struct Input {
     /// Seconds, from an arbitrary start; never an `f32` (it would stutter after a day).
     pub time: f64,
-    /// The desk and the page as they lie at the fitting zoom.
+    /// The desk and the page as they lie at the fitting zoom, whatever the zoom: lay everything
+    /// out from them (and `ground`), and it stays where it is on the desk, coming nearer with it.
     pub area: Rect,
     pub page: Rect,
-    /// The page bar, if it shows: anything growing up from the desk's foot keeps above it.
+    /// The page bar, if it shows, as at the fitting zoom: anything growing up from the desk's foot
+    /// keeps above it.
     pub bar: Option<Rect>,
+    /// What shows of the desk at this zoom: more than `area` zoomed out, less zoomed in, and beside
+    /// it when the page has moved. For fills that must reach the window's edges (a sky, a field,
+    /// the sea), and for choosing where a new thing goes so that it is seen; never to place
+    /// things, which would move as the writer zooms.
+    pub shown: Rect,
     /// How far the writer has zoomed in on the page (1 at the fitting zoom). Caprice zooms what is
     /// drawn itself, about `ground`: a theme lays out as at 1.
     pub zoom: f32,
@@ -244,7 +251,10 @@ pub struct Input {
 impl From<bindings::FrameInput> for Input {
     fn from(i: bindings::FrameInput) -> Input {
         let d = i.desk;
-        Input { time: i.time, area: d.area, page: d.page, bar: d.bar, zoom: d.zoom, unit: d.unit, window: d.window, ground: d.ground, carrier: i.carrier }
+        // The window zoomed back about the ground, as Caprice zooms the desk about it.
+        let back = |p: Point| pt(d.ground.x + (p.x - d.ground.x) / d.zoom, d.ground.y + (p.y - d.ground.y) / d.zoom);
+        let shown = Rect::from_min_max(back(d.window.min), back(d.window.max));
+        Input { time: i.time, area: d.area, page: d.page, bar: d.bar, shown, zoom: d.zoom, unit: d.unit, window: d.window, ground: d.ground, carrier: i.carrier }
     }
 }
 

@@ -252,14 +252,13 @@ impl Preview {
     }
 }
 
-/// The desk a frame is laid out on, unzoomed about the theme's ground as `draw_program` does: the
-/// area, the page, the bar, the size of things, and the point zoomed about.
+/// The desk a frame is laid out on, as `draw_program` tells it: the area, the page and the bar as
+/// at the fitting zoom (the page in the middle, zoomed about the theme's ground under it), the size
+/// of things, and the point zoomed about.
 fn desk_of(frame: Frame, ground: f32) -> (Rect, Rect, Rect, f32, Pos2) {
     let (area, page, bar, unit) = layout(frame.size);
     let anchor = pos2(page.center().x, area.bottom() - (area.bottom() - bar.top()) - ground * unit);
-    let z = frame.zoom;
-    let unzoom = |r: Rect| Rect::from_min_max(anchor + (r.min - anchor) / z, anchor + (r.max - anchor) / z);
-    (unzoom(area), unzoom(page), unzoom(bar), unit, anchor)
+    (area, page, bar, unit, anchor)
 }
 
 /// The desk under a program's shapes: the palette's two colours, as `theme::paint_desk` lays them.

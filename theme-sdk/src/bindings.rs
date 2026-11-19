@@ -1191,8 +1191,9 @@ pub mod caprice {
             /// theme lays out for these; Caprice zooms all it draws behind the pages and over them by
             /// `zoom` at once, about `ground`: the page's middle across, at the height the theme names
             /// (`frame-output.ground`), which stays where it is on the screen as the writer zooms. `area`
-            /// is as much of the desk as shows once zoomed; `window` the desk as it lies on the screen,
-            /// at every zoom. `unit` is the size of things (1 on a desk 900 high).
+            /// and `bar` are as they lie at the fitting zoom, under the page's middle, whatever the zoom;
+            /// `window` the desk as it lies on the screen, at every zoom (zoomed back about `ground`, what
+            /// shows of the desk). `unit` is the size of things (1 on a desk 900 high).
             #[repr(C)]
             #[derive(Clone, Copy)]
             pub struct Desk {
