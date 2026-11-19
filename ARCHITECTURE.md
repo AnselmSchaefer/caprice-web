@@ -2413,6 +2413,14 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   its own little runtime in `rt.rs` in place of wit-bindgen's: a theme's build is the SDK and one
   file, no proc macro, no other crate). Test: `the_bindings_carried_are_made_again_the_same_from_the_wit`
   (in `theme-sdk/tests/`).
+- **Every theme can still become a component.** The SDK's bindings put the world's type into each
+  module, in its two `component-type` sections, so `wit-component` wraps any theme into a component
+  of `caprice:theme@1.0.0` from the module alone, as `wasm-tools component new` does, with the same
+  bytes each time: what a host on Wasmtime, or a browser that runs components itself, would take.
+  The gallery signs the module, and a theme is never built again, so a change to the SDK's bindings
+  or to the flags (`themes/build.sh`, `toolchain/pack.mjs`) must keep those sections: `-C
+  strip=debuginfo` does, stripping every custom section would not. Test:
+  `the_sdk_s_themes_wrap_into_components_of_the_world_as_they_are_built` (every theme in `themes/`).
 - **Caprice writes and reads the canonical ABI itself; in the tests no module is run.** It writes
   the frame's input (`input_bytes`, 144 bytes) and the events (`event_bytes`, 12 bytes each) in
   `eggs/program.rs`; in the browser `web/theme-worker.js` reads the program's `frame-output` (40
@@ -3235,7 +3243,10 @@ result sent back, a stand-in answer in `api.test.mjs` and in `cloud::stand_in` (
 - **2026-11-16 — The gallery signs core modules, and its owner reviews in Caprice.** What the
   writer's tab builds and the reader plays is a core module (the world `caprice:theme@1.0.0` as
   wit-bindgen lays it out), so that is what is signed and taken: a component would be a second form
-  to check, build and keep in step for nothing a theme needs. The owner's review is in the app
+  to check, build and keep in step for nothing a theme needs. Each module still carries the world's
+  type and wraps into a component whenever one is wanted (R36); measured on 2026-11-19, that pays
+  only with a host that is a component too, linked to the theme by the engine (jco's JavaScript
+  between them, or a JavaScript host given the theme's values as objects, is slower than today's). The owner's review is in the app
   (the Waiting tab), with their session, rather than a page with an admin token: it needs the
   compiler and the preview that are there already, and no token sits in a browser. The first step
   is the loop alone (send, review, sign, list, Use); votes, reports, remixes, taking a theme out

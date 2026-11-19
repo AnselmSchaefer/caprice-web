@@ -615,6 +615,7 @@ dependencies = [
  "wasmparser 0.228.0",
  "wat",
  "web-sys",
+ "wit-component",
  "zip",
 ]
 
