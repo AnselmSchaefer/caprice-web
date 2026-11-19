@@ -18,12 +18,12 @@ import fireflies from "../../themes/fireflies/theme.rs";
 import snow from "../../themes/snow/theme.rs";
 import vineyard from "../../themes/vineyard/theme.rs";
 import { limits } from "./ledger.js";
+import { COLOURS } from "./theme-file.js";
 
 const WRITER = "claude-opus-5-5";
 // A theme's id, given by the Ledger when one is begun.
 export const THEME_ID = /^[0-9a-f]{16}$/;
 // The palette's names (src/own.rs, NAMES), and "light".
-export const COLOURS = ["desk_top", "desk", "dock", "dock_edge", "button", "button_hover", "field", "text", "text_dim", "text_hot", "accent", "on_accent", "caret", "thumb"];
 
 // The prompt, the same for every theme and every round, so it is cached after the first.
 const SYSTEM = [
