@@ -1919,4 +1919,29 @@ mod tests {
         assert!(Shelf::kept_in(Some(dir.clone())).entries.is_empty() && shelf.svg(&id).is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// The private key the Worker signs with (the secret `GALLERY_SIGNING_KEY`), where the owner
+    /// keeps it: `CAPRICE_GALLERY_SIGNING_KEY_FILE`, or `~/.config/caprice-web/gallery-signing-key`.
+    fn signing_seed() -> Option<String> {
+        let file = std::env::var_os("CAPRICE_GALLERY_SIGNING_KEY_FILE").map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config/caprice-web/gallery-signing-key")))?;
+        fs::read_to_string(file).ok()
+    }
+
+    /// Every other test checks signatures with a key of its own, and no test in CI holds the real
+    /// one, so a `GALLERY_KEY` that is not the public half of the Worker's secret would refuse every
+    /// theme taken from the gallery and nothing would say so. Checked only where the key is kept (the
+    /// owner's machine); elsewhere it says it was not. A test of "Use" in a real tab with a theme the
+    /// real key signed is an open question (THEME_PROGRAMS_PLAN.md, step 6).
+    #[test]
+    fn the_gallerys_key_is_the_public_half_of_the_key_the_worker_signs_with() {
+        use base64::Engine;
+        let Some(seed) = signing_seed() else {
+            eprintln!("the gallery's signing key is not kept here: GALLERY_KEY is not checked against it");
+            return;
+        };
+        let seed = base64::engine::general_purpose::STANDARD.decode(seed.trim()).expect("the key kept is base64");
+        let seed = ed25519_compact::Seed::from_slice(&seed).expect("the key kept is a 32-byte seed");
+        assert_eq!(*ed25519_compact::KeyPair::from_seed(seed).pk, GALLERY_KEY, "GALLERY_KEY is not the public half of the key kept");
+    }
 }

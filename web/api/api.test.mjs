@@ -72,7 +72,7 @@ async function start(t, vars = {}, down = false) {
     // From the checkout's root: the theme prompt's texts are the SDK's and the themes' own files.
     modulesRoot: fileURLToPath(new URL("../..", import.meta.url)),
     modules: [
-      ...[...(down ? ["ledger-down.mjs"] : []), "worker.js", "ledger.js", "room.js", "failure.js", "tally.js", "theme.js", "gallery.js", "wasm-check.js"].map(m => ({ type: "ESModule", path: fileURLToPath(new URL(m, import.meta.url)) })),
+      ...[...(down ? ["ledger-down.mjs"] : []), "worker.js", "ledger.js", "room.js", "failure.js", "tally.js", "theme.js", "theme-file.js", "gallery.js", "wasm-check.js"].map(m => ({ type: "ESModule", path: fileURLToPath(new URL(m, import.meta.url)) })),
       ...PROMPT.map(f => ({ type: "Text", path: fileURLToPath(new URL(`../../${f}`, import.meta.url)) })),
     ],
     compatibilityDate: DATE,

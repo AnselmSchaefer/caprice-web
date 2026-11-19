@@ -5,6 +5,8 @@ import { chromium } from "playwright-core";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
+import { check as galleryCheck } from "./api/theme-file.js";
 
 const out = process.argv[2] ?? ".";
 const url = process.env.CAPRICE_URL ?? "http://localhost:8080/";
@@ -430,11 +432,35 @@ if (!compiler) {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const snow = { source: fs.readFileSync(path.join(here, "../themes/snow/theme.rs"), "utf8"), ...JSON.parse(fs.readFileSync(path.join(here, "../themes/snow/manifest.json"), "utf8")) };
   const rounds = [];
-  const json = (r, v) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(v) });
+  const json = (r, v, status = 200) => r.fulfill({ status, contentType: "application/json", body: JSON.stringify(v) });
+  // The gallery, as the Worker answers (web/api/gallery.js): a theme sent is checked by the Worker's
+  // own code and waits for the owner (the writer here); the owner's decision is answered with a
+  // signature that is not the gallery's, as no test holds its key.
+  const shown = { id: "00000000000000aa", sent: null, checked: null, decided: null, signature: Buffer.alloc(64, 7).toString("base64") };
+  const gallery = async (r, at) => {
+    const method = r.request().method();
+    if (at === "/api/gallery" && method === "POST") {
+      shown.sent = r.request().postDataBuffer();
+      shown.checked = await galleryCheck(new Uint8Array(shown.sent));
+      return shown.checked.why ? r.fulfill({ status: 422, body: shown.checked.why }) : json(r, { id: shown.id, state: "waiting" }, 202);
+    }
+    const theme = shown.checked?.theme;
+    if (at === "/api/gallery") return json(r, { themes: shown.decided ? [{ id: shown.id, ...theme, signature: shown.signature }] : [] });
+    if (at === "/api/gallery/mine") return json(r, { themes: [] });
+    if (at === "/api/gallery/waiting") return json(r, { themes: theme && !shown.decided ? [{ id: shown.id, ...theme, size: shown.sent.length }] : [] });
+    if (at === `/api/gallery/waiting/${shown.id}`) {
+      shown.decided = JSON.parse(r.request().postData());
+      return json(r, { id: shown.id, state: "public", signature: shown.signature });
+    }
+    if (at === `/api/gallery/${shown.id}/theme`) return r.fulfill({ status: 200, contentType: "application/zip", body: shown.sent });
+    if (at === `/api/gallery/${shown.id}/preview`) return r.fulfill({ status: 200, contentType: "image/png", body: Buffer.from(shown.checked.preview) });
+    return r.fulfill({ status: 404, body: "" });
+  };
   await maker.route("**/api/**", r => {
     const at = new URL(r.request().url());
     if (at.pathname === "/api/providers") return json(r, ["google"]);
-    if (at.pathname === "/api/me") return json(r, { name: "Ada", provider: "google", user: "smoke" });
+    if (at.pathname === "/api/me") return json(r, { name: "Ada", provider: "google", user: "smoke", owner: true });
+    if (at.pathname.startsWith("/api/gallery")) return gallery(r, at.pathname);
     if (at.pathname.startsWith("/api/theme-program")) {
       const body = r.request().postDataBuffer() ?? Buffer.alloc(0);
       rounds.push({ path: at.pathname, kind: r.request().headers()["x-caprice-kind"] ?? "begin", body });
@@ -502,6 +528,69 @@ if (!compiler) {
     bytes && Buffer.from(bytes).equals(fs.readFileSync(path.join(here, "../tests/fixtures/snow.wasm")))
       && all.includes(built.replace(/\.wasm$/, ".rs")) && all.includes(built.replace(/\.wasm$/, ".png")) && maker.workers().some(w => w.url().endsWith("/theme-worker.js")),
     built ?? "nothing kept");
+
+  // The gallery's loop (R36, the plan's step 6) in this tab: the theme just kept is sent, and the
+  // Worker's own check takes the file the tab wrote. The writer is the owner here, so it waits in
+  // their Waiting tab: looked at, it is built again from its source by the compiler in the tab
+  // and must be the very module sent, played, pictured, then published. Taken back with "Use", the
+  // signature is checked with the key built into Caprice; the stand-in's is not the gallery's, so
+  // it is refused and nothing goes on the shelf. (A theme the real key signed, taken all the way
+  // onto the shelf, is left open: no test holds the key, and the owner's machine checks that
+  // `own::GALLERY_KEY` is its public half. THEME_PROGRAMS_PLAN.md, step 6.)
+  const fixtureHash = createHash("sha256").update(fs.readFileSync(path.join(here, "../tests/fixtures/snow.wasm"))).digest("hex");
+  // Page → Theme → Yours → the theme's ▸ → Send to the gallery…, then Send it and Done.
+  for (const [x, y] of [[737, 38], [810, 113], [992, 113], [1085, 267], [1170, 267]]) await click(x, y, maker);
+  await click(468, 531, maker);
+  const t2 = Date.now();
+  while (!shown.checked && Date.now() - t2 < 15000) await maker.waitForTimeout(250);
+  await maker.waitForTimeout(500);
+  await maker.screenshot({ path: `${out}/15-gallery-sent.png` });
+  const theme = shown.checked?.theme;
+  check("a theme sent to the gallery passes the Worker's check, its module the one built",
+    theme?.module === fixtureHash && theme.toolchain === compiler.id && theme.name === "Snow made with Claude",
+    shown.checked?.why ?? `${theme?.name}, ${theme?.toolchain}, module ${theme?.module.slice(0, 12)}`);
+  await click(462, 550, maker);
+  // Page → Theme → Gallery…, Waiting, Look at it.
+  for (const [x, y] of [[737, 38], [810, 113], [1113, 113], [590, 417], [812, 462]]) await click(x, y, maker);
+  const t3 = Date.now();
+  while (!compiling() && Date.now() - t3 < 60000) await maker.waitForTimeout(250);
+  const rebuilt = compiling();
+  while (compiling() && Date.now() - t3 < 180000) await maker.waitForTimeout(500);
+  // Played through the preview's story, then Publish it, tried again until the button is there.
+  while (!shown.decided && Date.now() - t3 < 240000) {
+    await maker.waitForTimeout(2000);
+    if (!shown.decided) await click(428, 750, maker);
+  }
+  await maker.screenshot({ path: `${out}/15-gallery-reviewed.png` });
+  check("the owner's tab builds it again from its source, the same byte for byte, and publishes it",
+    rebuilt && shown.decided?.publish === true && shown.decided.module === fixtureHash,
+    `${JSON.stringify(shown.decided)} in ${((Date.now() - t3) / 1000).toFixed(1)} s`);
+  const shelfBefore = await maker.evaluate(() => new Promise(done => {
+    const r = indexedDB.open("caprice", 1);
+    r.onsuccess = () => {
+      const req = r.result.transaction("files", "readonly").objectStore("files").get("/caprice/themes/index.json");
+      req.onsuccess = () => done(req.result ? new TextDecoder().decode(req.result.bytes) : "[]");
+    };
+  }));
+  // New, then the theme's Use: fetched, read, its signature checked.
+  let fetched = 0;
+  maker.on("request", q => { if (new URL(q.url()).pathname === `/api/gallery/${shown.id}/theme`) fetched++; });
+  await click(415, 417, maker);
+  await maker.waitForTimeout(1000);
+  await click(516, 542, maker);
+  await maker.waitForTimeout(3000);
+  await maker.screenshot({ path: `${out}/15-gallery-use-refused.png` });
+  const shelfAfter = await maker.evaluate(() => new Promise(done => {
+    const r = indexedDB.open("caprice", 1);
+    r.onsuccess = () => {
+      const req = r.result.transaction("files", "readonly").objectStore("files").get("/caprice/themes/index.json");
+      req.onsuccess = () => done(req.result ? new TextDecoder().decode(req.result.bytes) : "[]");
+    };
+  }));
+  const entries = JSON.parse(shelfAfter);
+  check("a theme the gallery did not sign is fetched with Use and not taken onto the shelf",
+    fetched === 1 && shelfAfter === shelfBefore && entries.length === 1 && !entries.some(e => e.gallery),
+    `fetched ${fetched}, ${entries.length} on the shelf`);
   await context.close();
 }
 

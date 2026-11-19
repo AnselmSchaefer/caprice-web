@@ -120,7 +120,8 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `web/api/failure.js` | What a failed request answers: Cloudflare's daily limit said plainly, with when it lifts; any other fault, "Something went wrong" (R34) |
 | `web/api/ledger.js` | The Durable Object `Ledger`: who has signed up, the current version and history of each story online, the day's scenes, every limit (R33) |
 | `web/api/tally.js` | The day's scenes counted in R2 as well, with conditional writes, for when the Ledger cannot be reached (R33, R34) |
-| `web/api/gallery.js` | The gallery's requests (R33, R36): a theme file sent, unpacked and checked, queued; the list, each writer's own, the owner's queue and decision, signed with `GALLERY_SIGNING_KEY`; its files read from R2 |
+| `web/api/gallery.js` | The gallery's requests (R33, R36): a theme file sent, checked (`theme-file.js`), queued; the list, each writer's own, the owner's queue and decision, signed with `GALLERY_SIGNING_KEY`; its files read from R2 |
+| `web/api/theme-file.js` | A theme file as the gallery takes it in: unzipped within limits, its manifest, picture and module's sections checked (`wasm-check.js`), the module and source hashed; no text imported, so `smoke.mjs` checks what a real tab sends with it |
 | `web/api/wasm-check.js` | R36's check of a theme's module, as the Worker makes it before anything is kept: imports, exports, sizes |
 
 ---
@@ -2102,7 +2103,8 @@ the theme or why not".
 The gallery of theme programs (`web/api/gallery.js`, R36, the plan's step 6) is for writers signed in:
 
 - **A theme sent is checked as far as is cheap, and queued for the owner**: its file (a zip, at most
-  `GALLERY_FILE_BYTES`) is unpacked in the Worker (`unzip`: stored or deflated, each part capped);
+  `GALLERY_FILE_BYTES`) is unpacked in the Worker (`theme-file.js`, which imports no text so that
+  `smoke.mjs` can run it on what a real tab sends: stored or deflated, each part capped);
   its manifest's world, name, toolchain and colours, its module (`wasm-check.js`, R36's check
   ported: only `host` imported, the world's exports, sizes bounded), its source (UTF-8, naming
   `theme!(`) and its picture (a PNG 320 wide) must hold, or 422 with a sentence. The Worker works
@@ -2584,8 +2586,14 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   under (`Signed::message`); the shelf checks it against `GALLERY_KEY` every time it is read or a
   theme added (`Shelf::check_signatures`), never trusting an earlier check, and only then shows the
   gallery's name (`Entry::shown_name`). Changed by a byte, or signed by another key, it is the
-  writer's own under its own name. Tests set the stand-in server's key (`stand_in::gallery_key`).
-  Test: `a_gallery_theme_is_shown_under_the_gallery_s_name_until_a_byte_of_it_changes`.
+  writer's own under its own name. Tests set the stand-in server's key (`stand_in::gallery_key`),
+  and none holds the real one: so where the owner keeps it, a test checks that `GALLERY_KEY` is
+  the public half of the Worker's secret (a mismatch would refuse every theme taken, and nothing
+  else would say so); elsewhere it says it did not check. A test of "Use" in a real tab with a
+  theme the real key signed is left open (the plan's step 6): it would mean a signature made with
+  the real key in this public repo, made again for each toolchain. Tests:
+  `a_gallery_theme_is_shown_under_the_gallery_s_name_until_a_byte_of_it_changes`,
+  `the_gallerys_key_is_the_public_half_of_the_key_the_worker_signs_with`.
 - **The gallery publishes only what the owner built again, the same, and saw play** (`gallery.rs`):
   a writer sends a theme made with Claude from its "⋯" menu (once: `Entry::sent`), under the name,
   words and author they give. The owner looks at it in Caprice: the module fetched must be the one
@@ -2609,7 +2617,12 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   `yours_shows_the_themes_from_the_gallery_those_made_with_claude_and_the_drawings_apart_and_sends_each_once`,
   `a_shelf_holding_a_theme_as_made_and_as_taken_from_the_gallery_keeps_the_gallery_s_alone`,
   `the_themes_menu_is_as_wide_as_its_two_tiles_whichever_themes_it_shows`,
-  `the_gallery_window_fits_a_phone_s_screen_and_goes_when_the_story_is_closed`.
+  `the_gallery_window_fits_a_phone_s_screen_and_goes_when_the_story_is_closed`; in the browser
+  `smoke.mjs` sends the theme it made, checks the file the tab wrote with the Worker's own check
+  (`web/api/theme-file.js`), and as the owner builds it again in the tab and publishes it: "a theme
+  sent to the gallery passes the Worker's check, its module the one built", "the owner's tab builds
+  it again from its source, the same byte for byte, and publishes it", "a theme the gallery did not
+  sign is fetched with Use and not taken onto the shelf".
 - **A theme is built from its source in the writer's tab, by one fixed toolchain** (`web/compiler/`,
   `platform::compiler`, the plan's step 4): rustc and wasm-ld built as WebAssembly (the
   investigation's release, `1.99.1-6c798e2613f0`), rustup's std for `wasm32-unknown-unknown`
