@@ -339,6 +339,24 @@ const keptAndOpened = async (files, wait) => {
 // Beside the page, low on the desk.
 const beside = () => page.screenshot({ clip: { x: 20, y: 560, width: 220, height: 200 } });
 // The screen's pixel, from a screenshot of it: a WebGL canvas cannot be read back.
+// The bluest pixel (most blue over red) in a part of the page, from one screenshot of it.
+const bluestIn = async (x, y, width, height, on = page) => {
+  const shot = (await on.screenshot({ clip: { x, y, width, height } })).toString("base64");
+  return on.evaluate(async png => {
+    const img = new Image();
+    img.src = `data:image/png;base64,${png}`;
+    await img.decode();
+    const g = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+    g.canvas.width = img.width;
+    g.canvas.height = img.height;
+    g.drawImage(img, 0, 0);
+    const d = g.getImageData(0, 0, img.width, img.height).data;
+    let best = 0;
+    for (let i = 4; i < d.length; i += 4) if (d[i + 2] - d[i] > d[best + 2] - d[best]) best = i;
+    return Array.from(d.slice(best, best + 4));
+  }, shot);
+};
+
 const pixelAt = async (x, y, on = page) => {
   const shot = (await on.screenshot({ clip: { x, y, width: 1, height: 1 } })).toString("base64");
   return on.evaluate(async png => {
@@ -423,11 +441,10 @@ check("and its snow falls", !falling.equals(await leftOfPage()));
 await keptInBrowser([["/caprice/theme.json", '{"own":"smokevineyard"}']]);
 await keptAndOpened([], 3000);
 await page.screenshot({ path: `${out}/13-program-vineyard.png` });
-// The sky high on the right (the low sun lights the left): the bluest of a few points there, as its
-// clouds drift over one or another as time goes.
-const skies = [];
-for (const [x, y] of [[1250, 110], [1000, 150], [1150, 230], [950, 260], [1240, 280]]) skies.push(await pixelAt(x, y));
-const sky = skies.reduce((a, b) => (b[2] - b[0] > a[2] - a[0] ? b : a));
+// The sky on the right (the low sun lights the left): its bluest pixel between the dock and the
+// hills. Where its clouds lie comes from the story's seed, a new story's each run, and they drift:
+// a few points chosen beforehand were all cloud and haze once (the deploy of 2026-11-20).
+const sky = await bluestIn(900, 66, 370, 230);
 const slope = await pixelAt(38, 790);
 check("the Magic Vineyard as a program draws its own sky and its slope", themeWorkers() === 1 && sky[2] > sky[0] + 30 && slope[0] > slope[2] + 30, `${themeWorkers()} workers, sky ${sky.join(",")}, slope ${slope.join(",")}`);
 await keptInBrowser([["/caprice/theme.json", '{"own":"smokespin"}']]);
