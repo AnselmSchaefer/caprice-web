@@ -1388,6 +1388,30 @@ test("a theme the owner refuses says why to its writer, and its files go", async
   assert.equal((await send(ada, SNOW_FILE)).status, 202, "and it may be sent again, changed or not");
 });
 
+test("the owner takes a published theme out of the gallery: listed and read no more, its files gone, its writer told", async t => {
+  const mf = await start(t, GALLERY);
+  const ada = await writer(mf, "1", "Ada");
+  const { id } = await (await send(ada, SNOW_FILE)).json();
+  const owner = await writer(mf, "9", "Owner");
+  const out = () => owner(`/api/gallery/${id}`, { method: "DELETE" });
+  assert.equal((await out()).status, 404, "only a theme in the gallery is taken out");
+  await owner(`/api/gallery/waiting/${id}`, { method: "POST", body: JSON.stringify({ publish: true, module: sha(SNOW["theme.wasm"]) }) });
+  assert.equal((await ada(`/api/gallery/${id}`, { method: "DELETE" })).status, 404, "only the owner takes one out");
+  assert.equal((await owner("/api/gallery/not-an-id", { method: "DELETE" })).status, 400);
+  assert.equal((await owner(`/api/gallery/${id}`)).status, 405);
+
+  const taken = await out();
+  assert.equal(taken.status, 200);
+  assert.deepEqual(await taken.json(), { id, state: "removed" });
+  assert.deepEqual((await (await ada("/api/gallery")).json()).themes, [], "listed no more");
+  assert.equal((await owner(`/api/gallery/${id}/theme`)).status, 404, "read no more");
+  assert.deepEqual(await inR2(mf), [], "its files gone");
+  const [mine] = (await (await ada("/api/gallery/mine")).json()).themes;
+  assert.deepEqual([mine.state, mine.why], ["removed", "Taken out of the gallery"]);
+  assert.equal((await out()).status, 404, "taken out once");
+  assert.equal((await send(ada, SNOW_FILE)).status, 202, "and it may be sent again");
+});
+
 test("a writer sends a few themes a day, the queue is bounded, and without a key nothing is signed", async t => {
   const mf = await start(t, { ...GALLERY, USER_PUBLISHED_PER_DAY: "2", GALLERY_WAITING: "3", GALLERY_SIGNING_KEY: "" });
   const [ada, bo] = [await writer(mf, "1", "Ada"), await writer(mf, "2", "Bo")];

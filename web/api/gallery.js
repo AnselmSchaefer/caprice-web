@@ -8,7 +8,9 @@
 // same module byte for byte, played, and looked at. Then the Worker signs it (ed25519 over the
 // module's hash and the source's that it worked out itself, the toolchain and the name, the
 // message `own::Signed::message` checks), and it is public: listed for every writer signed in,
-// its file and picture read through the Ledger, which counts each read before R2 is touched.
+// its file and picture read through the Ledger, which counts each read before R2 is touched. The
+// owner may take a published theme out again: no longer listed nor read, its files deleted; a
+// writer who took it keeps it, signed as it was.
 //
 // The owner is whoever's hashed id is in GALLERY_OWNERS (a var set in the dashboard); the key is
 // the secret GALLERY_SIGNING_KEY, the base64 of an ed25519 seed whose public half is the app's
@@ -55,6 +57,13 @@ export async function gallery(request, env, user, rest) {
     if (method !== "POST") return text(405, "POST only");
     if (!GALLERY_ID.test(decided[1])) return text(400, "Not a theme's id");
     return decide(request, env, decided[1]);
+  }
+  const one = rest.match(/^\/([^/]+)$/);
+  if (one) {
+    if (!isOwner(env, user)) return text(404, "No such request");
+    if (method !== "DELETE") return text(405, "DELETE only");
+    if (!GALLERY_ID.test(one[1])) return text(400, "Not a theme's id");
+    return takeDown(env, one[1]);
   }
   const part = rest.match(/^\/([^/]+)\/(theme|preview)$/);
   if (part) {
@@ -104,6 +113,16 @@ async function read(env, user, id, what) {
   if (!object) return text(404, "No such theme in the gallery");
   const kept = allowed.state === "public" ? "private, max-age=31536000, immutable" : "no-store";
   return new Response(object.body, { headers: { "Content-Type": what === "theme" ? "application/zip" : "image/png", "Cache-Control": kept } });
+}
+
+// A published theme taken out by the owner: the Ledger first, so it is never listed with its files
+// gone; then its files. Its writer reads under "Sent by you" that it was taken out.
+async function takeDown(env, id) {
+  const done = await ledgerOf(env).galleryRemove(id);
+  if (!done.ok) return refused(done);
+  const at = files(id);
+  await env.STORIES.delete([at.theme, at.preview]);
+  return Response.json({ id, state: "removed" });
 }
 
 // What the gallery signs for a theme, as the app checks it (`own::Signed::message`): the hashes are

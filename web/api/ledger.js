@@ -385,7 +385,7 @@ export class Ledger extends DurableObject {
     const l = this.limits;
     // One that never reached R2 gives its place back.
     this.sql.exec("DELETE FROM gallery WHERE state = 'sending' AND at <= ?", now - 10 * MINUTE);
-    const same = this.rows("SELECT state FROM gallery WHERE module = ? AND state != 'refused'", t.module)[0];
+    const same = this.rows("SELECT state FROM gallery WHERE module = ? AND state NOT IN ('refused', 'removed')", t.module)[0];
     if (same) return { error: 409, message: same.state === "public" ? "This theme is in the gallery already" : "This theme is waiting for the gallery already" };
     if (this.count(now, `published|${user}`) >= l.USER_PUBLISHED_PER_DAY) {
       return { error: 429, message: `You can send ${l.USER_PUBLISHED_PER_DAY} themes to the gallery a day. More tomorrow.`, retry: untilTomorrow(now) };
@@ -396,7 +396,7 @@ export class Ledger extends DurableObject {
     if (this.count(now, "writes") + 2 > l.SITE_WRITES_PER_DAY) {
       return { error: 503, message: "The gallery takes no more themes today. More tomorrow.", retry: untilTomorrow(now) };
     }
-    const used = this.rows("SELECT COALESCE(SUM(size), 0) AS n FROM gallery WHERE state != 'refused'")[0].n;
+    const used = this.rows("SELECT COALESCE(SUM(size), 0) AS n FROM gallery WHERE state NOT IN ('refused', 'removed')")[0].n;
     if (used + t.size > l.GALLERY_BYTES) return { error: 507, message: "The gallery has no more room for now" };
     this.bump(now, `published|${user}`);
     this.bump(now, "writes");
@@ -459,6 +459,14 @@ export class Ledger extends DurableObject {
     if (!this.rows("SELECT 1 FROM gallery WHERE id = ? AND state = 'waiting'", id).length) return { error: 409, message: "That theme is not waiting any more" };
     if (signature) this.sql.exec("UPDATE gallery SET state = 'public', signature = ?, decided = ? WHERE id = ?", signature, now, id);
     else this.sql.exec("UPDATE gallery SET state = 'refused', why = ?, decided = ? WHERE id = ?", why, now, id);
+    return { ok: true };
+  }
+
+  // A published theme the owner takes out: no longer listed nor read, its room given back, and its
+  // writer told (`galleryMine`). Only a theme in the gallery is taken out.
+  galleryRemove(id, now = Date.now()) {
+    if (!this.rows("SELECT 1 FROM gallery WHERE id = ? AND state = 'public'", id).length) return { error: 404, message: "No such theme in the gallery" };
+    this.sql.exec("UPDATE gallery SET state = 'removed', why = 'Taken out of the gallery', decided = ? WHERE id = ?", now, id);
     return { ok: true };
   }
 

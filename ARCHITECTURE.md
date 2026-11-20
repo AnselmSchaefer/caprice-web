@@ -2155,6 +2155,13 @@ The gallery of theme programs (`web/api/gallery.js`, R36, the plan's step 6) is 
   `Signed::message` with the secret `GALLERY_SIGNING_KEY` (an Ed25519 seed, base64), whose public
   half is `own::GALLERY_KEY`. Without the secret nothing is signed (503). A refusal says why to the
   writer (`/api/gallery/mine`) and its files are deleted.
+- **Only the owner takes a published theme out again** (`DELETE /api/gallery/<id>`, 404 to anyone
+  else, 404 for a theme not in the gallery): the Ledger marks it `removed` first (`galleryRemove`:
+  listed and read no more, its room given back, its writer told "Taken out of the gallery" under
+  `/api/gallery/mine`), then its files are deleted, so it is never listed with its files gone.
+  Deleting its files in R2 by hand leaves it listed, its "Use" broken: the list is the Ledger's
+  table, not R2's (seen live, 2026-11-20). A writer who took it keeps it: the signature on their
+  shelf stays good. Sent again, it waits for the owner as a new theme.
 - **Reading the gallery is counted**: the list, and each file, against `SITE_READS_PER_DAY`
   (`galleryRead`); a theme published never changes, so its files go back `private, max-age=31536000,
   immutable` (the one Cache-Control `guarded` keeps) and the browser asks once.
@@ -2163,7 +2170,8 @@ The gallery of theme programs (`web/api/gallery.js`, R36, the plan's step 6) is 
 Tests: "a theme sent is queued for the owner and seen by no one else", "what is not a theme the
 gallery can take is refused before anything is kept", "the owner's yes is signed by the worker over
 what it worked out, and the theme is everyone's", "a theme the owner refuses says why to its writer,
-and its files go", "a writer sends a few themes a day, the queue is bounded, and without a key
+and its files go", "the owner takes a published theme out of the gallery: listed and read no more,
+its files gone, its writer told", "a writer sends a few themes a day, the queue is bounded, and without a key
 nothing is signed", "deleting a writer's stories online takes their themes still waiting, and
 leaves the gallery's".
 
@@ -2664,6 +2672,8 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   and points shown against `gallery::BUDGET`. "Publish it" is offered only then, and sends the hash
   of what was built. "Use" fetches the file, checks the gallery's signature over its module before
   anything is kept, and adds it with that signature; one already on the shelf is chosen instead.
+  The owner sees "Take down…" under each theme in the gallery, and once more asked ("Out of the
+  gallery for everyone?") it is taken out (above, R33) and goes from the window.
   A theme is on the shelf once: if the writer's own program is the module taken, byte for byte (the
   one they made and sent), it is given the signature and becomes the gallery's, source and `sent`
   kept (`Shelf::sign`); a shelf read that holds both, from before, keeps the gallery's
@@ -2674,6 +2684,7 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   to a row), and close with the story (`Gallery::close` in `leave`): they are not drawn over the
   welcome page, and would wait there for the next story. Tests: `a_theme_made_with_claude_is_sent_built_again_by_the_owner_published_and_used_from_the_gallery`,
   `the_owner_refuses_a_theme_that_is_not_built_again_the_same_and_says_why`,
+  `the_owner_takes_a_theme_down_from_the_gallery_once_asked_and_its_writer_is_told`,
   `only_the_owner_is_shown_the_themes_waiting_and_the_gallery_is_for_writers_signed_in`,
   `yours_shows_the_themes_from_the_gallery_those_made_with_claude_and_the_drawings_apart_and_sends_each_once`,
   `a_shelf_holding_a_theme_as_made_and_as_taken_from_the_gallery_keeps_the_gallery_s_alone`,
