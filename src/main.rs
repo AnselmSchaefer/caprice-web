@@ -8123,6 +8123,47 @@ mod tests {
         assert!(h.painted_at("Keep it").is_some() && painted_texts(&h).iter().all(|t| !t.contains("stop short")), "never the checks to the writer");
     }
 
+    /// A theme that lays grass along its ground from where what shows begins, as the gallery's Magic
+    /// Lighthouse laid the grass on its cliff: it streams sideways as the writer zooms.
+    struct GrassFromShown;
+
+    impl theme_sdk::Theme for GrassFromShown {
+        fn new() -> GrassFromShown {
+            GrassFromShown
+        }
+
+        fn frame(&mut self, input: &theme_sdk::Input, out: &mut theme_sdk::Out) {
+            let (s, u, foot) = (input.shown, input.unit, input.ground.y);
+            let mut x = s.left();
+            while x < s.right() {
+                out.desk.line(theme_sdk::pt(x, foot), theme_sdk::pt(x + u, foot - 7.0 * u), 1.2 * u, theme_sdk::Color::rgb(150, 220, 110));
+                x += 3.0 * u;
+            }
+        }
+    }
+
+    #[test]
+    fn a_theme_that_slides_as_the_writer_zooms_goes_back_to_claude_unseen_by_the_writer() {
+        use platform::program::{Stand, stand_in};
+        let sliding = wat::parse_str(r#"(module (memory (export "memory") 16 512)
+            (func (export "cabi_realloc") (param i32 i32 i32 i32) (result i32) i32.const 600000)
+            (func (export "events") (param i32 i32))
+            (func (export "frame") (param i32) (result i32) i32.const 1024)
+            (func (export "cabi_post_frame") (param i32)))"#).unwrap();
+        stand_in(&sliding, || Stand::Theme(Box::new(theme_sdk::Running::<GrassFromShown>::new())));
+        platform::compiler::stand_in("// grass from shown", Ok(platform::compiler::Built::Module { module: sliding, toolchain: "the tests' stand-in".into(), ms: 1 }));
+        let mut h = Harness::new();
+        let server = make_with_claude(&mut h, "sliding", vec![written("// grass from shown", "Meadow"), written(FIREFLIES_SOURCE, "Jars")], "A meadow");
+        until_made(&mut h);
+        let rounds = server.0.borrow().theme_rounds.clone();
+        let kinds: Vec<Option<&str>> = rounds.iter().map(|r| r.1.as_deref()).collect();
+        assert_eq!(kinds, [None, Some("checks"), Some("frames")]);
+        let said = String::from_utf8_lossy(&rounds[1].2).into_owned();
+        assert!(said.contains("slides as the writer zooms") && said.contains("never from where `shown` begins"), "{said}");
+        assert!(!said.contains("stop short"), "only what is wrong: {said}");
+        assert!(h.painted_at("Keep it").is_some() && painted_texts(&h).iter().all(|t| !t.contains("slides")), "never the checks to the writer");
+    }
+
     #[test]
     fn a_theme_too_heavy_however_often_it_is_sent_back_is_still_offered_to_keep() {
         // When the fixes run out, the writer still has the near miss, rather than nothing.
