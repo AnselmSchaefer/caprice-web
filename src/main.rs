@@ -7969,6 +7969,43 @@ mod tests {
         assert!(painted_texts(&h).iter().all(|t| !t.contains("points a frame") && !t.contains("Caprice stopped it")), "never the checks to the writer");
     }
 
+    /// A theme that stretches its sky over `area`, the desk at the fitting zoom, as the gallery's
+    /// Magic Castle did: zoomed out it stops short of the window's edges.
+    struct SkyOverArea;
+
+    impl theme_sdk::Theme for SkyOverArea {
+        fn new() -> SkyOverArea {
+            SkyOverArea
+        }
+
+        fn frame(&mut self, input: &theme_sdk::Input, out: &mut theme_sdk::Out) {
+            out.desk.solid(input.area.corners(), theme_sdk::Color::rgb(60, 40, 110));
+        }
+    }
+
+    #[test]
+    fn a_theme_whose_sky_stops_short_of_the_window_zoomed_out_goes_back_to_claude_unseen_by_the_writer() {
+        use platform::program::{Stand, stand_in};
+        let short = wat::parse_str(r#"(module (memory (export "memory") 15 512)
+            (func (export "cabi_realloc") (param i32 i32 i32 i32) (result i32) i32.const 600000)
+            (func (export "events") (param i32 i32))
+            (func (export "frame") (param i32) (result i32) i32.const 1024)
+            (func (export "cabi_post_frame") (param i32)))"#).unwrap();
+        stand_in(&short, || Stand::Theme(Box::new(theme_sdk::Running::<SkyOverArea>::new())));
+        platform::compiler::stand_in("// sky over area", Ok(platform::compiler::Built::Module { module: short, toolchain: "the tests' stand-in".into(), ms: 1 }));
+        let mut h = Harness::new();
+        let server = make_with_claude(&mut h, "short", vec![written("// sky over area", "Short"), written(FIREFLIES_SOURCE, "Jars")], "A sky");
+        until_made(&mut h);
+        let rounds = server.0.borrow().theme_rounds.clone();
+        let kinds: Vec<Option<&str>> = rounds.iter().map(|r| r.1.as_deref()).collect();
+        assert_eq!(kinds, [None, Some("checks"), Some("frames")]);
+        let said = String::from_utf8_lossy(&rounds[1].2).into_owned();
+        assert!(said.contains("stop short") && said.contains("`Input::shown`, not `Input::area`"), "{said}");
+        let moments = rounds[2].3.iter().find(|(k, _)| k == "X-Caprice-Moments").map(|(_, v)| v.clone());
+        assert_eq!(moments.as_deref(), Some("begun,written,finishing,carried,zoomed out"), "Claude sees it zoomed out too");
+        assert!(h.painted_at("Keep it").is_some() && painted_texts(&h).iter().all(|t| !t.contains("stop short")), "never the checks to the writer");
+    }
+
     #[test]
     fn a_theme_too_heavy_however_often_it_is_sent_back_is_still_offered_to_keep() {
         // When the fixes run out, the writer still has the near miss, rather than nothing.

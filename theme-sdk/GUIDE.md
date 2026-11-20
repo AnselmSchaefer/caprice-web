@@ -75,6 +75,31 @@ and played by Caprice in a sandbox. It can only draw shapes; Caprice decides eve
   on a computer's, zoomed out included: a theme that draws more is sent back to be made lighter. A field of many small fills is cheaper as one mesh.
   Polygons cost the most: egui smooths every edge.
 
+## How finished it should look
+
+A writer picks a theme to live beside their story for months. Make it as finished as the built-in
+themes the first time, not a sketch to be filled in later: the Snow's igloos of blocks each cut and
+shaded, the Vineyard's posts, leaves and bunches in the examples are the measure.
+
+- **Depth.** Lay the world out in layers from far to near: the far ones paler, hazier and nearer
+  the sky's colour, the near ones darker and sharper. A sky is a gradient, never one flat colour.
+  The light comes from one side (a moon, a sun, a lit window), and everything is lit on that side
+  and shaded on the other.
+- **Small parts on what grows.** The things that grow with the story are looked at most: give them
+  their parts, as the thing would have them. Stones in courses, tiles on a roof, planks, window
+  frames and sills, a door with its hinges, flags, ivy; a rim of light on the lit side, a shadow
+  under each ledge, a reflection in the water below.
+- **A little life, slowly:** smoke from a chimney, birds now and then, ripples, a flag stirring,
+  stars twinkling. Calm still comes first.
+- **Detail where it shows.** Nothing behind the page is seen, and far off detail is lost: spend the
+  points on the near things beside the page, and keep the rest plain. Build texture as meshes (a
+  mesh of many small pieces costs a point a corner, and egui smooths no edge of it), so it keeps
+  within the points on a phone too.
+- **To the window's edges.** A sky, a ground or water of its own is stretched over
+  `Input::shown`, so that zoomed out the world reaches the window's edges with no frame of the
+  desk's plain colours around it. The palette's `desk_top` and `desk` are the sky's top and the
+  ground's colour at the foot, so the moment before the first frame looks the same.
+
 ## What you may not do
 
 - Import nothing but the SDK: the file names no other crate, uses no `unsafe`, no files, no clock,
@@ -102,6 +127,7 @@ It is built with Rust 1.99 (edition 2024): `rustc --crate-type cdylib --target
 wasm32-unknown-unknown -O` against the SDK. If it does not build, you are shown the compiler's
 messages and give the whole file again, fixed. If it builds but does not pass Caprice's checks
 (the module's load check, playing a story through without trapping or going silent, the points
-above), you are told what they found and do the same. If it builds and passes them, you are shown pictures of it at a few
+above, a sky and ground of its own that reach the window's edges zoomed out), you are told what
+they found and do the same. If it builds and passes them, you are shown pictures of it at a few
 moments of a story (begun; three chapters written; a chapter finishing; a title carried, if it
-carries titles) and its points on a phone's desk and a computer's, and asked to make it better.
+carries titles; three chapters written, zoomed out as far as a writer zooms) and its points on a phone's desk and a computer's, and asked to make it better.

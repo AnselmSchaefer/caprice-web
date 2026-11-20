@@ -4,7 +4,8 @@
 //! it (`platform::compiler`), checks it as every program is checked, and plays it off screen
 //! (`eggs::preview`). What goes wrong on the way goes back to Claude without the writer seeing it:
 //! the compiler's words (`errors`); a program Caprice will not play, one that stops while playing
-//! the preview's story, one that draws more than `gallery::BUDGET` (`checks`). One that works is shown
+//! the preview's story, one that draws more than `gallery::BUDGET`, one whose own sky stops short of
+//! the window's edges zoomed out (`Previewed::bare`) (`checks`). One that works is shown
 //! to Claude as pictures once, to be made better, and then to the writer, who keeps it or asks for
 //! a change. A version that worked is never lost to one that did not (the owner's decisions for
 //! step 5: a writer is never left with a broken theme).
@@ -474,6 +475,7 @@ impl App {
         // One that draws more than the budget is a near miss: kept to fall back on only while
         // there is no version within it, and sent back to be made lighter while fixes are left.
         let keep = within(phone, computer) || !self.making.good.as_ref().is_some_and(|g| within(g.previewed.phone_points, g.previewed.computer_points));
+        let bare = previewed.bare();
         let pngs: Vec<Vec<u8>> = previewed.pictures.iter().filter_map(|p| crate::eggs::preview::png(&p.image)).collect();
         let moments = previewed.pictures.iter().map(|p| p.name).collect::<Vec<_>>().join(",");
         if keep {
@@ -489,6 +491,14 @@ impl App {
                 self.give_up("The newest version draws more than a writer's desk can carry.".into());
                 return;
             }
+        }
+        // Its sky short of the window's edges zoomed out is sent back while fixes are left; then it is
+        // shown as it is (the picture zoomed out among the others), and kept if the writer likes it.
+        if let Some(why) = bare
+            && self.making.fixes_left > 0
+        {
+            self.fix(ctx, Kind::Checks, &why);
+            return;
         }
         let points = format!("{phone},{computer}");
         if self.making.looks_left > 0 && pngs.len() == moments.split(',').count() {
