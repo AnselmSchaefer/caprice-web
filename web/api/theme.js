@@ -242,8 +242,9 @@ async function keptAlive(answer, beat) {
 // Claude's answer in one piece, not streamed, as a scene is (worker.js, `paint`): waiting costs the
 // Worker none of its 10 ms. Thinking is adaptive; the prompt is cached, and the conversation too.
 // `max_tokens` is a wall Claude cannot see: thinking that runs into it leaves no program, and the
-// round is paid for all the same. So it is also told its room (`task_budget`, `budget`), which it
-// sees counting down and finishes within, and `most` stays the most a round can cost.
+// round is paid for all the same. So a rich theme is also told its room (`task_budget`, `budget`),
+// which it sees counting down and finishes within, and `most` stays the most a round can cost. A
+// simple one (`budget` 0) is told none: it fits without, and a tight budget can cut its answer short.
 // For an hour, not the usual five minutes: a round takes seven or more, and the five are counted
 // from when it was asked, so the next round would always find the cache gone and write it again.
 // Writing it for an hour costs more once (twice the input's price instead of 1.25 times), and is
@@ -257,13 +258,13 @@ async function write(messages, env, most, budget, effort) {
     headers: {
       "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json",
       // Should the model decline, the request goes on with another the platform chooses.
-      // And it is told the room it has.
-      "anthropic-beta": "server-side-fallback-2026-07-01,task-budgets-2026-03-13",
+      // And, given a budget, it is told the room it has.
+      "anthropic-beta": budget > 0 ? "server-side-fallback-2026-07-01,task-budgets-2026-03-13" : "server-side-fallback-2026-07-01",
     },
     body: JSON.stringify({
       model: WRITER, max_tokens: most,
       system: [{ type: "text", text: SYSTEM, cache_control: CACHED }],
-      output_config: { effort, task_budget: { type: "tokens", total: budget } },
+      output_config: { effort, ...(budget > 0 ? { task_budget: { type: "tokens", total: budget } } : {}) },
       cache_control: CACHED,
       fallbacks: "default",
       messages,
@@ -285,6 +286,13 @@ async function write(messages, env, most, budget, effort) {
   if (message.stop_reason === "refusal") return { error: 422, message: "This theme cannot be made: ask for something else", spent };
   const reply = (message.content ?? []).filter(b => b.type === "text").map(b => b.text).join("");
   const theme = read(reply);
+  // Why a reply had no program, for Workers Logs: how it stopped, what it spent, which model answered
+  // (the fallback's?), whether a rust block or `theme!(` was in it at all, and how it ended. Never the
+  // writer's words, which come first in no reply.
+  if (!theme) {
+    console.error("theme: no program", JSON.stringify({ stop: message.stop_reason, model: message.model, output: spent.output,
+      chars: reply.length, rust: (reply.match(/```(rust|rs)\b/g) ?? []).length, macro: reply.includes("theme!("), end: reply.slice(-300) }));
+  }
   if (!theme) return { error: 502, message: message.stop_reason === "max_tokens" ? "The theme ran out of room before it was finished. Starting again may well work" : "Something went wrong while the theme was written: try again", spent };
   return { theme, reply, spent };
 }
