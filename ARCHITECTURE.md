@@ -102,7 +102,7 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `theme.rs` | The themes (`Theme`, `Palette`): colours and egui visuals around the page, the palette in use (`pal`), fading from one to the next, the choice kept in the data folder (a theme's name, or one of the writer's own by its id); the page's own `PAPER` and `INK` |
 | `eggs.rs` | What is hidden in the magic themes: in the Magic Garden a plant a chapter growing on the desk and a balloon flying in each new chapter title; in the Magic City a street of houses a chapter, a floor a page, and a dragon flying a new title in held in its feet; in the Magic Sea a ship a chapter, built in a yard a part a page and launched into the bay when the next chapter begins; in the Magic Forest (`eggs/forest.rs`) an old forest at night with a swarm of lanterns, a lantern a page, each chapter's swarm becoming a big lantern on a branch near the page; in the Magic Reef (`eggs/reef.rs`) a sunlit sea with a coral a chapter, a branch a page, spawning and taking in a shoal of fish when the next chapter begins, and an octopus swimming down from above with each new title; in the Magic Snow (`eggs/snow.rs`) a frozen lake at the foot of a snowy hillside and an igloo a chapter spread about the hillside, a brick a page cut out of the lake and floated onto it, the igloo finished and lit inside when the next chapter begins; in the Magic Vineyard (`eggs/vineyard.rs`) a vineyard on rolling hills on a golden afternoon, a stretch of vines a chapter, a bunch of grapes a page, the stretch before turning gold and red and dropping its leaves when the next chapter begins, and now and then a murmuration of starlings; the country it lies in is `eggs/country.rs`; and a theme of the writer's own (`eggs/own.rs`, R35): its picture covering the desk and moving, a piece a chapter, a stage a page, finished when the next chapter begins, its carrier bringing new titles; or one that is a program (`eggs/program.rs`, R36) |
 | `eggs/program.rs` | Themes that are programs (R36): the check on every load, the input and events written as the canonical ABI lays them out, the frame's words read into egui's shapes (at most 450 000 points), drawn on the desk zoomed about the theme's ground and in the window unzoomed; what the program is told; its carrier |
-| `eggs/preview.rs` | A theme program's pictures, made off screen (R36): played through a short story (begun, three chapters written, a chapter finishing, a title carried) on the desk laid out as at the fitting zoom, tessellated by egui and filled in triangle by triangle; its points counted on a phone's desk and a computer's; the gallery's picture of a theme that came with none |
+| `eggs/preview.rs` | A theme program's pictures, made off screen (R36): played through a short story (begun, three chapters written, a chapter finishing, a title carried, zoomed out) on the desk laid out as at the fitting zoom, tessellated by egui and filled in triangle by triangle; its points counted on a phone's desk and a computer's; whether its own sky stops short of the window's edges zoomed out; the gallery's picture of a theme that came with none |
 | `platform/compiler.rs` | Where a theme program is built from its source (R36): in the browser rustc and wasm-ld as WebAssembly in a worker of their own (`web/compiler/`), ended when dropped; on the desktop not yet; under `cargo test` a stand-in (the sources of `themes/` build to their fixtures, anything else to what a test says) |
 | `platform/program.rs` | Where a theme program runs (R36): in the browser a worker of its own (`web/theme-worker.js`), ended when it does not answer; on the desktop not at all; under `cargo test` none, each module standing for its theme's source played natively (`played`: the input read out of Caprice's bytes, the output made into the same words) or for what a test says (`stand_in`) |
 | `theme-sdk/` | What theme programs are written against (R36): the WIT world `caprice:theme@1.0.0`, its bindings made ahead of time with a runtime of its own, shapes (and Caprice's own soft lights, ovals and clean fills), colours, `Seeds`, `Tended`, easing, the `theme!` macro; no dependencies |
@@ -2726,12 +2726,15 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   played off screen (`eggs::preview`). **A version is done only when it passed everything a writer
   would meet** (the owner's decisions for step 5): what goes wrong goes back to Claude, the
   compiler's words as an `errors` round, a program Caprice will not play, one stopped while playing
-  the preview's story and one that draws more than `gallery::BUDGET` as a `checks` round in
-  Caprice's words, at most `FIXES` of either (the server's `THEME_ERRORS_ROUNDS`), and **the writer
+  the preview's story, one that draws more than `gallery::BUDGET`, and one whose own sky and ground
+  reach the window's edges at the fitting zoom but stop short of them zoomed out
+  (`Previewed::bare`: stretched over `Input::area` instead of `Input::shown`, as the gallery's
+  Magic Castle and Lighthouse were, 2026-11-20) as a `checks` round in Caprice's words, at most `FIXES` of either (the server's `THEME_ERRORS_ROUNDS`), and **the writer
   never sees the compiler's words nor the checks**. The budget is the one the gallery's review
   shows and the guide names (`GUIDE.md`, "Points cost"): change them together. A version over it
   that plays is a near miss: kept to fall back on while there is no version within it, offered to
-  keep when the fixes run out, never put in place of a lighter one. The
+  keep when the fixes run out, never put in place of a lighter one. One that stops short of the
+  edges is kept as any other: when the fixes run out, Claude and the writer see it zoomed out. The
   first version that plays is shown to Claude as its pictures and points (`frames`, `LOOKS` times:
   each costs about as much as writing it); then the writer sees its pictures, keeps it, starts
   again, or asks for a change (`change`). **A version that worked is never lost to one that did
@@ -2745,6 +2748,7 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   `a_theme_made_with_claude_is_built_shown_to_claude_once_changed_and_kept_when_the_writer_says`,
   `mistakes_go_back_to_claude_unseen_and_a_theme_that_never_works_says_so_keeping_nothing`,
   `what_caprice_finds_of_a_program_that_built_goes_back_to_claude_as_checks_unseen_by_the_writer`,
+  `a_theme_whose_sky_stops_short_of_the_window_zoomed_out_goes_back_to_claude_unseen_by_the_writer`,
   `a_theme_too_heavy_however_often_it_is_sent_back_is_still_offered_to_keep`,
   `a_lighter_version_is_not_lost_to_a_heavier_one_that_cannot_be_made_lighter`,
   `a_theme_is_made_only_for_a_writer_signed_in_and_what_the_server_says_is_shown` (the stand-in
@@ -2770,7 +2774,8 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
 - **A theme is pictured by playing it off screen** (`eggs/preview.rs`): through the same
   `platform::Program` and `program::read` as on the desk, told a short story at ten frames a second
   (begun; three chapters written, shown afresh; the fourth begun, the third finishing; a title
-  carried, only if it asked to carry titles), each frame's desk laid out as Caprice lays it out at
+  carried, only if it asked to carry titles; three chapters written, zoomed out to `view::LEAST`,
+  the page zoomed with the desk about the theme's ground), each frame's desk laid out as Caprice lays it out at
   the fitting zoom (`preview::layout`, from `view::fit` and the docks' sizes: change how the desk is
   laid out and check it still agrees) and unzoomed about its ground as `draw_program` does. A
   moment's last frame is drawn as the screen draws it: the desk in the palette's colours, the
@@ -2778,13 +2783,24 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   the carried title, the docks; tessellated by egui's own tessellator and filled triangle by
   triangle (`rasterize`, premultiplied, each pixel on a shared edge in one triangle only). The
   same story counts its points on a phone's desk (412×915) and a computer's (1920×1080, and zoomed
-  out to `view::LEAST`): the Vineyard 63 000 and 309 000, as measured on the screen. A program theme
+  out to `view::LEAST`): the Vineyard 63 000 and 309 000, as measured on the screen. At three
+  chapters written and zoomed out it measures how much of the window's edges the program's own
+  shapes cover (`edges_covered`: 160 points along the four sides, each covered when what is drawn
+  over it is at least 90% opaque), for `Previewed::bare`, which counts a theme as reaching them at
+  95%: a theme that draws no sky of its own leaves the desk's colours at the fitting zoom too, and
+  is never told. **What Claude is asked for, how finished a theme should look, is in the guide**
+  (`GUIDE.md`, "How finished it should look": depth, small parts on what grows, a little life,
+  detail where it shows, to the window's edges), and the look at the pictures asks for it again
+  (`theme.js`, `asked.frames`): a theme that needed a second session to be finished (the Castle's
+  texture) should not, and a change to what the guide asks goes with the check that holds it, where
+  there is one. A program theme
   kept without a picture (a theme file without `preview.png`, a source just built) is given one,
   three chapters written, 320 wide (`Workshop::picture_theme`, `Shelf::set_picture`); one that
   cannot be played keeps its colours. `tests/fixtures/snow.caprice-theme` and
   `vineyard.caprice-theme` carry the pictures it makes. Tests:
   `a_theme_is_shown_its_story_and_pictured_as_the_desk_looks_with_the_page_on_it`
   (`CAPRICE_PREVIEW_OUT=dir` keeps the pictures to look at),
+  `a_theme_whose_sky_stops_short_of_the_window_zoomed_out_is_told_so`,
   `a_program_theme_kept_with_no_picture_is_given_one_made_from_its_program`; in the browser
   `smoke.mjs`, "kept, it is the very module the toolchain builds anywhere, with its source and a
   picture, and it plays".

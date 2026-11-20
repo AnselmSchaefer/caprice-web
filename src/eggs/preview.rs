@@ -5,7 +5,9 @@
 //! triangle by triangle, into a picture: the desk in the theme's colours, the program's shapes, the
 //! page and the bars. They are what Claude is shown of a theme it wrote, and a theme's picture in
 //! the gallery. The same frames count a theme's points where a writer reads: on a phone's desk and
-//! on a computer's, zoomed out too.
+//! on a computer's, zoomed out too. A theme drawn zoomed out as far as a writer zooms is pictured
+//! as well, with how much of the window's edges its own shapes cover there and at the fitting zoom:
+//! a sky stretched over the desk instead of what shows stops short of them (`Previewed::bare`).
 //!
 //! The program runs where every program theme runs (`platform::Program`: a worker in the browser,
 //! played natively under the tests, nowhere on the desktop), so a preview is asked for and taken
@@ -32,6 +34,8 @@ const ZOOMED_OUT: f32 = crate::view::LEAST;
 const PAPER_SIZE: Vec2 = vec2(595.0, 842.0);
 /// Frames a second the story is told at.
 const FPS: f64 = 10.0;
+/// How much of the window's edges a theme's shapes must cover to count as reaching them.
+const COVERED: f32 = 0.95;
 
 /// The desk as Caprice lays it out for a window of `size` at the fitting zoom, the page bar along
 /// its foot (`App::page_rect`, `App::fitting_zoom`, `App::dock_rect`), and how big things are on it
@@ -69,7 +73,8 @@ struct Moment {
 
 /// The story a preview tells: begun; three chapters written (shown afresh, as when the theme is
 /// picked); the fourth begun, the third finishing; a title carried, if the theme carries titles;
-/// then the same desk on a phone and on a computer, there zoomed out too, to count its points.
+/// three chapters written, zoomed out as far as a writer zooms; then the same desk on a phone and
+/// on a computer, there zoomed out too, to count its points.
 fn story() -> Vec<Moment> {
     let at = |from: f64, seconds: f64, size: Vec2, zoom: f32, carried: bool| -> Vec<Frame> {
         (0..=(seconds * FPS) as usize).map(|k| Frame { time: from + k as f64 / FPS, size, zoom, carried }).collect()
@@ -84,6 +89,7 @@ fn story() -> Vec<Moment> {
             events: vec![Event::Begun(3), Event::Grown { chapter: 3, pages: 1 }], frames: at(20.0, 2.0, PICTURE, 1.0, false),
         },
         Moment { name: "carried", picture: true, garden: finishing.clone(), events: vec![], frames: at(30.0, 1.5, PICTURE, 1.0, true) },
+        Moment { name: "zoomed out", picture: true, garden: written.clone(), events: vec![Event::Fresh], frames: at(35.0, 1.0, PICTURE, ZOOMED_OUT, false) },
         Moment { name: "phone", picture: false, garden: written.clone(), events: vec![Event::Fresh], frames: at(40.0, 0.5, PHONE, 1.0, false) },
         Moment { name: "computer", picture: false, garden: written.clone(), events: vec![Event::Fresh], frames: at(50.0, 0.5, COMPUTER, 1.0, false) },
         Moment { name: "computer zoomed out", picture: false, garden: written, events: vec![Event::Fresh], frames: at(60.0, 0.5, COMPUTER, ZOOMED_OUT, false) },
@@ -103,15 +109,33 @@ pub struct Picture {
 }
 
 /// What a preview came to: its pictures, and the most points a frame drew on a phone's desk and on
-/// a computer's (zoomed out included), which Claude is told with the pictures (the plan's step 5).
+/// a computer's (zoomed out included), which Claude is told with the pictures (the plan's step 5);
+/// and how much of the window's edges its own shapes cover, at the fitting zoom and zoomed out.
 #[cfg_attr(not(test), allow(dead_code))]
 pub struct Previewed {
     pub pictures: Vec<Picture>,
     pub phone_points: usize,
     pub computer_points: usize,
+    pub edges: (f32, f32),
 }
 
 impl Previewed {
+    /// What Claude is told when the theme draws its own sky and ground to the window's edges at the
+    /// fitting zoom but stops short of them zoomed out: stretched over `Input::area`, the desk at the
+    /// fitting zoom, instead of over `Input::shown`, what the window shows (the gallery's Magic
+    /// Castle and Lighthouse did). A theme that leaves the desk's own colours showing at the fitting
+    /// zoom too is left alone: it draws no sky of its own, as the guide allows.
+    pub fn bare(&self) -> Option<String> {
+        let (fitted, out) = self.edges;
+        let percent = |k: f32| (k * 100.0).round() as u32;
+        (fitted >= COVERED && out < COVERED).then(|| format!(
+            "It plays, but zoomed out (as far as a writer zooms, half the fitting zoom) its own sky and ground stop short \
+            of the window's edges, and the desk's plain colours show around them like a frame: its shapes cover {}% of \
+            the window's edges there, against {}% at the fitting zoom. Stretch every fill that must reach the edges (the \
+            sky, the ground, the water, a field) over `Input::shown`, not `Input::area`; keep placing things from \
+            `area`, the page and the ground.", percent(out), percent(fitted)))
+    }
+
     /// The gallery's picture of the theme: three chapters written, as wide as the gallery keeps them.
     pub fn gallery_picture(&self) -> Option<ColorImage> {
         let written = self.pictures.iter().find(|p| p.name == "written")?;
@@ -141,6 +165,7 @@ pub struct Preview {
     asks_lift: bool,
     pictures: Vec<Picture>,
     points: (usize, usize),
+    edges: (f32, f32),
     done: Option<Result<Previewed, String>>,
 }
 
@@ -149,7 +174,7 @@ impl Preview {
     pub fn start(module: &[u8], palette: Palette, wake: Waker, now: f64) -> Preview {
         Preview {
             program: Program::load(module, wake, now), palette, story: story(), at: (0, 0), asked: false,
-            ground: 0.0, asks_lift: false, pictures: Vec::new(), points: (0, 0), done: None,
+            ground: 0.0, asks_lift: false, pictures: Vec::new(), points: (0, 0), edges: (0.0, 0.0), done: None,
         }
     }
 
@@ -170,7 +195,8 @@ impl Preview {
                 }
                 if !self.next() {
                     let (phone_points, computer_points) = self.points;
-                    self.done = Some(Ok(Previewed { pictures: std::mem::take(&mut self.pictures), phone_points, computer_points }));
+                    let (pictures, edges) = (std::mem::take(&mut self.pictures), self.edges);
+                    self.done = Some(Ok(Previewed { pictures, phone_points, computer_points, edges }));
                     break;
                 }
             }
@@ -227,16 +253,22 @@ impl Preview {
         let anchor = desk_of(frame, self.ground).4;
         self.ground = drawn.ground;
         if moment.picture && f + 1 == moment.frames.len() {
-            // On the screen: the desk, the page and the bar where they lie at this zoom.
+            // On the screen: the desk, the page and the bar where they lie at this zoom (the page
+            // zoomed with the desk, about the theme's ground under its middle).
             let (area, page, bar, _) = layout(frame.size);
             let zoom = egui::emath::TSTransform::new(anchor.to_vec2() * (1.0 - frame.zoom), frame.zoom);
-            let mut shapes = desk(area, &self.palette);
-            shapes.extend(drawn.desk.iter().cloned().map(|mut s| {
+            let own: Vec<Shape> = drawn.desk.iter().cloned().map(|mut s| {
                 s.transform(zoom);
                 s
-            }));
-            shapes.extend(drawn.window.iter().cloned());
-            shapes.extend(paper(page));
+            }).chain(drawn.window.iter().cloned()).collect();
+            match moment.name {
+                "written" => self.edges.0 = edges_covered(frame.size, &own),
+                "zoomed out" => self.edges.1 = edges_covered(frame.size, &own),
+                _ => {}
+            }
+            let mut shapes = desk(area, &self.palette);
+            shapes.extend(own);
+            shapes.extend(paper(zoom.mul_rect(page)));
             shapes.extend(drawn.over.iter().cloned().map(|mut s| {
                 s.transform(zoom);
                 s
@@ -259,6 +291,49 @@ fn desk_of(frame: Frame, ground: f32) -> (Rect, Rect, Rect, f32, Pos2) {
     let (area, page, bar, unit) = layout(frame.size);
     let anchor = pos2(page.center().x, area.bottom() - (area.bottom() - bar.top()) - ground * unit);
     (area, page, bar, unit, anchor)
+}
+
+/// How much of the window's edges `shapes` cover on a window of `size`: points along its four sides,
+/// each covered when what is drawn over it is all but opaque, blended as `fill` blends.
+fn edges_covered(size: Vec2, shapes: &[Shape]) -> f32 {
+    const ALONG: usize = 40;
+    let (w, h) = (size.x - 0.5, size.y - 0.5);
+    let step = |k: usize, n: f32| 0.5 + (n - 1.0) * (k as f32 + 0.5) / ALONG as f32;
+    let points: Vec<Pos2> = (0..ALONG).flat_map(|k| {
+        let (x, y) = (step(k, size.x), step(k, size.y));
+        [pos2(0.5, y), pos2(w, y), pos2(x, 0.5), pos2(x, h)]
+    }).collect();
+    let mut alpha = vec![0f32; points.len()];
+    let mut tess = epaint::Tessellator::new(1.0, epaint::TessellationOptions::default(), [1, 1], Vec::new());
+    for shape in shapes {
+        let mut mesh = epaint::Mesh::default();
+        tess.tessellate_shape(shape.clone(), &mut mesh);
+        for t in mesh.indices.as_chunks::<3>().0 {
+            let v = t.map(|i| &mesh.vertices[i as usize]);
+            let (lo, hi) = (v[0].pos.min(v[1].pos).min(v[2].pos), v[0].pos.max(v[1].pos).max(v[2].pos));
+            // Only a triangle that reaches a side can cover a point on it.
+            if lo.x > 0.5 && hi.x < w && lo.y > 0.5 && hi.y < h {
+                continue;
+            }
+            let edge = |a: Pos2, b: Pos2, p: Pos2| (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+            let area = edge(v[0].pos, v[1].pos, v[2].pos);
+            if area.abs() < 1e-9 || !area.is_finite() {
+                continue;
+            }
+            for (p, a) in points.iter().zip(alpha.iter_mut()) {
+                if p.x < lo.x || p.x > hi.x || p.y < lo.y || p.y > hi.y {
+                    continue;
+                }
+                let k = [edge(v[1].pos, v[2].pos, *p) / area, edge(v[2].pos, v[0].pos, *p) / area, edge(v[0].pos, v[1].pos, *p) / area];
+                if k.iter().any(|&k| k < 0.0) {
+                    continue;
+                }
+                let src = (k[0] * f32::from(v[0].color.a()) + k[1] * f32::from(v[1].color.a()) + k[2] * f32::from(v[2].color.a())) / 255.0;
+                *a += src * (1.0 - *a);
+            }
+        }
+    }
+    alpha.iter().filter(|&&a| a >= 0.9).count() as f32 / points.len() as f32
 }
 
 /// The desk under a program's shapes: the palette's two colours, as `theme::paint_desk` lays them.
@@ -385,7 +460,7 @@ mod tests {
     fn a_theme_is_shown_its_story_and_pictured_as_the_desk_looks_with_the_page_on_it() {
         let snow = previewed("snow", include_bytes!("../../tests/fixtures/snow.wasm"), crate::theme::Theme::Snow.palette());
         let names: Vec<_> = snow.pictures.iter().map(|p| p.name).collect();
-        assert_eq!(names, ["begun", "written", "finishing"], "no carrier: the Snow brings no titles");
+        assert_eq!(names, ["begun", "written", "finishing", "zoomed out"], "no carrier: the Snow brings no titles");
         let written = &snow.pictures[1].image;
         assert_eq!(written.size, [1280, 800]);
         let (area, page, bar, _) = layout(PICTURE);
@@ -401,10 +476,66 @@ mod tests {
         assert!(snow.phone_points > 1000 && snow.computer_points > snow.phone_points, "{} {}", snow.phone_points, snow.computer_points);
         // The fireflies bring titles: the carrier's moment is pictured too.
         let fireflies = previewed("fireflies", include_bytes!("../../tests/fixtures/fireflies.wasm"), crate::theme::Theme::Midnight.palette());
-        assert_eq!(fireflies.pictures.iter().map(|p| p.name).collect::<Vec<_>>(), ["begun", "written", "finishing", "carried"]);
+        assert_eq!(fireflies.pictures.iter().map(|p| p.name).collect::<Vec<_>>(), ["begun", "written", "finishing", "carried", "zoomed out"]);
         // The Vineyard, the theme of the most points: within the limit everywhere.
         let vineyard = previewed("vineyard", include_bytes!("../../tests/fixtures/vineyard.wasm"), crate::theme::Theme::Vineyard.palette());
         assert!(vineyard.computer_points > vineyard.phone_points && vineyard.computer_points < super::super::program::MOST_POINTS);
         eprintln!("points: snow {} / {}, vineyard {} / {}", snow.phone_points, snow.computer_points, vineyard.phone_points, vineyard.computer_points);
+        // Each fills what must reach the window's edges over what shows: none is told it stops short.
+        for (name, p) in [("snow", &snow), ("fireflies", &fireflies), ("vineyard", &vineyard)] {
+            assert_eq!(p.bare(), None, "{name}: {:?}", p.edges);
+        }
+    }
+
+    /// A sky from top to foot, stretched over `area` (the desk at the fitting zoom) or over
+    /// `shown` (what the window shows), and a tower placed from `area` beside the page.
+    struct Sky<const SHOWN: bool>;
+
+    impl<const SHOWN: bool> theme_sdk::Theme for Sky<SHOWN> {
+        fn new() -> Self {
+            Sky
+        }
+
+        fn frame(&mut self, input: &theme_sdk::Input, out: &mut theme_sdk::Out) {
+            let r = if SHOWN { input.shown } else { input.area };
+            let mut sky = theme_sdk::Mesh::new();
+            for (at, c) in [(r.min, (40, 30, 90)), (theme_sdk::pt(r.max.x, r.min.y), (40, 30, 90)), (r.max, (200, 120, 140)), (theme_sdk::pt(r.min.x, r.max.y), (200, 120, 140))] {
+                sky.vertex(at, theme_sdk::Color::rgb(c.0, c.1, c.2));
+            }
+            sky.triangle(0, 1, 2);
+            sky.triangle(0, 2, 3);
+            out.desk.mesh(sky);
+            let u = input.unit;
+            out.desk.circle(theme_sdk::pt(input.area.right() - 150.0 * u, input.ground.y - 80.0 * u), 30.0 * u, theme_sdk::Color::rgb(200, 200, 210));
+        }
+    }
+
+    fn sky_module(memory: u32) -> Vec<u8> {
+        wat::parse_str(format!(r#"(module (memory (export "memory") {memory} 512)
+            (func (export "cabi_realloc") (param i32 i32 i32 i32) (result i32) i32.const 600000)
+            (func (export "events") (param i32 i32))
+            (func (export "frame") (param i32) (result i32) i32.const 1024)
+            (func (export "cabi_post_frame") (param i32)))"#)).unwrap()
+    }
+
+    #[test]
+    fn a_theme_whose_sky_stops_short_of_the_window_zoomed_out_is_told_so() {
+        use crate::platform::program::{Stand, stand_in};
+        // Stretched over the desk at the fitting zoom, a sky reaches the window's edges there and
+        // leaves a frame of the desk's own colours around it zoomed out; over what shows, it reaches
+        // them at every zoom.
+        let (short, whole) = (sky_module(13), sky_module(14));
+        stand_in(&short, || Stand::Theme(Box::new(theme_sdk::Running::<Sky<false>>::new())));
+        stand_in(&whole, || Stand::Theme(Box::new(theme_sdk::Running::<Sky<true>>::new())));
+        let palette = crate::theme::Theme::Midnight.palette();
+        let short = previewed("sky-over-area", &short, palette);
+        let zoomed = &short.pictures.iter().find(|p| p.name == "zoomed out").expect("pictured zoomed out").image;
+        let plain = rasterize(PICTURE, desk(layout(PICTURE).0, &palette));
+        assert_eq!(at(zoomed, pos2(4.0, 300.0)), at(&plain, pos2(4.0, 300.0)), "the desk's own colours at the edge");
+        let said = short.bare().expect("told it stops short");
+        assert!(said.contains("Input::shown") && said.contains("100% at the fitting zoom"), "{said}");
+        let whole = previewed("sky-over-shown", &whole, palette);
+        assert_eq!(whole.edges, (1.0, 1.0));
+        assert_eq!(whole.bare(), None);
     }
 }

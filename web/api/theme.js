@@ -93,8 +93,10 @@ const asked = {
   change: (said) => `The writer asks for a change:\n\n<change>\n${said}\n</change>\n\nMake it, and give the palette and the whole file again.`,
   frames: (moments, points) => `It built. Here it is as Caprice drew it, at these moments of a story: ${moments.join(", ")}. `
     + `At most ${points.phone} points a frame on a phone's desk, ${points.computer} on a computer's (zoomed out included). `
-    + "Look at it as the writer will, beside their page for hours, and make it better: what is wrong, unclear, ugly or too heavy, "
-    + "and what would make it lovelier. Give the palette and the whole file again.",
+    + "Look at it as the writer will, beside their page for hours, and make it better. Is it as finished as the guide asks: "
+    + "depth from far to near, light from one side, small parts on the things that grow with the story? Does it reach the "
+    + "window's edges zoomed out, with no frame of the plain desk around it? Mend what is wrong, unclear, ugly or too heavy "
+    + "first, then make it lovelier, within the points. Give the palette and the whole file again.",
 };
 
 // Making a theme: `id` none to begin one (the writer's request), else a round of `kind`.
