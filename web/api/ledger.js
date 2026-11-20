@@ -45,8 +45,10 @@ const DEFAULTS = {
   THEME_FRAMES_BYTES: 4_000_000,
   THEME_TOKENS: 64_000,
   // The room Claude is told it has in a round (a task budget, which it sees counting down, where
-  // THEME_TOKENS it never sees): below THEME_TOKENS, so that it leaves itself room for the program.
-  THEME_BUDGET: 52_000,
+  // THEME_TOKENS it never sees), 0 for none. A simple theme has none: at effort low it took at most
+  // 48,000 tokens without one (2026-11-20), and the first simple round told 52,000 came back with
+  // no program.
+  THEME_BUDGET: 0,
   // A rich theme (the writer's choice, suggested by `themeEstimate`): its rounds may be this long,
   // with this much room, and each counts as THEME_RICH_WEIGHT rounds, and the theme as as many themes.
   THEME_TOKENS_RICH: 128_000,

@@ -1030,8 +1030,8 @@ test("a theme is begun from the writer's words, and only its source and palette 
   assert.equal(key, "a test's key");
   assert.equal(body.model, "claude-opus-5-5");
   assert.equal(body.max_tokens, 64000, "the most a round can cost is the Worker's");
-  assert.deepEqual(body.output_config.task_budget, { type: "tokens", total: 52000 }, "and Claude is told a room within it");
-  assert.ok(beta.split(",").includes("task-budgets-2026-03-13"), beta);
+  assert.deepEqual(body.output_config, { effort: "low" }, "a simple theme is told no budget: it fits without one");
+  assert.ok(!beta.includes("task-budgets"), beta);
   const system = body.system.map(b => b.text).join("");
   for (const part of ["# Writing a magic theme for Caprice", "pub trait Theme", "package caprice:theme", "The Magic Snow, as a theme program", "theme!(Fireflies)"]) {
     assert.ok(system.includes(part), `the prompt holds ${part}`);
@@ -1192,7 +1192,8 @@ test("a rich theme is written with more room, counts as two, and its later round
   const rich = said => ada("/api/theme-program", { method: "POST", body: said, headers: { "X-Caprice-Tier": "rich" } });
   const { theme } = await (await rich("A village of treehouses")).json();
   assert.equal(claude.asked[0].body.max_tokens, 128000);
-  assert.deepEqual(claude.asked[0].body.output_config, { effort: "medium", task_budget: { type: "tokens", total: 110000 } }, "at more effort");
+  assert.deepEqual(claude.asked[0].body.output_config, { effort: "medium", task_budget: { type: "tokens", total: 110000 } }, "at more effort, told its room");
+  assert.ok(claude.asked[0].beta.split(",").includes("task-budgets-2026-03-13"), claude.asked[0].beta);
   assert.equal((await round(ada, theme, "errors", "error: one")).status, 200);
   assert.equal(claude.asked[1].body.max_tokens, 128000, "its fix is rich too, whatever the app says");
   const more = await rich("A second village");

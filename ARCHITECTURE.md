@@ -2096,10 +2096,15 @@ ask Claude anything else** (`/api/theme-program`, `web/api/theme.js`, R36, the p
   40 000 tokens) is cached, and the conversation with it (`cache_control`).
 - **Claude is told its room, below the wall it cannot see**: `max_tokens` is never shown to the
   model, and thinking that runs into it leaves no program, paid for all the same (a lighthouse's
-  first round, 2026-11-20). So each round also sends a task budget (`task_budget`,
-  `THEME_BUDGET`, beta `task-budgets-2026-03-13`), which Claude sees counting down and finishes
-  within; keep it below `THEME_TOKENS`, and change the two together. A round that still runs into
-  the wall says so ("ran out of room"), not that the writer asked too much.
+  first round, 2026-11-20). So a rich theme's rounds also send a task budget (`task_budget`,
+  `THEME_BUDGET_RICH`, beta `task-budgets-2026-03-13`), which Claude sees counting down and finishes
+  within; keep it below `THEME_TOKENS_RICH`, and change the two together. A simple theme is told
+  none (`THEME_BUDGET` 0): at effort low it fits its tokens without one, and the first simple round
+  told 52 000 came back with no program (a tight budget can cut an answer short). A round that still
+  runs into the wall says so ("ran out of room"), not that the writer asked too much. **A reply
+  without a program is logged** ("theme: no program": how it stopped, what it spent, the model, how
+  it ended; never the writer's words) to Workers Logs (`observability` in `wrangler.jsonc`), so it
+  can be looked into afterwards.
 - **A theme is simple or rich, as the writer chooses** (the owner's call, 2026-11-20, from six
   requests measured: at effort medium a first round took 56 000 to over 128 000 tokens, at low
   17 000 to 48 000, all building and nearly as good). Begun with `X-Caprice-Tier: rich`, a theme is
