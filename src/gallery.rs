@@ -9,7 +9,8 @@
 //! points shown. Only then may it be published, and the Worker signs it over the hashes it worked
 //! out itself. A theme taken from the gallery goes on the shelf with that signature, which the
 //! shelf checks every time it is read (`own::Signed`): changed by a byte, it is no longer the
-//! gallery's. Taken, it is the writer's to keep, offline too, whatever becomes of the gallery.
+//! gallery's. Taken, it is the writer's to keep, offline too, whatever becomes of the gallery: the
+//! owner may take a theme out of it again ("Take down…"), and those who took it keep it.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::mpsc::{Receiver, channel};
@@ -153,6 +154,9 @@ pub struct Gallery {
     waiting_asked: Asked,
     review: Option<Review>,
     pub sending: Option<Sending>,
+    /// The theme the owner asked to take down, waiting for a yes; then the request on its way.
+    down_asked: Option<String>,
+    taking_down: Option<(Listed, Receiver<Answer>)>,
 }
 
 impl Gallery {
@@ -165,7 +169,7 @@ impl Gallery {
 
     /// Whether a theme is being taken, or looked at by the owner.
     pub fn busy(&self) -> bool {
-        self.taking.is_some() || self.listing.is_some() || self.review.as_ref().is_some_and(|r| !matches!(r.look, Look::Seen { .. } | Look::Failed))
+        self.taking.is_some() || self.taking_down.is_some() || self.listing.is_some() || self.review.as_ref().is_some_and(|r| !matches!(r.look, Look::Seen { .. } | Look::Failed))
     }
 
     /// No theme is being looked at: the owner's decision is in.
@@ -300,6 +304,15 @@ impl App {
         self.gallery.review = Some(Review { theme, look: Look::Fetching(rx), found: Vec::new(), same: None, why: String::new(), deciding: None, publishing: false });
     }
 
+    /// The owner takes a published theme out of the gallery.
+    fn take_down(&mut self, ctx: &egui::Context, listed: Listed) {
+        self.gallery.down_asked = None;
+        if let Some(rx) = self.ask_server(ctx, "DELETE", format!("/api/gallery/{}", listed.id), None) {
+            self.gallery.said = None;
+            self.gallery.taking_down = Some((listed, rx));
+        }
+    }
+
     fn decide(&mut self, ctx: &egui::Context, publish: bool) {
         let Some(r) = &self.gallery.review else { return };
         let said = if publish {
@@ -370,6 +383,22 @@ impl App {
                 let rgba = image.to_rgba8();
                 let picture = egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], rgba.as_raw());
                 g.pictures.insert(id.clone(), ctx.load_texture(format!("gallery-{id}"), picture, TextureOptions::LINEAR));
+            }
+        }
+        if let Some((listed, rx)) = &g.taking_down {
+            match rx.try_recv() {
+                Ok(answer) => {
+                    if answer.status == 200 {
+                        g.themes.retain(|t| t.id != listed.id);
+                        g.pictures.remove(&listed.id);
+                        g.said = Some(format!("\u{201c}{}\u{201d} is taken out of the gallery. Writers who took it keep it.", listed.name));
+                    } else {
+                        g.said = Some(said_of(&answer));
+                    }
+                    g.taking_down = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(_) => g.taking_down = None,
             }
         }
         self.tend_taking(ctx);
@@ -611,6 +640,22 @@ impl App {
                                             act = Some(GalleryAct::Take(t.clone()));
                                         }
                                     });
+                                    // The owner may take it out again, once more asked: it goes for everyone.
+                                    if owner {
+                                        if g.down_asked.as_deref() == Some(t.id.as_str()) {
+                                            ui.label(egui::RichText::new("Out of the gallery for everyone?").size(11.0).color(pal().accent));
+                                            ui.horizontal(|ui| {
+                                                if ui.add_enabled(g.taking_down.is_none(), egui::Button::new("Take it down").small()).clicked() {
+                                                    act = Some(GalleryAct::TakeDown(t.clone()));
+                                                }
+                                                if ui.add(egui::Button::new("Keep it").small()).clicked() {
+                                                    act = Some(GalleryAct::Ask(None));
+                                                }
+                                            });
+                                        } else if ui.add_enabled(g.taking_down.is_none(), egui::Button::new(egui::RichText::new("Take down\u{2026}").size(11.0).color(pal().text_dim)).small().frame(false)).clicked() {
+                                            act = Some(GalleryAct::Ask(Some(t.id.clone())));
+                                        }
+                                    }
                                 });
                                 if k % columns == columns - 1 {
                                     ui.end_row();
@@ -627,6 +672,7 @@ impl App {
                         let state = match m.state.as_str() {
                             "public" => "In the gallery".to_owned(),
                             "refused" => format!("Not taken: {}", m.why),
+                            "removed" => "Taken out of the gallery".to_owned(),
                             _ => "Waiting to be looked at".to_owned(),
                         };
                         ui.horizontal_wrapped(|ui| {
@@ -645,6 +691,8 @@ impl App {
             Some(GalleryAct::Take(t)) => self.take(ctx, t),
             Some(GalleryAct::Review(w)) => self.review(ctx, w),
             Some(GalleryAct::Decide(publish)) => self.decide(ctx, publish),
+            Some(GalleryAct::Ask(id)) => self.gallery.down_asked = id,
+            Some(GalleryAct::TakeDown(t)) => self.take_down(ctx, t),
             None => {}
         }
         if !self.gallery.open {
@@ -707,6 +755,9 @@ enum GalleryAct {
     Take(Listed),
     Review(Waiting),
     Decide(bool),
+    /// The owner asks to take a theme down (or thinks better of it), then says yes.
+    Ask(Option<String>),
+    TakeDown(Listed),
 }
 
 /// The owner's tab: the themes waiting, and the one being looked at.

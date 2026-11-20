@@ -7637,6 +7637,59 @@ mod tests {
     }
 
     #[test]
+    fn the_owner_takes_a_theme_down_from_the_gallery_once_asked_and_its_writer_is_told() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "gallery-take-down");
+        let server = online(&mut h, &dir, true);
+        server.0.borrow_mut().owner = true;
+        let public = |id: &str, name: &str| {
+            let mut b = bundle::open(SNOW_FILE, "snow").unwrap().bundle;
+            b.manifest.name = name.into();
+            cloud::stand_in::Sent { id: id.into(), user: "ada".into(), file: bundle::write(&b).unwrap(), manifest: b.manifest, module: b.module,
+                source: String::new(), state: "public".into(), why: String::new(), signature: String::new() }
+        };
+        server.0.borrow_mut().gallery = vec![public("00000000000000a1", "The Magic Castle"), public("00000000000000a2", "Magic Lighthouse")];
+        h.frames(12, vec![], Modifiers::NONE);
+        assert!(h.app.cloud.who.as_ref().is_some_and(|w| w.owner), "the owner, as /api/me says");
+        open_gallery(&mut h);
+        assert!(h.labels().contains("The Magic Castle") && h.labels().contains("Magic Lighthouse"), "{}", h.labels());
+
+        // Asked once more, and thought better of: nothing goes.
+        h.click_widget("Take down\u{2026}");
+        assert!(h.labels().contains("Out of the gallery for everyone?"), "{}", h.labels());
+        h.click_widget("Keep it");
+        assert!(!h.labels().contains("Out of the gallery for everyone?"));
+        assert!(server.0.borrow().gallery.iter().all(|t| t.state == "public"), "nothing taken down");
+
+        // Asked again, and taken down: the gallery shows it no more, and its writer reads why.
+        h.click_widget("Take down\u{2026}");
+        h.click_widget("Take it down");
+        h.frames_until("taken down", |a| !a.gallery.busy());
+        h.frames(2, vec![], Modifiers::NONE);
+        let states: Vec<String> = server.0.borrow().gallery.iter().map(|t| t.state.clone()).collect();
+        assert_eq!(states, ["removed", "public"], "the castle's, whose button was clicked: {states:?}");
+        let labels = h.labels();
+        assert!(labels.contains("\u{201c}The Magic Castle\u{201d} is taken out of the gallery. Writers who took it keep it."), "{labels}");
+        assert!(h.painted_at("Magic Lighthouse").is_some(), "{labels}");
+        assert_eq!(h.labels().matches("Use").count(), 1, "one theme left: {labels}");
+        h.click_widget("Sent by you");
+        h.frames_until("listed", |a| !a.gallery.busy());
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.labels().contains("Taken out of the gallery"), "its writer told: {}", h.labels());
+
+        // A writer who is not the owner is offered nothing of the kind.
+        let mut h = Harness::new();
+        let dir_b = with_shelf(&mut h, "gallery-take-down-writer");
+        let server_b = online(&mut h, &dir_b, true);
+        server_b.0.borrow_mut().gallery = vec![public("00000000000000a1", "The Magic Castle")];
+        h.frames(12, vec![], Modifiers::NONE);
+        open_gallery(&mut h);
+        assert!(h.labels().contains("The Magic Castle") && h.painted_at("Take down\u{2026}").is_none(), "{}", h.labels());
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&dir_b);
+    }
+
+    #[test]
     fn the_gallery_window_fits_a_phone_s_screen_and_goes_when_the_story_is_closed() {
         let mut h = Harness::new();
         let (dir, _server) = gallery_on_a_phone(&mut h, "gallery-phone", "Bea");

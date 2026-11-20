@@ -1599,6 +1599,12 @@ pub mod stand_in {
                 }
                 json(200, serde_json::json!({ "id": id, "state": t.state }))
             }
+            ("DELETE", [id]) if o.owner => {
+                let Some(t) = o.gallery.iter_mut().find(|t| t.id == *id && t.state == "public") else { return said(404, "No such theme in the gallery") };
+                t.state = "removed".into();
+                t.why = "Taken out of the gallery".into();
+                json(200, serde_json::json!({ "id": id, "state": "removed" }))
+            }
             ("GET", [id, part @ ("theme" | "preview")]) => {
                 let Some(t) = o.gallery.iter().find(|t| t.id == *id && (t.state == "public" || (o.owner && t.state == "waiting"))) else {
                     return said(404, "No such theme in the gallery");

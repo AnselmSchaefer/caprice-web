@@ -598,7 +598,8 @@ if (!compiler) {
   maker.on("request", q => { if (new URL(q.url()).pathname === `/api/gallery/${shown.id}/theme`) fetched++; });
   await click(415, 417, maker);
   await maker.waitForTimeout(1000);
-  await click(516, 542, maker);
+  // The owner's "Take down…" under it makes the window taller, so Use is higher than a writer's.
+  await click(516, 530, maker);
   await maker.waitForTimeout(3000);
   await maker.screenshot({ path: `${out}/15-gallery-use-refused.png` });
   const shelfAfter = await maker.evaluate(() => new Promise(done => {
