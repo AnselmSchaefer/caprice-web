@@ -8152,6 +8152,39 @@ mod tests {
     }
 
     #[test]
+    fn a_program_theme_zoomed_in_about_the_pointer_stays_under_the_page_between_its_frames() {
+        use platform::program::{Stand, stand_in};
+        // Zooming about the pointer beside the page moves the page's middle, and the theme's ground
+        // under it, a long way each frame. A frame laid out about where the ground was is drawn
+        // about it, put where the ground is now: drawn about the ground of the moment, the hill was
+        // 870 points off the page's middle at four times the zoom, and the world shook as frames came.
+        let castle = wat::parse_str(r#"(module (memory (export "memory") 12 512)
+            (func (export "cabi_realloc") (param i32 i32 i32 i32) (result i32) i32.const 600000)
+            (func (export "events") (param i32 i32))
+            (func (export "frame") (param i32) (result i32) i32.const 1024)
+            (func (export "cabi_post_frame") (param i32)))"#).unwrap();
+        stand_in(&castle, || Stand::Theme(Box::new(theme_sdk::Running::<Castle>::new())));
+        let mut h = Harness::new();
+        in_program_theme(&mut h, &castle, 0.0);
+        h.app.eggs.painted = Some(Vec::new());
+        h.wait(1.0);
+        let hill = |h: &Harness| h.app.eggs.painted.clone().unwrap_or_default().iter().find_map(|s| match s {
+            egui::Shape::Circle(k) if k.fill == egui::Color32::from_rgb(1, 0, 200) => Some(k.center),
+            _ => None,
+        }).expect("drawn");
+        let page = h.app.last_page_rect;
+        let beside = hill(&h).x - page.center().x;
+        let over = egui::pos2(page.right() + 150.0, page.center().y);
+        for _ in 0..12 {
+            h.frames(1, vec![egui::Event::PointerMoved(over), egui::Event::Zoom(1.15)], Modifiers::NONE);
+            let (zoom, middle) = (program_seen(&h).zoom, h.app.last_page_rect.center().x);
+            let off = hill(&h).x - (middle + beside * zoom);
+            assert!(off.abs() < 0.5, "the hill as far from the page's middle as zoomed: {off} points off at {zoom}");
+        }
+        assert!(program_seen(&h).zoom > 3.9, "zoomed in as far as it goes");
+    }
+
+    #[test]
     fn a_program_theme_zoomed_about_the_pointer_beside_the_page_keeps_its_world_in_proportion() {
         use platform::program::{Stand, stand_in};
         // The desk it lays out on is the desk at the fitting zoom, whatever the zoom and wherever
