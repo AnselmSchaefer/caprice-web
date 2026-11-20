@@ -2162,6 +2162,10 @@ The gallery of theme programs (`web/api/gallery.js`, R36, the plan's step 6) is 
   Deleting its files in R2 by hand leaves it listed, its "Use" broken: the list is the Ledger's
   table, not R2's (seen live, 2026-11-20). A writer who took it keeps it: the signature on their
   shelf stays good. Sent again, it waits for the owner as a new theme.
+- **A theme refused or taken out is told to its writer for `GALLERY_TOLD_DAYS` (30), then forgotten**
+  (`galleryForget`, run when the writer lists theirs or sends one): its files are gone already, so
+  only its row goes, and "Sent by you" does not keep it for ever. A theme in the gallery or waiting
+  is never forgotten.
 - **Reading the gallery is counted**: the list, and each file, against `SITE_READS_PER_DAY`
   (`galleryRead`); a theme published never changes, so its files go back `private, max-age=31536000,
   immutable` (the one Cache-Control `guarded` keeps) and the browser asks once.
@@ -2171,7 +2175,8 @@ Tests: "a theme sent is queued for the owner and seen by no one else", "what is 
 gallery can take is refused before anything is kept", "the owner's yes is signed by the worker over
 what it worked out, and the theme is everyone's", "a theme the owner refuses says why to its writer,
 and its files go", "the owner takes a published theme out of the gallery: listed and read no more,
-its files gone, its writer told", "a writer sends a few themes a day, the queue is bounded, and without a key
+its files gone, its writer told", "a theme refused or taken out is listed to its writer for a while, then
+forgotten", "a writer sends a few themes a day, the queue is bounded, and without a key
 nothing is signed", "deleting a writer's stories online takes their themes still waiting, and
 leaves the gallery's".
 
