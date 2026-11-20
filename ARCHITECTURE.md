@@ -2092,7 +2092,10 @@ ask Claude anything else** (`/api/theme-program`, `web/api/theme.js`, R36, the p
   writer's who began it: anyone else's round is 404.
 - **The Ledger counts every round before Claude is asked**: `SITE_THEME_ROUNDS_PER_DAY` for
   everyone, `USER_THEMES_PER_DAY` begun and `USER_THEME_ROUNDS_PER_DAY` for one writer. A round
-  counts whether or not a theme comes of it. `THEME_TOKENS` is `max_tokens`; the prompt (about
+  counts whether or not a theme comes of it. **The site's owner** (`GALLERY_OWNERS`, the owner's
+  call of 2026-11-20, to try themes out) has none of these, nor the weighing's, and their rounds
+  leave the site's to everyone else: what the owner spends is bounded by nothing but their choice,
+  and kept with each theme as anyone's. A theme's own rounds of each kind bound them as anyone. `THEME_TOKENS` is `max_tokens`; the prompt (about
   40 000 tokens) is cached, and the conversation with it (`cache_control`).
 - **Claude is told its room, below the wall it cannot see**: `max_tokens` is never shown to the
   model, and thinking that runs into it leaves no program, paid for all the same (a lighthouse's
@@ -2157,7 +2160,8 @@ theme is made", "a round that takes longer than a beat is answered at once, a sp
 the theme or why not", "a theme dear enough already is shown as it is, and claude is not asked to look
 at its pictures", "a round that runs out of room says so, and that starting again may work", "a request is
 weighed by a small model before it is made, and only simple or rich comes back", "a rich theme is
-written with more room, counts as two, and its later rounds stay rich".
+written with more room, counts as two, and its later rounds stay rich", "the site's owner makes themes
+without a day's limits, and leaves the site's rounds to everyone else".
 
 The gallery of theme programs (`web/api/gallery.js`, R36, the plan's step 6) is for writers signed in:
 

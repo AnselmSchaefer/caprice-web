@@ -19,6 +19,7 @@ import snow from "../../themes/snow/theme.rs";
 import vineyard from "../../themes/vineyard/theme.rs";
 import { limits } from "./ledger.js";
 import { COLOURS } from "./theme-file.js";
+import { isOwner } from "./gallery.js";
 
 const WRITER = "claude-opus-5-5";
 // What a token costs, in dollars a million (Anthropic's prices, 2026-11): input, the cache written
@@ -130,7 +131,8 @@ export async function themeProgram(request, env, user, id) {
   const ledger = env.LEDGER.get(env.LEDGER.idFromName("ledger"));
   // Begun simple (`light`) or `rich`, as the writer chose; later rounds are of the theme's tier.
   const tier = request.headers.get("X-Caprice-Tier") === "rich" ? "rich" : "light";
-  const round = await ledger.themeRound(user, id ?? null, kind, undefined, tier);
+  // The site's owner tries themes out without a day's limits (the Ledger's `themeRound`).
+  const round = await ledger.themeRound(user, id ?? null, kind, undefined, tier, isOwner(env, user));
   if (!round.ok) return refused(round);
   const answer = (async () => {
     let answered = null, spent = null, done;
@@ -179,7 +181,7 @@ export async function themeEstimate(request, env, user) {
   if (got.error) return refused(got);
   const said = words(got.bytes);
   if (!said) return text(400, "Nothing was said");
-  const counted = await env.LEDGER.get(env.LEDGER.idFromName("ledger")).themeWeighed(user);
+  const counted = await env.LEDGER.get(env.LEDGER.idFromName("ledger")).themeWeighed(user, undefined, isOwner(env, user));
   if (!counted.ok) return refused(counted);
   const unknown = Response.json({ tier: null });
   try {

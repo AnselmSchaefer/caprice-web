@@ -1233,6 +1233,20 @@ test("rounds of each kind run out for a theme, and themes for a writer, and clau
   assert.equal(claude.asked.length, 3);
 });
 
+test("the site's owner makes themes without a day's limits, and leaves the site's rounds to everyone else", async t => {
+  const mf = await start(t, { ...GALLERY, USER_THEMES_PER_DAY: "1", USER_THEME_ROUNDS_PER_DAY: "2", SITE_THEME_ROUNDS_PER_DAY: "2", USER_THEME_ESTIMATES_PER_DAY: "1" });
+  claude.writes = THEME_REPLY;
+  const owner = await writer(mf, "9", "Owner");
+  const rich = () => owner("/api/theme-program", { method: "POST", body: "A village of treehouses", headers: { "X-Caprice-Tier": "rich" } });
+  for (let k = 0; k < 3; k++) assert.equal((await rich()).status, 200, `the owner's rich theme ${k + 1}, past every day's limit`);
+  claude.writes = JSON.stringify({ things: 1, growth: 1, events: 0, motion: 0 });
+  for (let k = 0; k < 2; k++) assert.equal((await owner("/api/theme-estimate", { method: "POST", body: "Herbs" })).status, 200, "weighed as often");
+  claude.writes = THEME_REPLY;
+  const ada = await writer(mf, "1", "Ada");
+  assert.equal((await begin(ada)).status, 200, "the site's rounds are still there for a writer");
+  assert.equal((await begin(ada)).status, 429, "who keeps a writer's limits");
+});
+
 test("the site's rounds for the day run out for everyone, and a round that fails still counts", async t => {
   const mf = await start(t, { SITE_THEME_ROUNDS_PER_DAY: "2" });
   const ada = await writer(mf, "1", "Ada");
