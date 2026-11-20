@@ -24,7 +24,7 @@ const claude = { asked: [], writes: "Here it is:\n<svg viewBox=\"0 0 4 3\"><rect
 
 async function painted(request) {
   const body = await request.json();
-  claude.asked.push({ key: request.headers.get("x-api-key"), body });
+  claude.asked.push({ key: request.headers.get("x-api-key"), beta: request.headers.get("anthropic-beta"), body });
   if (claude.hold) await claude.hold;
   if (claude.broke) return Response.json({ type: "error", error: { type: "invalid_request_error", message: claude.broke.said } }, { status: claude.broke.status });
   // Thinking first, as Opus answers, then the text in two blocks.
@@ -1026,10 +1026,12 @@ test("a theme is begun from the writer's words, and only its source and palette 
   assert.deepEqual(theme.left, { errors: 3, frames: 2, change: 3 });
   assert.ok(!JSON.stringify(theme).includes("hope you like it") && !JSON.stringify(theme).includes("Enjoy"), "none of Claude's own words");
 
-  const [{ key, body }] = claude.asked;
+  const [{ key, beta, body }] = claude.asked;
   assert.equal(key, "a test's key");
   assert.equal(body.model, "claude-opus-5-5");
   assert.equal(body.max_tokens, 64000, "the most a round can cost is the Worker's");
+  assert.deepEqual(body.output_config.task_budget, { type: "tokens", total: 52000 }, "and Claude is told a room within it");
+  assert.ok(beta.split(",").includes("task-budgets-2026-03-13"), beta);
   const system = body.system.map(b => b.text).join("");
   for (const part of ["# Writing a magic theme for Caprice", "pub trait Theme", "package caprice:theme", "The Magic Snow, as a theme program", "theme!(Fireflies)"]) {
     assert.ok(system.includes(part), `the prompt holds ${part}`);
@@ -1145,6 +1147,71 @@ test("what each theme costs is kept with it, and the owner sees it a day at a ti
   assert.equal((await ada("/api/stories", { method: "DELETE" })).status, 204);
   assert.equal((await (await ask(`Bearer ${token}`)).json()).total.dollars, 3.61);
   assert.equal((await kept(theme)).status, 404);
+});
+
+test("a theme dear enough already is shown as it is, and claude is not asked to look at its pictures", async t => {
+  const mf = await start(t);
+  const ada = await writer(mf, "1", "Ada");
+  // A round as measured, $1.204: the first is under THEME_LOOK_MICRO's $2, a fix takes it over.
+  claude.usage = { input_tokens: 1000, cache_creation_input_tokens: 50_000, cache_read_input_tokens: 0, output_tokens: 40_000 };
+  claude.writes = THEME_REPLY;
+  const begun = await (await begin(ada)).json();
+  assert.equal(begun.left.frames, 2, "written at once, it may be looked over");
+  const fixed = await (await round(ada, begun.theme, "errors", "error: one")).json();
+  assert.equal(fixed.left.frames, 0, "a mistake put right, and it is dear enough");
+  const look = await round(ada, begun.theme, "frames", framed([png(1280, 800)]), { "X-Caprice-Moments": "begun", "X-Caprice-Points": "1,2" });
+  assert.equal(look.status, 429);
+  assert.equal(claude.asked.length, 2, "Claude is not asked");
+  claude.usage = undefined;
+  assert.equal((await round(ada, begun.theme, "change", "Bluer")).status, 200, "a change the writer asks for still goes");
+});
+
+test("a request is weighed by a small model before it is made, and only simple or rich comes back", async t => {
+  const mf = await start(t, { USER_THEME_ESTIMATES_PER_DAY: "3" });
+  const ada = await writer(mf, "1", "Ada");
+  const weigh = said => ada("/api/theme-estimate", { method: "POST", body: said });
+  claude.writes = JSON.stringify({ things: 4, growth: 2, events: 2, motion: 2 });
+  assert.deepEqual(await (await weigh("A village of treehouses, lanterns at dusk")).json(), { tier: "rich", parts: 10 });
+  const [{ body }] = claude.asked;
+  assert.equal(body.model, "claude-haiku-5-5");
+  assert.deepEqual(body.output_config.format.schema.required, ["things", "growth", "events", "motion"], "counts only, never words");
+  assert.equal(body.messages[0].content, "<request>\nA village of treehouses, lanterns at dusk\n</request>");
+  claude.writes = JSON.stringify({ things: 3, growth: 2, events: 1, motion: 0 });
+  assert.deepEqual(await (await weigh("Herbs on a windowsill")).json(), { tier: "light", parts: 6 });
+  claude.writes = "Paris is the capital of France.";
+  assert.deepEqual(await (await weigh("What is the capital of France?")).json(), { tier: null }, "anything else is no suggestion");
+  assert.equal((await weigh("One more")).status, 429, "weighed a few times a day");
+  assert.equal((await weigh("")).status, 400);
+  assert.equal(claude.asked.length, 3);
+});
+
+test("a rich theme is written with more room, counts as two, and its later rounds stay rich", async t => {
+  const mf = await start(t, { USER_THEMES_PER_DAY: "3", SITE_THEME_ROUNDS_PER_DAY: "5" });
+  const ada = await writer(mf, "1", "Ada");
+  claude.writes = THEME_REPLY;
+  const rich = said => ada("/api/theme-program", { method: "POST", body: said, headers: { "X-Caprice-Tier": "rich" } });
+  const { theme } = await (await rich("A village of treehouses")).json();
+  assert.equal(claude.asked[0].body.max_tokens, 128000);
+  assert.deepEqual(claude.asked[0].body.output_config, { effort: "medium", task_budget: { type: "tokens", total: 110000 } }, "at more effort");
+  assert.equal((await round(ada, theme, "errors", "error: one")).status, 200);
+  assert.equal(claude.asked[1].body.max_tokens, 128000, "its fix is rich too, whatever the app says");
+  const more = await rich("A second village");
+  assert.equal(more.status, 429, "two themes counted, one left");
+  assert.match(await more.text(), /A rich theme counts as 2, and today has room for a simple one only/);
+  assert.equal((await begin(ada)).status, 200, "a simple one still fits");
+  assert.equal(claude.asked[2].body.max_tokens, 64000);
+  assert.equal(claude.asked[2].body.output_config.effort, "low", "a simple one at low, as measured to be good enough");
+  assert.equal((await round(ada, theme, "change", "Bluer")).status, 503, "four of the site's five rounds used, and a rich one takes two");
+  assert.equal(claude.asked.length, 3);
+});
+
+test("a round that runs out of room says so, and that starting again may work", async t => {
+  const mf = await start(t);
+  claude.writes = "I am still thinking about the lighthouse";
+  claude.stop = "max_tokens";
+  const got = await begin(await writer(mf, "1", "Ada"));
+  assert.equal(got.status, 502);
+  assert.match(await got.text(), /ran out of room before it was finished\. Starting again may well work/);
 });
 
 test("rounds of each kind run out for a theme, and themes for a writer, and claude is not asked again", async t => {

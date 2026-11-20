@@ -7422,7 +7422,7 @@ mod tests {
     /// there, a source and its palette.
     fn written(source: &str, name: &str) -> platform::Answer {
         let colours = serde_json::json!({ "desk_top": "#101830", "desk": "#202848", "accent": "#f0b25a", "light": "no" });
-        let body = serde_json::json!({ "theme": "0123456789abcdef", "source": source, "name": name, "about": "jars of light", "colours": colours, "left": 9 });
+        let body = serde_json::json!({ "theme": "0123456789abcdef", "source": source, "name": name, "about": "jars of light", "colours": colours, "left": { "errors": 3, "frames": 2, "change": 3 } });
         platform::Answer { status: 200, headers: Vec::new(), body: body.to_string().into_bytes() }
     }
 
@@ -7435,10 +7435,19 @@ mod tests {
     /// As `make_with_claude`, with Claude still writing each round asked (`writing`) until the test
     /// says it has written.
     fn ask_for_theme(h: &mut Harness, name: &str, answers: Vec<platform::Answer>, request: &str, writing: bool) -> std::rc::Rc<cloud::stand_in::StandIn> {
+        let server = request_theme(h, name, answers, request, writing, None);
+        h.click_widget("Make it simple");
+        server
+    }
+
+    /// As `ask_for_theme`, up to the writer choosing how much room it is given, the request weighed
+    /// as `weighs` says (else simple).
+    fn request_theme(h: &mut Harness, name: &str, answers: Vec<platform::Answer>, request: &str, writing: bool, weighs: Option<&'static str>) -> std::rc::Rc<cloud::stand_in::StandIn> {
         let dir = with_shelf(h, &format!("making-{name}"));
         let server = online(h, &dir, true);
         server.0.borrow_mut().theme_answers = answers.into();
         server.0.borrow_mut().writing = writing;
+        server.0.borrow_mut().weighs = weighs;
         h.frames(12, vec![], Modifiers::NONE);
         assert!(h.app.cloud.who.is_some(), "signed in");
         h.click_widget("Page");
@@ -7451,6 +7460,8 @@ mod tests {
         h.click_widget("A lighthouse on a cliff by the sea, a window lit for each page, a boat for each chapter");
         h.type_text(request);
         h.click_widget("Make it");
+        h.frames_until("the request weighed", |a| a.making.choosing().is_some());
+        h.frames(2, vec![], Modifiers::NONE);
         server
     }
 
@@ -7950,6 +7961,59 @@ mod tests {
     }
 
     #[test]
+    fn a_request_is_weighed_and_the_writer_chooses_a_simple_or_a_rich_theme() {
+        let mut h = Harness::new();
+        let rich = r#"{"tier":"rich","parts":10}"#;
+        let fireflies = || written(FIREFLIES_SOURCE, "Fireflies at dusk");
+        let server = request_theme(&mut h, "rich", vec![fireflies(), fireflies()], "Treehouses", false, Some(rich));
+        assert_eq!(server.0.borrow().weighed, [b"Treehouses".to_vec()], "the writer's words, weighed");
+        assert!(h.painted_at(making::LOOKS_RICH).is_some(), "{}", h.painted_texts());
+        assert!(server.0.borrow().theme_rounds.is_empty(), "nothing made before the writer chooses");
+
+        // Asked again in other words, and the server cannot say: the writer chooses unhelped.
+        h.click_widget("Change what I asked");
+        assert!(h.painted_at("Make it").is_some() && h.labels().contains("Treehouses"), "back to the request, as written");
+        server.0.borrow_mut().weighs = Some("{}");
+        h.click_widget("Make it");
+        h.frames_until("weighed again", |a| a.making.choosing().is_some());
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.painted_at(making::EITHER).is_some(), "{}", h.painted_texts());
+        h.click_widget("Make it rich");
+        until_made(&mut h);
+        let rounds = server.0.borrow().theme_rounds.clone();
+        let tier = |r: &cloud::stand_in::Round| r.3.iter().find(|(k, _)| k == "X-Caprice-Tier").map(|(_, v)| v.clone());
+        assert_eq!(tier(&rounds[0]).as_deref(), Some("rich"), "begun rich");
+        assert_eq!(tier(&rounds[1]), None, "later rounds are of the theme's tier, which the server keeps");
+        assert!(h.painted_at("Keep it").is_some());
+
+        // A rich theme takes longer, and the window says so while it is written.
+        let mut h = Harness::new();
+        let _server = request_theme(&mut h, "rich-time", vec![fireflies()], "Treehouses", true, Some(rich));
+        h.click_widget("Make it rich");
+        h.frames(3, vec![], Modifiers::NONE);
+        let told = format!("up to {} minutes", making::UP_TO_MINUTES_RICH);
+        assert!(h.painted_texts().contains(&told), "{}", h.painted_texts());
+    }
+
+    #[test]
+    fn a_theme_that_has_cost_enough_already_is_shown_to_the_writer_without_a_look_at_its_pictures() {
+        // The server leaves no look once a theme is dear (`THEME_LOOK_MICRO`): here, a mistake put right.
+        let dear = |source: &str| {
+            let mut answer = written(source, "Jars");
+            let mut body: serde_json::Value = serde_json::from_slice(&answer.body).unwrap();
+            body["left"]["frames"] = 0.into();
+            answer.body = body.to_string().into_bytes();
+            answer
+        };
+        let mut h = Harness::new();
+        let server = make_with_claude(&mut h, "dear", vec![written("// not yet a theme", "Jars"), dear(FIREFLIES_SOURCE)], "Jars of light");
+        until_made(&mut h);
+        let kinds: Vec<Option<String>> = server.0.borrow().theme_rounds.iter().map(|r| r.1.clone()).collect();
+        assert_eq!(kinds.iter().map(Option::as_deref).collect::<Vec<_>>(), [None, Some("errors")], "no look at its pictures");
+        assert!(h.painted_at("Jars").is_some() && h.painted_at("Keep it").is_some(), "shown to the writer as it is");
+    }
+
+    #[test]
     fn mistakes_go_back_to_claude_unseen_and_a_theme_that_never_works_says_so_keeping_nothing() {
         // A source with mistakes (the tests' compiler builds only the themes of themes/), then one
         // that works; the look at its pictures finds Claude busy, and the version that works stays.
@@ -7971,7 +8035,7 @@ mod tests {
         until_made(&mut h);
         assert_eq!(server.0.borrow().theme_rounds.len(), 4, "begun and three fixes");
         assert!(h.painted_at(making::NEVER_WORKED).is_some());
-        assert!(h.painted_at("Try again").is_some() && h.painted_at("Keep it").is_none());
+        assert!(h.painted_at("Start again").is_some() && h.painted_at("Keep it").is_none());
         assert!(h.app.themes.own.entries.is_empty(), "nothing kept");
     }
 
@@ -8098,7 +8162,7 @@ mod tests {
         until_made(&mut h);
         assert_eq!(server.0.borrow().theme_rounds.len(), 1);
         assert!(h.painted_at("Many themes are being made just now: try again in a few minutes.").is_some(), "the server's words");
-        h.click_widget("Try again");
+        h.click_widget("Start again");
         assert!(h.painted_at("Make it").is_some(), "back to the request");
         assert!(h.labels().contains("A lighthouse"), "as it was written");
     }
@@ -8163,7 +8227,7 @@ mod tests {
         assert!(h.app.making.busy(), "it may come back in time");
         h.time += 61.0;
         h.frames(2, vec![], Modifiers::NONE);
-        assert!(h.painted_at(making::LOST_NETWORK).is_some() && h.painted_at("Try again").is_some(), "{}", h.painted_texts());
+        assert!(h.painted_at(making::LOST_NETWORK).is_some() && h.painted_at("Start again").is_some(), "{}", h.painted_texts());
         assert!(!h.app.making.busy());
 
         // Online, but no word from the server for a minute.

@@ -55,9 +55,13 @@
     // written, so a round costs at most about $1.60 with Opus 5.5 (the prompt, about 40,000 tokens,
     // is cached for an hour after the first, for every writer), and a day at most about $18, the
     // owner's limit (2026-11-16).
-    // Thinking at effort medium: measured, a theme took 46,000 tokens of the 64,000 (high, not
-    // measured, might think past them and pay for a round that gives nothing; usually $1.20 a
-    // round). THEMES_OFF = "1" switches it off.
+    // A theme is simple or rich, as the writer chooses (told which their request looks like). Measured
+    // on six requests, 2026-11-20: at effort medium a first round took 56,000 to over 128,000 tokens,
+    // most of it thinking, three of six past 64,000; at low 17,000 to 48,000, all building, and
+    // looking nearly as good. So a simple theme is written at low, told it has 52,000 of its 64,000
+    // (THEME_BUDGET), at most about $1.70 a round; a rich one at medium, told 110,000 of 128,000
+    // (THEME_*_RICH), at most about $3, and counted as two rounds and two themes. A theme that has
+    // cost $2 already is not looked over again (THEME_LOOK_MICRO). THEMES_OFF = "1" switches it off.
     "SITE_THEME_ROUNDS_PER_DAY": "11",
     // The gallery of theme programs (api/gallery.js): a writer sends at most 3 themes a day, at most
     // 30 wait for the owner at once, each theme file at most 3 MB, all of them at most 1 GB of R2.
@@ -67,7 +71,8 @@
     "GALLERY_WAITING": "30",
     "GALLERY_FILE_BYTES": "3000000",
     "GALLERY_BYTES": "1000000000",
-    "THEME_EFFORT": "medium",
+    "THEME_EFFORT": "low",
+    "THEME_EFFORT_RICH": "medium",
     "USER_THEMES_PER_DAY": "2",
     "USER_THEME_ROUNDS_PER_DAY": "12",
     // A story live on several devices: connections a day for the site, messages a day for one

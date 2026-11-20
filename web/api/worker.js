@@ -10,7 +10,7 @@ import { Ledger, key, limits } from "./ledger.js";
 import { StoryRoom } from "./room.js";
 import { failure, OVER_LIMIT } from "./failure.js";
 import { noted, tally } from "./tally.js";
-import { THEME_ID, themeProgram } from "./theme.js";
+import { THEME_ID, themeEstimate, themeProgram } from "./theme.js";
 import { gallery, isOwner } from "./gallery.js";
 
 export { Ledger, StoryRoom };
@@ -122,6 +122,8 @@ async function signedIn(request, env, url, session) {
   const method = request.method;
   if (path === "/api/scene") return method === "POST" ? scene(request, env, session.u) : text(405, "POST only");
   if (path === "/api/scenes") return method === "GET" ? waiting(url, env, session.u) : text(405, "GET only");
+  // A request for a theme weighed before it is made: simple or rich (theme.js).
+  if (path === "/api/theme-estimate") return method === "POST" ? themeEstimate(request, env, session.u) : text(405, "POST only");
   // Making a theme program with Claude (theme.js): begun, then a round at a time.
   const making = path.match(/^\/api\/theme-program(?:\/([^/]+))?(\/kept)?$/);
   if (making) {
