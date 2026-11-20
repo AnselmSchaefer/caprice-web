@@ -311,9 +311,10 @@ export class Ledger extends DurableObject {
 
   // A request weighed before it is made (`themeEstimate` in theme.js), counted: for next to nothing,
   // but still Claude on Caprice's key.
-  themeWeighed(user, now = Date.now()) {
+  themeWeighed(user, now = Date.now(), owner = false) {
     if (!this.known(user)) return { error: 401, message: "Not signed in" };
     const l = this.limits;
+    if (owner) return { ok: true };
     if (this.count(now, "theme_estimates") >= l.SITE_THEME_ESTIMATES_PER_DAY || this.count(now, `theme_estimates:${user}`) >= l.USER_THEME_ESTIMATES_PER_DAY) {
       return { error: 429, message: "No more weighing today", retry: untilTomorrow(now) };
     }
@@ -328,9 +329,14 @@ export class Ledger extends DurableObject {
   // THEME_RICH_WEIGHT rounds, and a rich theme as as many themes: it may cost about that much more.
   // One round of a theme at a time. It counts whether or not a theme comes of it, as Claude bills
   // the asking.
-  themeRound(user, id, kind, now = Date.now(), tier = "light") {
+  // The site's owner (GALLERY_OWNERS, `owner`), who tries themes out, has no day's limits: neither a
+  // writer's nor the site's, and their rounds leave the site's for everyone else. What they cost is
+  // still kept with each theme.
+  themeRound(user, id, kind, now = Date.now(), tier = "light", owner = false) {
     if (!this.known(user)) return { error: 401, message: "Not signed in" };
     const l = this.limits;
+    const themesMost = owner ? Infinity : l.USER_THEMES_PER_DAY;
+    const roundsMost = owner ? Infinity : l.USER_THEME_ROUNDS_PER_DAY;
     const old = this.rows("SELECT id FROM theme_talks WHERE made <= ?", now - l.THEME_DAYS * DAY);
     for (const o of old) this.sql.exec("DELETE FROM theme_turns WHERE id = ?", o.id);
     for (const o of old) this.sql.exec("DELETE FROM theme_tiers WHERE id = ?", o.id);
@@ -348,20 +354,20 @@ export class Ledger extends DurableObject {
       tier = this.rows("SELECT tier FROM theme_tiers WHERE id = ?", id)[0]?.tier ?? "light";
     }
     const weight = tier === "rich" ? l.THEME_RICH_WEIGHT : 1;
-    if (talk === null && this.count(now, `themes:${user}`) + weight > l.USER_THEMES_PER_DAY) {
-      const message = weight > 1 && this.count(now, `themes:${user}`) < l.USER_THEMES_PER_DAY
+    if (talk === null && this.count(now, `themes:${user}`) + weight > themesMost) {
+      const message = weight > 1 && this.count(now, `themes:${user}`) < themesMost
         ? `A rich theme counts as ${weight}, and today has room for a simple one only. More tomorrow.`
-        : `You can begin ${l.USER_THEMES_PER_DAY} themes a day. More tomorrow.`;
+        : `You can begin ${themesMost} themes a day. More tomorrow.`;
       return { error: 429, message, retry: untilTomorrow(now) };
     }
-    if (this.count(now, "theme_rounds") + weight > l.SITE_THEME_ROUNDS_PER_DAY) {
+    if (!owner && this.count(now, "theme_rounds") + weight > l.SITE_THEME_ROUNDS_PER_DAY) {
       return { error: 503, message: "Caprice makes no more themes today, for anyone. More tomorrow.", retry: untilTomorrow(now) };
     }
-    if (this.count(now, `theme_rounds:${user}`) + weight > l.USER_THEME_ROUNDS_PER_DAY) {
+    if (this.count(now, `theme_rounds:${user}`) + weight > roundsMost) {
       return { error: 429, message: "You have made as much as a day allows. More tomorrow.", retry: untilTomorrow(now) };
     }
     for (let k = 0; k < weight; k++) {
-      this.bump(now, "theme_rounds");
+      if (!owner) this.bump(now, "theme_rounds");
       this.bump(now, `theme_rounds:${user}`);
       if (talk === null) this.bump(now, `themes:${user}`);
     }
