@@ -453,6 +453,9 @@ if (!compiler) {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const snow = { source: fs.readFileSync(path.join(here, "../themes/snow/theme.rs"), "utf8"), ...JSON.parse(fs.readFileSync(path.join(here, "../themes/snow/manifest.json"), "utf8")) };
   const rounds = [];
+  const weighed = [];
+  // Where "Make it simple" is, the request weighed (the window centred, its words fixed).
+  const [CHOOSE_X, CHOOSE_Y] = [443, 472];
   const json = (r, v, status = 200) => r.fulfill({ status, contentType: "application/json", body: JSON.stringify(v) });
   // The gallery, as the Worker answers (web/api/gallery.js): a theme sent is checked by the Worker's
   // own code and waits for the owner (the writer here); the owner's decision is answered with a
@@ -482,10 +485,14 @@ if (!compiler) {
     if (at.pathname === "/api/providers") return json(r, ["google"]);
     if (at.pathname === "/api/me") return json(r, { name: "Ada", provider: "google", user: "smoke", owner: true });
     if (at.pathname.startsWith("/api/gallery")) return gallery(r, at.pathname);
+    if (at.pathname === "/api/theme-estimate") {
+      weighed.push((r.request().postDataBuffer() ?? Buffer.alloc(0)).toString());
+      return json(r, { tier: "light", parts: 6 });
+    }
     if (at.pathname.startsWith("/api/theme-program")) {
       const body = r.request().postDataBuffer() ?? Buffer.alloc(0);
       rounds.push({ path: at.pathname, kind: r.request().headers()["x-caprice-kind"] ?? "begin", body });
-      return json(r, { theme: "0123456789abcdef", source: snow.source, name: "Snow made with Claude", about: snow.about, colours: snow.colours, left: 9 });
+      return json(r, { theme: "0123456789abcdef", source: snow.source, name: "Snow made with Claude", about: snow.about, colours: snow.colours, left: { errors: 3, frames: 2, change: 3 } });
     }
     if (at.pathname.startsWith("/api/stories")) return json(r, r.request().method() === "PUT" ? { version: "v1" } : at.search.includes("gone") ? { stories: [], gone: [] } : []);
     return r.fulfill({ status: 404, body: "" });
@@ -512,6 +519,10 @@ if (!compiler) {
   await click(640, 425, maker);
   await maker.keyboard.type("Snow falling on igloos by a frozen lake");
   await click(423, 512, maker);
+  // Weighed, and the writer chooses a simple theme.
+  await maker.waitForTimeout(1500);
+  await maker.screenshot({ path: `${out}/14-theme-choosing.png` });
+  await click(CHOOSE_X, CHOOSE_Y, maker);
   const t0 = Date.now();
   const compiling = () => maker.workers().some(w => w.url().endsWith("/compiler/compiler.js"));
   while (rounds.length < 2 && Date.now() - t0 < 240000) await maker.waitForTimeout(500);
@@ -521,6 +532,7 @@ if (!compiler) {
   await maker.waitForTimeout(2000);
   await maker.screenshot({ path: `${out}/14-theme-made.png` });
   const [begun, looked] = rounds;
+  check("the request is weighed first, and the writer chooses", weighed.join("|") === "Snow falling on igloos by a frozen lake", weighed.join("|"));
   check("a theme is asked of Claude with the writer's words", begun?.path === "/api/theme-program" && begun.body.toString() === "Snow falling on igloos by a frozen lake", begun?.body.toString());
   check("its source is built in the tab, and Claude is shown its pictures once",
     looked?.kind === "frames" && looked.path === "/api/theme-program/0123456789abcdef" && looked.body[0] >= 3 && rounds.length === 2, `${rounds.map(r => r.kind).join(", ")} in ${seconds} s, toolchain ${compiler.id}`);

@@ -128,25 +128,85 @@ export async function themeProgram(request, env, user, id) {
   }
 
   const ledger = env.LEDGER.get(env.LEDGER.idFromName("ledger"));
-  const round = await ledger.themeRound(user, id ?? null, kind);
+  // Begun simple (`light`) or `rich`, as the writer chose; later rounds are of the theme's tier.
+  const tier = request.headers.get("X-Caprice-Tier") === "rich" ? "rich" : "light";
+  const round = await ledger.themeRound(user, id ?? null, kind, undefined, tier);
   if (!round.ok) return refused(round);
   const answer = (async () => {
-    let answered = null, spent = null;
+    let answered = null, spent = null, done;
     try {
       const messages = [...round.turns.map(t => ({ role: t.role, content: t.text })), { role: "user", content }];
-      const written = await write(messages, env, l.THEME_TOKENS);
+      const rich = round.tier === "rich";
+      const effort = rich ? env.THEME_EFFORT_RICH || "medium" : env.THEME_EFFORT || "low";
+      const written = await write(messages, env, rich ? l.THEME_TOKENS_RICH : l.THEME_TOKENS, rich ? l.THEME_BUDGET_RICH : l.THEME_BUDGET, effort);
       spent = written.spent ?? null;
-      if (written.error) return written;
-      answered = { asked: kept, answer: written.reply };
-      return { theme: { theme: round.id, ...written.theme, left: round.left } };
+      if (written.error) {
+        done = written;
+      } else {
+        answered = { asked: kept, answer: written.reply };
+        done = { theme: { theme: round.id, ...written.theme, left: round.left } };
+      }
     } catch (e) {
       console.error("theme: the round failed", String(e).slice(0, 200));
-      return { error: 502, message: "Something went wrong while the theme was written: try again" };
-    } finally {
-      await ledger.themeAnswered(user, round.id, answered, spent);
+      done = { error: 502, message: "Something went wrong while the theme was written: try again" };
     }
+    const after = await ledger.themeAnswered(user, round.id, answered, spent);
+    // A theme dear enough already is offered no look at its pictures (THEME_LOOK_MICRO): the app
+    // shows it to the writer as it is.
+    if (done.theme && after?.look === false) done.theme.left = { ...done.theme.left, frames: 0 };
+    return done;
   })();
   return keptAlive(answer, Number(env.THEME_BEAT_MS) || BEAT_MS);
+}
+
+// A request weighed before it is made, so the writer can be told whether it looks simple or rich
+// (and choose): a small model counts its parts, as the measurements were counted, and the Worker
+// sums them. It answers only `{ tier, parts }`, never words: like a round, it is no way to ask
+// Claude anything. Anything that goes wrong is `{ tier: null }`, and the writer chooses unhelped.
+const WEIGHER = "claude-haiku-5-5";
+const WEIGHING = "You judge how much work a desk theme for a writing app will be to program, before it is written. "
+  + "A theme draws a scene beside the page: something grows a part for each page written and a new thing for each chapter. "
+  + "Count in the request: things (distinct kinds of drawn objects, e.g. lighthouse, boat, sea, sky), growth (what is added "
+  + "per page or per chapter), events (one-off animations, e.g. something leaves when a chapter begins), motion (things "
+  + "that travel between places or recur, e.g. lights flying to a boat, a whale passing, lanterns at dusk).";
+const PARTS = ["things", "growth", "events", "motion"];
+
+export async function themeEstimate(request, env, user) {
+  if (env.THEMES_OFF === "1") return text(503, "Making themes is switched off for now", { "Retry-After": "3600" });
+  if (!env.ANTHROPIC_API_KEY) return text(503, "Making themes is not set up", { "Retry-After": "3600" });
+  const l = limits(env);
+  const got = await body(request, l.THEME_REQUEST_BYTES);
+  if (got.error) return refused(got);
+  const said = words(got.bytes);
+  if (!said) return text(400, "Nothing was said");
+  const counted = await env.LEDGER.get(env.LEDGER.idFromName("ledger")).themeWeighed(user);
+  if (!counted.ok) return refused(counted);
+  const unknown = Response.json({ tier: null });
+  try {
+    const sent = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+      body: JSON.stringify({
+        model: WEIGHER, max_tokens: 2000,
+        system: WEIGHING,
+        output_config: {
+          effort: "low",
+          format: { type: "json_schema", schema: { type: "object", properties: Object.fromEntries(PARTS.map(p => [p, { type: "integer" }])), required: PARTS, additionalProperties: false } },
+        },
+        messages: [{ role: "user", content: `<request>\n${said}\n</request>` }],
+      }),
+    });
+    if (!sent.ok) return unknown;
+    const message = await sent.json();
+    if (message.stop_reason !== "end_turn") return unknown;
+    const n = JSON.parse((message.content ?? []).filter(b => b.type === "text").map(b => b.text).join(""));
+    const parts = PARTS.reduce((sum, p) => sum + (Number.isInteger(n[p]) && n[p] >= 0 && n[p] < 100 ? n[p] : NaN), 0);
+    if (!Number.isFinite(parts)) return unknown;
+    return Response.json({ tier: parts >= l.THEME_RICH_FROM ? "rich" : "light", parts });
+  } catch (e) {
+    console.error("theme: weighing failed", String(e).slice(0, 200));
+    return unknown;
+  }
 }
 
 // A beat, in milliseconds: how often a round still being written says so.
@@ -181,6 +241,9 @@ async function keptAlive(answer, beat) {
 
 // Claude's answer in one piece, not streamed, as a scene is (worker.js, `paint`): waiting costs the
 // Worker none of its 10 ms. Thinking is adaptive; the prompt is cached, and the conversation too.
+// `max_tokens` is a wall Claude cannot see: thinking that runs into it leaves no program, and the
+// round is paid for all the same. So it is also told its room (`task_budget`, `budget`), which it
+// sees counting down and finishes within, and `most` stays the most a round can cost.
 // For an hour, not the usual five minutes: a round takes seven or more, and the five are counted
 // from when it was asked, so the next round would always find the cache gone and write it again.
 // Writing it for an hour costs more once (twice the input's price instead of 1.25 times), and is
@@ -188,18 +251,19 @@ async function keptAlive(answer, beat) {
 // the hour reads it too; the conversation only that theme's next rounds.
 const CACHED = { type: "ephemeral", ttl: "1h" };
 
-async function write(messages, env, most) {
+async function write(messages, env, most, budget, effort) {
   const sent = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json",
       // Should the model decline, the request goes on with another the platform chooses.
-      "anthropic-beta": "server-side-fallback-2026-07-01",
+      // And it is told the room it has.
+      "anthropic-beta": "server-side-fallback-2026-07-01,task-budgets-2026-03-13",
     },
     body: JSON.stringify({
       model: WRITER, max_tokens: most,
       system: [{ type: "text", text: SYSTEM, cache_control: CACHED }],
-      output_config: { effort: env.THEME_EFFORT || "high" },
+      output_config: { effort, task_budget: { type: "tokens", total: budget } },
       cache_control: CACHED,
       fallbacks: "default",
       messages,
@@ -221,7 +285,7 @@ async function write(messages, env, most) {
   if (message.stop_reason === "refusal") return { error: 422, message: "This theme cannot be made: ask for something else", spent };
   const reply = (message.content ?? []).filter(b => b.type === "text").map(b => b.text).join("");
   const theme = read(reply);
-  if (!theme) return { error: 502, message: message.stop_reason === "max_tokens" ? "The theme grew too long to finish: ask for something simpler" : "Something went wrong while the theme was written: try again", spent };
+  if (!theme) return { error: 502, message: message.stop_reason === "max_tokens" ? "The theme ran out of room before it was finished. Starting again may well work" : "Something went wrong while the theme was written: try again", spent };
   return { theme, reply, spent };
 }
 

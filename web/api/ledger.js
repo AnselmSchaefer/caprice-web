@@ -44,6 +44,25 @@ const DEFAULTS = {
   THEME_ERRORS_BYTES: 20_000,
   THEME_FRAMES_BYTES: 4_000_000,
   THEME_TOKENS: 64_000,
+  // The room Claude is told it has in a round (a task budget, which it sees counting down, where
+  // THEME_TOKENS it never sees): below THEME_TOKENS, so that it leaves itself room for the program.
+  THEME_BUDGET: 52_000,
+  // A rich theme (the writer's choice, suggested by `themeEstimate`): its rounds may be this long,
+  // with this much room, and each counts as THEME_RICH_WEIGHT rounds, and the theme as as many themes.
+  THEME_TOKENS_RICH: 128_000,
+  THEME_BUDGET_RICH: 110_000,
+  THEME_RICH_WEIGHT: 2,
+  // A request is suggested as rich from this many parts counted in it (things, growth, events,
+  // motion: measured, those with 8 or more took 76,000 tokens or more at medium, 2026-11-20).
+  THEME_RICH_FROM: 8,
+  // How often a request may be weighed before it is made (by a small model, for next to nothing):
+  // for one writer a day, and for everyone.
+  USER_THEME_ESTIMATES_PER_DAY: 30,
+  SITE_THEME_ESTIMATES_PER_DAY: 2_000,
+  // A theme that has cost this much already, in millionths of a dollar, is shown to the writer as
+  // it is, without the look at its pictures (a round as dear as writing it): one that needed a
+  // mistake put right, as rounds cost today.
+  THEME_LOOK_MICRO: 2_000_000,
   THEME_DAYS: 7,
   // The gallery of theme programs (gallery.js): what one theme file may hold, the themes one writer
   // may send in a day, how many may wait for the owner at once, the room all of them may take in
@@ -124,6 +143,7 @@ export class Ledger extends DurableObject {
       CREATE TABLE IF NOT EXISTS theme_talks (id TEXT PRIMARY KEY, user TEXT, made INTEGER, errors INTEGER, frames INTEGER,
         changes INTEGER, busy INTEGER);
       CREATE TABLE IF NOT EXISTS theme_turns (id TEXT, n INTEGER, role TEXT, text TEXT, PRIMARY KEY (id, n));
+      CREATE TABLE IF NOT EXISTS theme_tiers (id TEXT PRIMARY KEY, tier TEXT);
       CREATE TABLE IF NOT EXISTS theme_costs (id TEXT PRIMARY KEY, user TEXT, begun INTEGER, rounds INTEGER, input INTEGER,
         written INTEGER, read INTEGER, output INTEGER, micro INTEGER, kept INTEGER);
       CREATE TABLE IF NOT EXISTS gallery (id TEXT PRIMARY KEY, user TEXT, name TEXT, about TEXT, author TEXT, colours TEXT,
@@ -287,14 +307,31 @@ export class Ledger extends DurableObject {
     return { ok: true, left: most - done - 1 };
   }
 
+  // A request weighed before it is made (`themeEstimate` in theme.js), counted: for next to nothing,
+  // but still Claude on Caprice's key.
+  themeWeighed(user, now = Date.now()) {
+    if (!this.known(user)) return { error: 401, message: "Not signed in" };
+    const l = this.limits;
+    if (this.count(now, "theme_estimates") >= l.SITE_THEME_ESTIMATES_PER_DAY || this.count(now, `theme_estimates:${user}`) >= l.USER_THEME_ESTIMATES_PER_DAY) {
+      return { error: 429, message: "No more weighing today", retry: untilTomorrow(now) };
+    }
+    this.bump(now, "theme_estimates");
+    this.bump(now, `theme_estimates:${user}`);
+    return { ok: true };
+  }
+
   // A round of making a theme (theme.js), counted before Claude is asked: whether it may be, the
-  // conversation so far, and what is left of each kind. `id` none begins a theme. One round of a
-  // theme at a time. It counts whether or not a theme comes of it, as Claude bills the asking.
-  themeRound(user, id, kind, now = Date.now()) {
+  // conversation so far, what is left of each kind, and the theme's tier. `id` none begins a theme,
+  // `light` or `rich`; later rounds are of the tier it was begun as. A rich round counts as
+  // THEME_RICH_WEIGHT rounds, and a rich theme as as many themes: it may cost about that much more.
+  // One round of a theme at a time. It counts whether or not a theme comes of it, as Claude bills
+  // the asking.
+  themeRound(user, id, kind, now = Date.now(), tier = "light") {
     if (!this.known(user)) return { error: 401, message: "Not signed in" };
     const l = this.limits;
     const old = this.rows("SELECT id FROM theme_talks WHERE made <= ?", now - l.THEME_DAYS * DAY);
     for (const o of old) this.sql.exec("DELETE FROM theme_turns WHERE id = ?", o.id);
+    for (const o of old) this.sql.exec("DELETE FROM theme_tiers WHERE id = ?", o.id);
     this.sql.exec("DELETE FROM theme_talks WHERE made <= ?", now - l.THEME_DAYS * DAY);
     // A fix is a fix whichever kind: the compiler's errors, or what Caprice's checks found.
     const most = { errors: l.THEME_ERRORS_ROUNDS, checks: l.THEME_ERRORS_ROUNDS, frames: l.THEME_FRAMES_ROUNDS, change: l.THEME_CHANGE_ROUNDS };
@@ -305,21 +342,31 @@ export class Ledger extends DurableObject {
       if (!talk) return { error: 404, message: "That theme is no longer being made: begin it again" };
       if (talk.busy > now) return { error: 409, message: "This theme is being worked on already", retry: 30 };
       if (talk[column[kind]] >= most[kind]) return { error: 429, message: `No more rounds of this kind for this theme (${most[kind]})` };
-    } else if (this.count(now, `themes:${user}`) >= l.USER_THEMES_PER_DAY) {
-      return { error: 429, message: `You can begin ${l.USER_THEMES_PER_DAY} themes a day. More tomorrow.`, retry: untilTomorrow(now) };
+      if (kind === "frames" && this.themeSpent(id) >= l.THEME_LOOK_MICRO) return { error: 429, message: "This theme is shown as it is" };
+      tier = this.rows("SELECT tier FROM theme_tiers WHERE id = ?", id)[0]?.tier ?? "light";
     }
-    if (this.count(now, "theme_rounds") >= l.SITE_THEME_ROUNDS_PER_DAY) {
+    const weight = tier === "rich" ? l.THEME_RICH_WEIGHT : 1;
+    if (talk === null && this.count(now, `themes:${user}`) + weight > l.USER_THEMES_PER_DAY) {
+      const message = weight > 1 && this.count(now, `themes:${user}`) < l.USER_THEMES_PER_DAY
+        ? `A rich theme counts as ${weight}, and today has room for a simple one only. More tomorrow.`
+        : `You can begin ${l.USER_THEMES_PER_DAY} themes a day. More tomorrow.`;
+      return { error: 429, message, retry: untilTomorrow(now) };
+    }
+    if (this.count(now, "theme_rounds") + weight > l.SITE_THEME_ROUNDS_PER_DAY) {
       return { error: 503, message: "Caprice makes no more themes today, for anyone. More tomorrow.", retry: untilTomorrow(now) };
     }
-    if (this.count(now, `theme_rounds:${user}`) >= l.USER_THEME_ROUNDS_PER_DAY) {
+    if (this.count(now, `theme_rounds:${user}`) + weight > l.USER_THEME_ROUNDS_PER_DAY) {
       return { error: 429, message: "You have made as much as a day allows. More tomorrow.", retry: untilTomorrow(now) };
     }
-    this.bump(now, "theme_rounds");
-    this.bump(now, `theme_rounds:${user}`);
+    for (let k = 0; k < weight; k++) {
+      this.bump(now, "theme_rounds");
+      this.bump(now, `theme_rounds:${user}`);
+      if (talk === null) this.bump(now, `themes:${user}`);
+    }
     if (talk === null) {
-      this.bump(now, `themes:${user}`);
       id = [...crypto.getRandomValues(new Uint8Array(8))].map(b => b.toString(16).padStart(2, "0")).join("");
       this.sql.exec("INSERT INTO theme_talks VALUES (?, ?, ?, 0, 0, 0, 0)", id, user, now);
+      if (tier === "rich") this.sql.exec("INSERT INTO theme_tiers VALUES (?, 'rich')", id);
       this.sql.exec("INSERT INTO theme_costs VALUES (?, ?, ?, 0, 0, 0, 0, 0, 0, 0)", id, user, now);
     } else {
       this.sql.exec(`UPDATE theme_talks SET ${column[kind]} = ${column[kind]} + 1 WHERE id = ?`, id);
@@ -327,7 +374,7 @@ export class Ledger extends DurableObject {
     this.sql.exec("UPDATE theme_talks SET busy = ? WHERE id = ?", now + 15 * MINUTE, id);
     const talked = this.rows("SELECT * FROM theme_talks WHERE id = ?", id)[0];
     const left = { errors: most.errors - talked.errors, frames: most.frames - talked.frames, change: most.change - talked.changes };
-    return { ok: true, id, turns: this.rows("SELECT role, text FROM theme_turns WHERE id = ? ORDER BY n", id), left };
+    return { ok: true, id, tier, turns: this.rows("SELECT role, text FROM theme_turns WHERE id = ? ORDER BY n", id), left };
   }
 
   // A round done: what was asked and what Claude answered kept, whole, if it answered; the theme
@@ -347,7 +394,12 @@ export class Ledger extends DurableObject {
       this.sql.exec("INSERT INTO theme_turns VALUES (?, ?, 'assistant', ?)", id, n + 1, answered.answer);
     }
     this.sql.exec("UPDATE theme_talks SET busy = 0 WHERE id = ?", id);
-    return { ok: true };
+    return { ok: true, look: this.themeSpent(id) < this.limits.THEME_LOOK_MICRO };
+  }
+
+  // What a theme has cost so far, in millionths of a dollar.
+  themeSpent(id) {
+    return this.rows("SELECT micro FROM theme_costs WHERE id = ?", id)[0]?.micro ?? 0;
   }
 
   // The writer kept the theme (put it on their shelf): what billing will hang on, and what the
