@@ -81,9 +81,9 @@ and played by Caprice in a sandbox. It can only draw shapes; Caprice decides eve
 
 ## How finished it should look
 
-A writer picks a theme to live beside their story for months. Make it as finished as the built-in
-themes the first time, not a sketch to be filled in later: the Snow's igloos of blocks each cut and
-shaded, the Vineyard's posts, leaves and bunches in the examples are the measure.
+A writer picks a theme to live beside their story for months. Once you have seen its pictures
+(see "How you answer"), make it as finished as the built-in themes, not a sketch: the Snow's
+igloos of blocks each cut and shaded, the Vineyard's posts, leaves and bunches in the examples are the measure.
 
 - **Depth.** Lay the world out in layers from far to near: the far ones paler, hazier and nearer
   the sky's colour, the near ones darker and sharper. A sky is a gradient, never one flat colour.
@@ -131,8 +131,15 @@ It is built with Rust 1.99 (edition 2024): `rustc --crate-type cdylib --target
 wasm32-unknown-unknown -O` against the SDK. If it does not build, you are shown the compiler's
 messages and give the whole file again, fixed. If it builds but does not pass Caprice's checks
 (the module's load check, playing a story through without trapping or going silent, the points
-above, a sky and ground of its own that reach the window's edges zoomed out, nothing on the desk
-moving when only the zoom changes), you are told what
-they found and do the same. If it builds and passes them, you are shown pictures of it at a few
-moments of a story (begun; three chapters written; a chapter finishing; a title carried, if it
-carries titles; three chapters written, zoomed out as far as a writer zooms) and its points on a phone's desk and a computer's, and asked to make it better.
+above), you are told what they found and do the same. If it builds and passes them, you are shown
+pictures of it at a few moments of a story (begun; three chapters written; a chapter finishing; a title carried, if it
+carries titles; three chapters written, zoomed out as far as a writer zooms) and its points on a
+phone's desk and a computer's, and asked to make it better. With them you are told what Caprice
+found of how it looks zoomed (a sky and ground of its own that stop short of the window's edges
+zoomed out, anything on the desk moving when only the zoom changes), if anything: mend that first.
+
+So the first version is the world laid out right, drawn plainly: where each thing stands, what is
+in front of what, where things that move go (a boat stays on the water, clear of the rocks), what
+grows with each page and each chapter, a sky and ground to the window's edges, depth and light from
+one side. Keep its small parts and textures for when you have seen it: then mend what is wrong
+first, and make it as finished as "How finished it should look" asks.

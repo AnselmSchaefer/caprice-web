@@ -90,7 +90,7 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `motion.rs` | Scenes that move a little: the parts Claude marks by id (drift, wing, sway, smoke, flicker, shimmer), rendered apart from the still picture and moved every frame; and the kinds a theme of one's own may use besides (float, twinkle, pulse, wander, spin, and areas of snow, rain, fireflies, leaves, bubbles or embers that Caprice fills) |
 | `own.rs` | Themes of the writer's own (R35): one SVG drawing read into its desk, pieces and carrier (`Pack`), checked on import with the reasons in plain words (`check`), its palette taken from its picture (`palette_of`); the shelf of them in the data folder (`Shelf`); importing and exporting drawings (never a program), deleting, the template, the guide and the import's report (`Workshop`) |
 | `bundle.rs` | A theme that is a program as it travels (R36): a `.caprice-theme`, a zip of `manifest.json` (name, words, author, palette, the world, the toolchain), `theme.wasm`, `theme.rs` and `preview.png`; read and checked with the reasons in words (`open`; a file with a source and no module, or a source alone, `from_source`, to be built), written (`write`), the same bytes for the same parts; never a file a writer picks or saves |
-| `making.rs` | Making a theme with Claude (R36): the "Make a theme" window, the request weighed and the writer's choice of a simple or a rich theme, its steps, time and lost connections told the writer without naming Claude; the request to `/api/theme-program`, the source built in the tab, checked and pictured, the compiler's words and a program that will not play sent back to Claude unseen, its pictures shown to Claude once, the last version that worked kept until the writer keeps it or asks for a change |
+| `making.rs` | Making a theme with Claude (R36): the "Make a theme" window, its steps, time and lost connections told the writer without naming Claude; the request to `/api/theme-program`, the source built in the tab, checked and pictured, the compiler's words and a program that will not play sent back to Claude unseen, its pictures shown to Claude once, the last version that worked kept until the writer keeps it or asks for a change |
 | `gallery.rs` | The gallery of theme programs (R33, R36): the Gallery window (New, Sent by you, and for the owner Waiting), each theme's picture, "Use" checking the gallery's signature before the shelf keeps it; sending a theme made with Claude; the owner's look, built again the same in the tab and played, and their decision |
 | `cast.rs` | The cast: people found by name in what is painted, their looks and model sheets in the scene's prompt; the Cast window and its example |
 | `start.rs` | The welcome page when Caprice opens without a file: kinds of new story (`Kind`), the stories last opened with what they hold, the sheet flying to the desk; the list of stories last opened, kept in the data folder |
@@ -2083,8 +2083,9 @@ ask Claude anything else** (`/api/theme-program`, `web/api/theme.js`, R36, the p
   `THEME_REQUEST_BYTES`), `errors` (the compiler's words, `THEME_ERRORS_BYTES`), `checks` (what
   Caprice's checks found of a program that built, in Caprice's words, as large; with `errors` at
   most `THEME_ERRORS_ROUNDS` a theme, a fix being a fix whichever kind), `frames` (the preview's PNGs as bytes, checked to be PNGs of a
-  desk's size, never decoded, made base64 here, with their moments and points; `THEME_FRAMES_BYTES`,
-  `THEME_FRAMES_ROUNDS`), `change` (the writer's words, `THEME_CHANGE_ROUNDS`). The writer's words
+  desk's size, never decoded, made base64 here, with their moments and points, and after them
+  what Caprice's checks found of how it looks, in words, at most `THEME_ERRORS_BYTES`, put in the
+  Worker's sentence as a `checks` round's are; `THEME_FRAMES_BYTES`, `THEME_FRAMES_ROUNDS`), `change` (the writer's words, `THEME_CHANGE_ROUNDS`). The writer's words
   are one field in a sentence the Worker wrote. Anything else is refused before Claude is asked.
 - **The conversation is the Ledger's** (`theme_talks`, `theme_turns`, `themeRound`,
   `themeAnswered`): each answer kept whole, so the browser cannot write Claude's side; pictures kept
@@ -2099,32 +2100,40 @@ ask Claude anything else** (`/api/theme-program`, `web/api/theme.js`, R36, the p
   40 000 tokens) is cached, and the conversation with it (`cache_control`).
 - **Claude is told its room, below the wall it cannot see**: `max_tokens` is never shown to the
   model, and thinking that runs into it leaves no program, paid for all the same (a lighthouse's
-  first round, 2026-11-20). So a rich theme's rounds also send a task budget (`task_budget`,
-  `THEME_BUDGET_RICH`, beta `task-budgets-2026-03-13`), which Claude sees counting down and finishes
-  within; keep it below `THEME_TOKENS_RICH`, and change the two together. A simple theme is told
-  none (`THEME_BUDGET` 0): at effort low it fits its tokens without one, and the first simple round
-  told 52 000 came back with no program (a tight budget can cut an answer short). A round that still
+  first round, 2026-11-20). So every round also sends a task budget (`task_budget`, `THEME_BUDGET`
+  and `THEME_BUDGET_RICH`, both 110 000, beta `task-budgets-2026-03-13`), which Claude sees counting
+  down and finishes within; keep each below its tier's tokens (both 128 000, the most Opus 5.5
+  writes), and change them together. Never a tight one: a simple round told 52 000 at effort low
+  came back with no program (a budget of 0 sends none). A round that still
   runs into the wall says so ("ran out of room"), not that the writer asked too much. **A reply
   without a program is logged** ("theme: no program": how it stopped, what it spent, the model, how
   it ended; never the writer's words) to Workers Logs (`observability` in `wrangler.jsonc`), so it
   can be looked into afterwards.
-- **A theme is simple or rich, as the writer chooses** (the owner's call, 2026-11-20, from six
-  requests measured: at effort medium a first round took 56 000 to over 128 000 tokens, at low
-  17 000 to 48 000, all building and nearly as good). Begun with `X-Caprice-Tier: rich`, a theme is
+- **Every theme is written at effort medium for now** (`THEME_EFFORT` and `THEME_EFFORT_RICH`, the
+  owner's call of 2026-11-20, after a lighthouse written at low came out rough; six requests
+  measured that day: at effort medium a first round took 56 000 to over 128 000 tokens, at low
+  17 000 to 48 000). The app no longer offers a rich theme nor weighs a request (R36), but the
+  server still serves an older app that does, so it can come back. Begun with `X-Caprice-Tier: rich`, a theme is
   rich for all its rounds (`theme_tiers`, the Ledger's, never the app's word after the first):
   written at `THEME_EFFORT_RICH` with `THEME_TOKENS_RICH` and `THEME_BUDGET_RICH`, each round counted
   as `THEME_RICH_WEIGHT` rounds of the site's and the writer's, and the theme as as many themes;
-  else at `THEME_EFFORT` (`low`) with `THEME_TOKENS` and `THEME_BUDGET`. **The weight is what keeps
-  the day's dollars bounded**: change it with the tokens. Before choosing, the writer's words are
+  else at `THEME_EFFORT` (`medium`) with `THEME_TOKENS` and `THEME_BUDGET`. A round of either costs
+  at most about $3, so `SITE_THEME_ROUNDS_PER_DAY` (6) is what keeps the day within the owner's $18;
+  the weight counts a rich theme as two: change both with the tokens. Before choosing, an older app had the writer's words
   weighed (`POST /api/theme-estimate`, `themeEstimate`, `themeWeighed`'s own count a day): a small
   model (`WEIGHER`) counts the request's things, growth, events and motion as structured output,
   the Worker sums them, and only `{ tier, parts }` goes back (`rich` from `THEME_RICH_FROM`, as the
   measured requests split); anything else is `{ tier: null }`. It is no way to ask Claude anything.
-- **A theme dear enough already is not looked over** (`THEME_LOOK_MICRO`, $2: as rounds cost
-  today, one that needed a mistake put right): `themeAnswered` says whether its costs are below
-  it, the answer's `left.frames` is 0 when not, and a `frames` round for it is 429 before Claude is
-  asked. The app then shows it to the writer as it is (R36). A change the writer asks for still
-  goes.
+- **A theme is made in two rounds: laid out, then made finished** (`GUIDE.md`, "How you answer",
+  as on 2026-11-16; the owner's call of 2026-11-20, after one round asked to be finished at once
+  took 122 000 tokens and 18 minutes). The first version is the world laid out right and drawn
+  plainly; shown its pictures (`frames`), Claude mends what is wrong and adds the small parts and
+  textures "How finished it should look" asks for. **A theme dear enough already is not looked
+  over** (`THEME_LOOK_MICRO`, $4: at effort medium, one that needed a mistake put right):
+  `themeAnswered` says whether its costs are below it, the answer's `left.frames` is 0 when not,
+  and a `frames` round for it is 429 before Claude is asked (as with `THEME_FRAMES_ROUNDS` 0). The
+  app then shows it to the writer as it is (R36), and the guide's plain first version is what they
+  get: change the two together. A change the writer asks for still goes.
 - **What each theme cost is kept, and whether it was kept** (`theme_costs`, `cost`, `themeKept`,
   the owner's call of 2026-11-19: free at first, the numbers gathered for a price later). Every
   round Claude answered adds its tokens and their price in millionths of a dollar (`PRICES`, the
@@ -2139,7 +2148,7 @@ ask Claude anything else** (`/api/theme-program`, `web/api/theme.js`, R36, the p
   must name `theme!(`), and from the ```json block the name, a few words and the colours by the
   palette's names as `#rrggbb`; never Claude's own words. A reply without a program is 502.
 - The model is named once (`WRITER`, `claude-opus-5-5`); thinking adaptive at `THEME_EFFORT` or
-  `THEME_EFFORT_RICH` (`low` and `medium`, measured to fit their tokens, the same when unset); a model's refusal goes on with the platform's fallback
+  `THEME_EFFORT_RICH` (both `medium`, the same when unset); a model's refusal goes on with the platform's fallback
   (`server-side-fallback-2026-07-01`, `fallbacks: "default"`). Not streamed, as a scene is not.
   `THEMES_OFF = "1"` stops it; without a key there is none.
 - **A round not answered within a beat is kept alive** (`keptAlive`, `BEAT_MS` 15 s,
@@ -2163,9 +2172,10 @@ out for a theme, and themes for a writer, and claude is not asked again", "the s
 day run out for everyone, and a round that fails still counts", "without a key, or switched off, no
 theme is made", "a round that takes longer than a beat is answered at once, a space every beat, then
 the theme or why not", "a theme dear enough already is shown as it is, and claude is not asked to look
-at its pictures", "a round that runs out of room says so, and that starting again may work", "a request is
-weighed by a small model before it is made, and only simple or rich comes back", "a rich theme is
-written with more room, counts as two, and its later rounds stay rich", "the site's owner makes themes
+at its pictures", "with no looks allowed, every theme is shown as it is and claude never sees its
+pictures", "a round that runs out of room says so, and that starting again may work", "a request is
+weighed by a small model before it is made, and only simple or rich comes back", "a rich theme,
+which only an older app asks for, counts as two, and its later rounds stay rich", "the site's owner makes themes
 without a day's limits, and leaves the site's rounds to everyone else".
 
 The gallery of theme programs (`web/api/gallery.js`, R36, the plan's step 6) is for writers signed in:
@@ -2777,11 +2787,10 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   pack it (`CAPRICE_TOOLCHAIN=0` leaves it out; `smoke.mjs` then skips the build, saying so).
 - **A theme made with Claude reaches the writer only once it works** (`making.rs`, the plan's step
   5; the server's side is R33's `/api/theme-program`). The window ("Have one made…" in
-  Yours, for a writer signed in, saying the words go to an AI model by Anthropic) has the request
-  weighed first (R33's `/api/theme-estimate`) and the writer choose a simple or a rich theme, told
-  which it looks like (`LOOKS_SIMPLE`, `LOOKS_RICH`, or `EITHER` when the server cannot say) and that
-  a rich one counts as two; the begin round carries the choice, and a rich one's window promises
-  `UP_TO_MINUTES_RICH`. Then it starts the compiler first, so a
+  Yours, for a writer signed in, saying the words go to an AI model by Anthropic) begins the theme
+  as soon as the writer asks: every theme is given the same room for now, so the request is not
+  weighed and there is no simple or rich to choose (the owner's call, 2026-11-20; R33 keeps both
+  for an older app). Then it starts the compiler first, so a
   browser that cannot build says so before Claude is asked, and the toolchain loads while Claude
   writes. Each answer (only a source and a palette) is built, checked (`eggs::program::check`) and
   played off screen (`eggs::preview`). **A version is done only when it passed everything a writer
@@ -2792,15 +2801,21 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   (`Previewed::bare`: stretched over `Input::area` instead of `Input::shown`, as the gallery's
   Magic Castle and Lighthouse were, 2026-11-20), and one with parts that slide as the writer zooms
   (`Previewed::slides`: laid out from `Input::shown`, as the Lighthouse's grass was, 2026-11-20;
-  sent with the sky's, one round for both) as a `checks` round in Caprice's words, at most `FIXES` of either (the server's `THEME_ERRORS_ROUNDS`), and **the writer
+  sent with the sky's, one round for both) as a `checks` round in Caprice's words, at most `FIXES` of either (the server's `THEME_ERRORS_ROUNDS`).
+  **What the two zoom checks find goes with the pictures while Claude is still to see them**
+  (`pictures_body`): one round that mends it first and then makes the theme finished, rather than a
+  round of its own before the look (the owner's call, 2026-11-20: each round is a whole file
+  written again); without a look to come, it is a `checks` round as the others. And **the writer
   never sees the compiler's words nor the checks**. The budget is the one the gallery's review
   shows and the guide names (`GUIDE.md`, "Points cost"): change them together. A version over it
   that plays is a near miss: kept to fall back on while there is no version within it, offered to
   keep when the fixes run out, never put in place of a lighter one. One that stops short of the
   edges is kept as any other: when the fixes run out, Claude and the writer see it zoomed out. The
-  first version that plays is shown to Claude as its pictures and points (`frames`, `LOOKS` times:
-  each costs about as much as writing it), unless the server's answer left it no look
-  (`left.frames` 0, R33's `THEME_LOOK_MICRO`: the theme has cost enough already); then the writer sees its pictures, keeps it, starts
+  first version that plays is shown to Claude as its pictures and points (`frames`, at most `LOOKS`
+  times: each costs about as much as writing it), unless the server's answer left it no look
+  (`left.frames` 0: R33's `THEME_LOOK_MICRO`, the theme has cost enough already). The steps the
+  window counts plan a look from the start and drop it once an answer leaves none, so that they
+  never promise more than will come. Then the writer sees its pictures, keeps it, starts
   again, or asks for a change (`change`). **A version that worked is never lost to one that did
   not**: a fix that never builds, or a look Claude cannot give, leaves the last good version shown,
   with a word why; with none, the window says nothing came of it, and nothing is kept. Nothing goes
@@ -2810,12 +2825,12 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   writer asks and beside "Keep it": a theme kept meanwhile stays theirs whatever comes later (§7).
   The compiler is ended once there is nothing more to build. Closing the window only hides it. Tests:
   `a_theme_made_with_claude_is_built_shown_to_claude_once_changed_and_kept_when_the_writer_says`,
-  `a_request_is_weighed_and_the_writer_chooses_a_simple_or_a_rich_theme`,
+  `a_theme_is_begun_as_soon_as_the_writer_asks_with_no_choice_of_room`,
   `a_theme_that_has_cost_enough_already_is_shown_to_the_writer_without_a_look_at_its_pictures`,
   `mistakes_go_back_to_claude_unseen_and_a_theme_that_never_works_says_so_keeping_nothing`,
   `what_caprice_finds_of_a_program_that_built_goes_back_to_claude_as_checks_unseen_by_the_writer`,
-  `a_theme_whose_sky_stops_short_of_the_window_zoomed_out_goes_back_to_claude_unseen_by_the_writer`,
-  `a_theme_that_slides_as_the_writer_zooms_goes_back_to_claude_unseen_by_the_writer`,
+  `a_theme_whose_sky_stops_short_of_the_window_zoomed_out_is_told_claude_with_its_pictures_unseen_by_the_writer`,
+  `a_theme_that_slides_as_the_writer_zooms_is_told_claude_with_its_pictures_or_alone_without_them`,
   `a_theme_too_heavy_however_often_it_is_sent_back_is_still_offered_to_keep`,
   `a_lighter_version_is_not_lost_to_a_heavier_one_that_cannot_be_made_lighter`,
   `a_theme_is_made_only_for_a_writer_signed_in_and_what_the_server_says_is_shown` (the stand-in

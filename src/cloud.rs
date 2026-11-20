@@ -1337,10 +1337,6 @@ pub mod stand_in {
         pub theme_rounds: Vec<Round>,
         /// The themes the writer said they kept (`/api/theme-program/<id>/kept`).
         pub themes_kept: Vec<String>,
-        /// The requests weighed before they were made (`/api/theme-estimate`), and what the next
-        /// weighing says: with none set, a simple theme.
-        pub weighed: Vec<Vec<u8>>,
-        pub weighs: Option<&'static str>,
         /// Claude still writing: rounds of a theme wait, each with whom to tell that the server
         /// is still at it, until `beat` tells them or `written` answers them.
         pub writing: bool,
@@ -1476,10 +1472,6 @@ pub mod stand_in {
             if let Some(id) = r.path.strip_prefix("/api/theme-program/").and_then(|p| p.strip_suffix("/kept")) {
                 o.themes_kept.push(id.to_owned());
                 return Answer { status: 204, headers: Vec::new(), body: Vec::new() };
-            }
-            if r.path == "/api/theme-estimate" {
-                o.weighed.push(r.body.clone().unwrap_or_default());
-                return Answer { status: 200, headers: Vec::new(), body: o.weighs.unwrap_or(r#"{"tier":"light","parts":6}"#).as_bytes().to_vec() };
             }
             if r.path.starts_with("/api/theme-program") {
                 let kind = header("X-Caprice-Kind");

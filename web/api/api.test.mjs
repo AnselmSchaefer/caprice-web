@@ -1029,9 +1029,9 @@ test("a theme is begun from the writer's words, and only its source and palette 
   const [{ key, beta, body }] = claude.asked;
   assert.equal(key, "a test's key");
   assert.equal(body.model, "claude-opus-5-5");
-  assert.equal(body.max_tokens, 64000, "the most a round can cost is the Worker's");
-  assert.deepEqual(body.output_config, { effort: "low" }, "a simple theme is told no budget: it fits without one");
-  assert.ok(!beta.includes("task-budgets"), beta);
+  assert.equal(body.max_tokens, 128000, "the most a round can cost is the Worker's");
+  assert.deepEqual(body.output_config, { effort: "medium", task_budget: { type: "tokens", total: 110000 } }, "told its room, below the wall");
+  assert.ok(beta.split(",").includes("task-budgets-2026-03-13"), beta);
   const system = body.system.map(b => b.text).join("");
   for (const part of ["# Writing a magic theme for Caprice", "pub trait Theme", "package caprice:theme", "The Magic Snow, as a theme program", "theme!(Fireflies)"]) {
     assert.ok(system.includes(part), `the prompt holds ${part}`);
@@ -1093,6 +1093,27 @@ test("pictures go to claude as images, and are kept in the conversation as words
   assert.ok(typeof kept === "string" && kept.startsWith("[2 pictures were shown here.]"), "later rounds see words in their place");
 });
 
+test("what caprice's checks found goes with the pictures, inside the worker's words, and too much of it is refused", async t => {
+  const mf = await start(t);
+  const api = await writer(mf, "1", "Ada");
+  claude.writes = THEME_REPLY;
+  const { theme } = await (await begin(api)).json();
+  const headers = { "X-Caprice-Moments": "begun", "X-Caprice-Points": "1,2" };
+  const found = "It plays, but part of it slides as the writer zooms.";
+  const tooMuch = await round(api, theme, "frames", Buffer.concat([framed([png(1280, 800)]), Buffer.from("s".repeat(20_001))]), headers);
+  assert.equal(tooMuch.status, 400, "no more words than a checks round holds");
+  assert.equal(claude.asked.length, 1);
+  const looked = await round(api, theme, "frames", Buffer.concat([framed([png(1280, 800)]), Buffer.from(found)]), headers);
+  assert.equal(looked.status, 200);
+  const content = claude.asked[1].body.messages[2].content;
+  assert.equal(content.length, 2, "the picture, then the words");
+  assert.ok(content[1].text.startsWith("It built. Here it is as Caprice drew it"), content[1].text);
+  assert.ok(content[1].text.includes(`Caprice's checks found, which you mend first:\n\n<checks>\n${found}\n</checks>`), content[1].text);
+  assert.match(content[1].text, /make it better/, "and then the look, as always");
+  await round(api, theme, "change", "Brighter");
+  assert.ok(claude.asked[2].body.messages[2].content.includes(found), "kept in the conversation with the pictures' place");
+});
+
 test("what is not one of its kinds, too big, or not pictures is refused before claude is asked", async t => {
   const mf = await start(t);
   const api = await writer(mf, "1", "Ada");
@@ -1152,8 +1173,8 @@ test("what each theme costs is kept with it, and the owner sees it a day at a ti
 test("a theme dear enough already is shown as it is, and claude is not asked to look at its pictures", async t => {
   const mf = await start(t);
   const ada = await writer(mf, "1", "Ada");
-  // A round as measured, $1.204: the first is under THEME_LOOK_MICRO's $2, a fix takes it over.
-  claude.usage = { input_tokens: 1000, cache_creation_input_tokens: 50_000, cache_read_input_tokens: 0, output_tokens: 40_000 };
+  // A round at effort medium, $2.404: the first is under THEME_LOOK_MICRO's $4, a fix takes it over.
+  claude.usage = { input_tokens: 1000, cache_creation_input_tokens: 50_000, cache_read_input_tokens: 0, output_tokens: 100_000 };
   claude.writes = THEME_REPLY;
   const begun = await (await begin(ada)).json();
   assert.equal(begun.left.frames, 2, "written at once, it may be looked over");
@@ -1163,6 +1184,18 @@ test("a theme dear enough already is shown as it is, and claude is not asked to 
   assert.equal(look.status, 429);
   assert.equal(claude.asked.length, 2, "Claude is not asked");
   claude.usage = undefined;
+  assert.equal((await round(ada, begun.theme, "change", "Bluer")).status, 200, "a change the writer asks for still goes");
+});
+
+test("with no looks allowed, every theme is shown as it is and claude never sees its pictures", async t => {
+  const mf = await start(t, { THEME_FRAMES_ROUNDS: "0" });
+  const ada = await writer(mf, "1", "Ada");
+  claude.writes = THEME_REPLY;
+  const begun = await (await begin(ada)).json();
+  assert.equal(begun.left.frames, 0, "the app is told at once: no look");
+  const look = await round(ada, begun.theme, "frames", framed([png(1280, 800)]), { "X-Caprice-Moments": "begun", "X-Caprice-Points": "1,2" });
+  assert.equal(look.status, 429, "an app that asks anyway is refused");
+  assert.equal(claude.asked.length, 1, "Claude is not asked");
   assert.equal((await round(ada, begun.theme, "change", "Bluer")).status, 200, "a change the writer asks for still goes");
 });
 
@@ -1185,14 +1218,14 @@ test("a request is weighed by a small model before it is made, and only simple o
   assert.equal(claude.asked.length, 3);
 });
 
-test("a rich theme is written with more room, counts as two, and its later rounds stay rich", async t => {
+test("a rich theme, which only an older app asks for, counts as two, and its later rounds stay rich", async t => {
   const mf = await start(t, { USER_THEMES_PER_DAY: "3", SITE_THEME_ROUNDS_PER_DAY: "5" });
   const ada = await writer(mf, "1", "Ada");
   claude.writes = THEME_REPLY;
   const rich = said => ada("/api/theme-program", { method: "POST", body: said, headers: { "X-Caprice-Tier": "rich" } });
   const { theme } = await (await rich("A village of treehouses")).json();
   assert.equal(claude.asked[0].body.max_tokens, 128000);
-  assert.deepEqual(claude.asked[0].body.output_config, { effort: "medium", task_budget: { type: "tokens", total: 110000 } }, "at more effort, told its room");
+  assert.deepEqual(claude.asked[0].body.output_config, { effort: "medium", task_budget: { type: "tokens", total: 110000 } }, "told its room");
   assert.ok(claude.asked[0].beta.split(",").includes("task-budgets-2026-03-13"), claude.asked[0].beta);
   assert.equal((await round(ada, theme, "errors", "error: one")).status, 200);
   assert.equal(claude.asked[1].body.max_tokens, 128000, "its fix is rich too, whatever the app says");
@@ -1200,8 +1233,8 @@ test("a rich theme is written with more room, counts as two, and its later round
   assert.equal(more.status, 429, "two themes counted, one left");
   assert.match(await more.text(), /A rich theme counts as 2, and today has room for a simple one only/);
   assert.equal((await begin(ada)).status, 200, "a simple one still fits");
-  assert.equal(claude.asked[2].body.max_tokens, 64000);
-  assert.equal(claude.asked[2].body.output_config.effort, "low", "a simple one at low, as measured to be good enough");
+  assert.equal(claude.asked[2].body.max_tokens, 128000, "as much room: the model's most");
+  assert.equal(claude.asked[2].body.output_config.effort, "medium", "a simple one at medium too");
   assert.equal((await round(ada, theme, "change", "Bluer")).status, 503, "four of the site's five rounds used, and a rich one takes two");
   assert.equal(claude.asked.length, 3);
 });

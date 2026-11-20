@@ -6,7 +6,8 @@
 //! the compiler's words (`errors`); a program Caprice will not play, one that stops while playing
 //! the preview's story, one that draws more than `gallery::BUDGET`, one whose own sky stops short of
 //! the window's edges zoomed out (`Previewed::bare`), one with parts that slide as the writer zooms
-//! (`Previewed::slides`) (`checks`). One that works is shown
+//! (`Previewed::slides`) (`checks`; the last two go with the pictures instead, while Claude is still
+//! to see them). One that works is shown
 //! to Claude as pictures once, to be made better (unless the server says the theme has cost enough
 //! already), and then to the writer, who keeps it or asks for a change. A version that worked is never lost to one that did not (the owner's decisions for
 //! step 5: a writer is never left with a broken theme).
@@ -41,22 +42,21 @@ pub const MOST_REQUEST: usize = 2000;
 const MOST_ERRORS: usize = 19_000;
 /// Mistakes Claude is asked to fix for one theme, as the server allows (`THEME_ERRORS_ROUNDS`).
 const FIXES: u8 = 3;
-/// Times Claude is shown the pictures of a theme that works, to make it better: each costs about
-/// as much as writing it did (THEME_PROGRAMS_PLAN.md, step 5's measurement).
+/// Times Claude is shown the pictures of a theme that works, to make it better, at most: each costs
+/// about as much as writing it did (THEME_PROGRAMS_PLAN.md, step 5's measurement). The server's
+/// answers say whether it may (`left.frames`).
 const LOOKS: u8 = 1;
 /// What the writer is told of where their words go.
 pub const GOES_OUT: &str = "What you write here goes through Caprice's server to an AI model by Anthropic, which writes your theme.";
 /// What the writer is told of what a theme costs, while Caprice gives them away (the owner's call,
 /// 2026-11-19): the themes kept meanwhile stay the writer's whatever comes later.
 pub const FREE: &str = "Free while Caprice is new: a theme you keep now stays yours.";
-/// What the writer is told a theme takes, in minutes: two rounds of writing, about seven minutes
-/// each as measured (THEME_PROGRAMS_PLAN.md, step 5), and the building and trying between.
-pub const UP_TO_MINUTES: u32 = 15;
-/// And a rich one: written at more effort, a round took up to 20 minutes as measured (2026-11-20).
-pub const UP_TO_MINUTES_RICH: u32 = 30;
+/// What the writer is told a theme takes, in minutes: two rounds of writing, the world laid out and
+/// then made finished, about seven to ten minutes each at effort medium (THEME_PROGRAMS_PLAN.md,
+/// step 5), and the building and trying between.
+pub const UP_TO_MINUTES: u32 = 25;
 /// Seconds a round of writing usually takes: how far the bar moves within its step meanwhile.
-const TYPICAL_ROUND: f64 = 420.0;
-const TYPICAL_ROUND_RICH: f64 = 780.0;
+const TYPICAL_ROUND: f64 = 480.0;
 /// Seconds without word from the server while Claude writes before the window says so, and before
 /// the connection is taken for lost: it says it is at work every 15 seconds (`BEAT_MS`).
 const QUIET: f64 = 25.0;
@@ -142,20 +142,6 @@ impl Kind {
     }
 }
 
-/// How much room a theme is given: simple, or rich, which counts as two of the day's themes (the
-/// server's `THEME_RICH_WEIGHT`) and may cost about that much more. The writer chooses, told which
-/// the request looks like (`/api/theme-estimate`).
-#[derive(Clone, Copy, PartialEq, Debug, Default)]
-pub enum Tier {
-    #[default]
-    Light,
-    Rich,
-}
-
-/// What the writer is told the request looks like, and what each choice means.
-pub const LOOKS_SIMPLE: &str = "This looks like a simple theme.";
-pub const LOOKS_RICH: &str = "This looks like a rich theme: it takes longer, and counts as two of today's themes.";
-pub const EITHER: &str = "A simple theme is quicker. A rich one has room for more, and counts as two of today's themes.";
 
 /// Where the making of a theme is.
 #[derive(Default)]
@@ -163,10 +149,6 @@ enum Step {
     /// The writer saying what they would like.
     #[default]
     Writing,
-    /// The request being weighed: simple or rich.
-    Weighing(Receiver<Answer>),
-    /// The writer choosing how much room it is given, told what it looks like (if the server could say).
-    Choosing(Option<Tier>),
     /// The compiler starting, before Claude is asked: a round of this kind, with this body.
     Starting(Kind, Vec<u8>, Vec<(&'static str, String)>),
     /// Claude at a round.
@@ -186,7 +168,8 @@ struct Run {
     began: f64,
     heard: f64,
     /// How many steps it has, and how many looks at the pictures were left when it began (each
-    /// adds a round of writing, a build and a try).
+    /// adds a round of writing, a build and a try). A look the server allows no more is taken off
+    /// both, so that the steps never promise more than will come.
     steps: u8,
     looks: u8,
     /// The step shown, never going back (a mistake put right stays at the step it was found in),
@@ -216,8 +199,6 @@ pub struct Making {
     looks_left: u8,
     /// Whether the server would have Claude look at the pictures of the version in hand.
     may_look: bool,
-    /// The room the theme is given, as the writer chose.
-    tier: Tier,
     /// What the writer should know beside the version shown (a change that did not work out).
     note: Option<String>,
 }
@@ -260,15 +241,6 @@ impl Making {
         }
     }
 
-    /// What the request was weighed as, while the writer chooses.
-    #[cfg(test)]
-    pub fn choosing(&self) -> Option<Option<Tier>> {
-        match self.step {
-            Step::Choosing(t) => Some(t),
-            _ => None,
-        }
-    }
-
     /// The kind of round Claude is at, if it is at one.
     #[cfg(test)]
     pub fn waiting(&self) -> Option<Kind> {
@@ -289,8 +261,9 @@ fn cut(text: &str, most: usize) -> &str {
 }
 
 /// A round's pictures as the server takes them: how many (a byte), each one's length (four bytes,
-/// little-endian), then the PNGs.
-fn pictures_body(pngs: &[Vec<u8>]) -> Vec<u8> {
+/// little-endian), then the PNGs, then what Caprice's checks found of how it looks, in words (none
+/// for a version that passed them all).
+fn pictures_body(pngs: &[Vec<u8>], found: &str) -> Vec<u8> {
     let mut body = vec![pngs.len() as u8];
     for p in pngs {
         body.extend_from_slice(&(p.len() as u32).to_le_bytes());
@@ -298,6 +271,7 @@ fn pictures_body(pngs: &[Vec<u8>]) -> Vec<u8> {
     for p in pngs {
         body.extend_from_slice(p);
     }
+    body.extend_from_slice(cut(found, MOST_ERRORS).as_bytes());
     body
 }
 
@@ -307,23 +281,10 @@ impl App {
         self.making.open = true;
     }
 
-    /// The writer's request weighed, so they can be told whether it looks simple or rich. Without
-    /// Caprice's server it goes on as a round would, which says why it cannot.
-    fn weigh_theme(&mut self, ctx: &egui::Context) {
-        let Some(server) = self.cloud.server.clone() else {
-            self.begin_theme(ctx, Tier::Light);
-            return;
-        };
-        let request = cut(self.making.request.trim(), MOST_REQUEST).as_bytes().to_vec();
-        let (tx, rx) = channel();
-        let headers = vec![("Content-Type", "text/plain; charset=utf-8".into())];
-        server.send(Request { method: "POST", path: "/api/theme-estimate".into(), headers, body: Some(request) }, tx, Waker::new(ctx));
-        self.making.step = Step::Weighing(rx);
-    }
-
-    /// Begin a theme from the writer's request, given the room they chose: the compiler first, then Claude.
-    fn begin_theme(&mut self, ctx: &egui::Context, tier: Tier) {
-        self.making.tier = tier;
+    /// Begin a theme from the writer's request: the compiler first, then Claude. Every theme is
+    /// given the same room for now: the server's rich tier, and its weighing of a request to suggest
+    /// it (`/api/theme-estimate`), are not offered (the owner's call, 2026-11-20).
+    fn begin_theme(&mut self, ctx: &egui::Context) {
         let request = cut(self.making.request.trim(), MOST_REQUEST).to_owned();
         let m = &mut self.making;
         m.theme = None;
@@ -355,9 +316,6 @@ impl App {
             self.making.step = Step::Failed("Making a theme needs Caprice in the browser, signed in.".into());
             return;
         };
-        if kind == Kind::Begin && self.making.tier == Tier::Rich {
-            headers.push(("X-Caprice-Tier", "rich".into()));
-        }
         let path = match (&self.making.theme, kind) {
             (Some(id), k) if k != Kind::Begin => {
                 headers.push(("X-Caprice-Kind", kind.name().into()));
@@ -459,17 +417,7 @@ impl App {
                 Some(Err(why)) => self.fix(ctx, Kind::Checks, &format!("Caprice stopped it while playing the story: {why}.")),
                 None => ctx.request_repaint_after(std::time::Duration::from_millis(50)),
             },
-            Step::Weighing(answer) => {
-                let Ok(answer) = answer.try_recv() else { return };
-                let tier = (answer.status == 200).then(|| serde_json::from_slice::<serde_json::Value>(&answer.body).ok()).flatten();
-                let suggested = match tier.as_ref().and_then(|t| t.get("tier")).and_then(serde_json::Value::as_str) {
-                    Some("rich") => Some(Tier::Rich),
-                    Some("light") => Some(Tier::Light),
-                    _ => None,
-                };
-                self.making.step = Step::Choosing(suggested);
-            }
-            Step::Writing | Step::Choosing(_) | Step::Ready | Step::Failed(_) => {}
+            Step::Writing | Step::Ready | Step::Failed(_) => {}
         }
     }
 
@@ -485,6 +433,13 @@ impl App {
                 Ok(w) => {
                     self.making.theme = Some(w.theme);
                     self.making.may_look = w.left.get("frames").and_then(serde_json::Value::as_u64) != Some(0);
+                    if !self.making.may_look {
+                        let m = &mut self.making;
+                        let unseen = m.looks_left;
+                        m.run.looks -= unseen;
+                        m.run.steps -= 3 * unseen;
+                        m.looks_left = 0;
+                    }
                     let version = Version { source: w.source, name: w.name, about: w.about, colours: w.colours, module: Vec::new(), toolchain: String::new() };
                     if let Some(c) = &mut self.making.compiler {
                         c.build(&version.source);
@@ -563,16 +518,21 @@ impl App {
                 return;
             }
         }
-        // What is wrong with how it looks zoomed is sent back while fixes are left; then it is shown
-        // as it is (the picture zoomed out among the others), and kept if the writer likes it.
-        if !looks.is_empty() && self.making.fixes_left > 0 {
+        // What is wrong with how it looks zoomed goes with the pictures when Claude is still to see
+        // them: one round, which mends what is wrong first and then makes it finished, rather than
+        // a round of its own before the look. Without a look to come it is sent back while fixes
+        // are left; then it is shown as it is (the picture zoomed out among the others), and kept
+        // if the writer likes it.
+        let look = self.making.looks_left > 0 && self.making.may_look && pngs.len() == moments.split(',').count();
+        if !looks.is_empty() && !look && self.making.fixes_left > 0 {
             self.fix(ctx, Kind::Checks, &looks.join("\n\n"));
             return;
         }
         let points = format!("{phone},{computer}");
-        if self.making.looks_left > 0 && self.making.may_look && pngs.len() == moments.split(',').count() {
+        if look {
             self.making.looks_left -= 1;
-            self.round(ctx, Kind::Frames, pictures_body(&pngs), vec![("X-Caprice-Moments", moments), ("X-Caprice-Points", points)]);
+            let body = pictures_body(&pngs, &looks.join("\n\n"));
+            self.round(ctx, Kind::Frames, body, vec![("X-Caprice-Moments", moments), ("X-Caprice-Points", points)]);
         } else {
             self.making.compiler = None;
             self.making.step = Step::Ready;
@@ -636,48 +596,21 @@ impl App {
                     ui.horizontal(|ui| {
                         if signed_in {
                             if ui.add_enabled(!m.request.trim().is_empty(), egui::Button::new("Make it")).clicked() {
-                                act = Some(Act::Weigh);
+                                act = Some(Act::Begin);
                             }
                         } else if ui.button("Sign in\u{2026}").clicked() {
                             act = Some(Act::SignIn);
                         }
                     });
                 }
-                Step::Weighing(_) => {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label("Looking at what you asked for\u{2026}");
-                    });
-                }
-                Step::Choosing(suggested) => {
-                    ui.label(egui::RichText::new(m.request.trim()).italics());
-                    ui.add_space(4.0);
-                    ui.label(match suggested {
-                        Some(Tier::Light) => LOOKS_SIMPLE,
-                        Some(Tier::Rich) => LOOKS_RICH,
-                        None => EITHER,
-                    });
-                    ui.horizontal(|ui| {
-                        if ui.button("Make it simple").clicked() {
-                            act = Some(Act::Begin(Tier::Light));
-                        }
-                        if ui.button("Make it rich").clicked() {
-                            act = Some(Act::Begin(Tier::Rich));
-                        }
-                        if ui.button("Change what I asked").clicked() {
-                            act = Some(Act::Rewrite);
-                        }
-                    });
-                }
                 Step::Starting(..) | Step::Waiting(_) | Step::Building | Step::Picturing(_) => {
-                    let (minutes, typical) = if m.tier == Tier::Rich { (UP_TO_MINUTES_RICH, TYPICAL_ROUND_RICH) } else { (UP_TO_MINUTES, TYPICAL_ROUND) };
-                    ui.label(format!("We prepare the theme (up to {minutes} minutes) and show it once it is done. Go on writing meanwhile: closing this window does not stop it."));
+                    ui.label(format!("We prepare the theme (up to {UP_TO_MINUTES} minutes) and show it once it is done. Go on writing meanwhile: closing this window does not stop it."));
                     ui.add_space(4.0);
                     if let Some((at, of, doing)) = m.step() {
                         let r = m.run;
                         // Within a round of writing the bar moves by the time it usually takes,
                         // never past most of its step: the steps between are seconds.
-                        let within = if matches!(m.step, Step::Waiting(_)) { ((now - r.since) / typical).min(0.9) } else { 0.0 };
+                        let within = if matches!(m.step, Step::Waiting(_)) { ((now - r.since) / TYPICAL_ROUND).min(0.9) } else { 0.0 };
                         let done = (f64::from(at.saturating_sub(1)) + within) / f64::from(of.max(1));
                         ui.add(egui::ProgressBar::new(done as f32).text(format!("Step {at} of {of}")));
                         ui.horizontal(|ui| {
@@ -690,7 +623,7 @@ impl App {
                             ui.label(egui::RichText::new("Lost network. Waiting for it to come back\u{2026}").color(pal().accent));
                         } else if matches!(m.step, Step::Waiting(_)) && quiet > QUIET {
                             ui.label(egui::RichText::new(format!("No word from Caprice's server for {}: the connection may be lost.", took(quiet))).color(pal().accent));
-                        } else if now - r.began > f64::from(minutes) * 60.0 {
+                        } else if now - r.began > f64::from(UP_TO_MINUTES) * 60.0 {
                             ui.label(egui::RichText::new("This is taking longer than usual, but it is still going.").color(pal().text_dim));
                         }
                     }
@@ -744,9 +677,7 @@ impl App {
             ctx.request_repaint_after(std::time::Duration::from_secs(1));
         }
         match act {
-            Some(Act::Weigh) => self.weigh_theme(ctx),
-            Some(Act::Begin(tier)) => self.begin_theme(ctx, tier),
-            Some(Act::Rewrite) => self.making.step = Step::Writing,
+            Some(Act::Begin) => self.begin_theme(ctx),
             Some(Act::SignIn) => self.cloud.open = true,
             Some(Act::Keep) => self.keep_made(ctx),
             Some(Act::Again) => {
@@ -767,9 +698,7 @@ impl App {
 
 /// What the writer did in the window.
 enum Act {
-    Weigh,
-    Begin(Tier),
-    Rewrite,
+    Begin,
     SignIn,
     Keep,
     Again,

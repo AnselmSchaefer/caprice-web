@@ -7435,19 +7435,10 @@ mod tests {
     /// As `make_with_claude`, with Claude still writing each round asked (`writing`) until the test
     /// says it has written.
     fn ask_for_theme(h: &mut Harness, name: &str, answers: Vec<platform::Answer>, request: &str, writing: bool) -> std::rc::Rc<cloud::stand_in::StandIn> {
-        let server = request_theme(h, name, answers, request, writing, None);
-        h.click_widget("Make it simple");
-        server
-    }
-
-    /// As `ask_for_theme`, up to the writer choosing how much room it is given, the request weighed
-    /// as `weighs` says (else simple).
-    fn request_theme(h: &mut Harness, name: &str, answers: Vec<platform::Answer>, request: &str, writing: bool, weighs: Option<&'static str>) -> std::rc::Rc<cloud::stand_in::StandIn> {
         let dir = with_shelf(h, &format!("making-{name}"));
         let server = online(h, &dir, true);
         server.0.borrow_mut().theme_answers = answers.into();
         server.0.borrow_mut().writing = writing;
-        server.0.borrow_mut().weighs = weighs;
         h.frames(12, vec![], Modifiers::NONE);
         assert!(h.app.cloud.who.is_some(), "signed in");
         h.click_widget("Page");
@@ -7460,8 +7451,6 @@ mod tests {
         h.click_widget("A lighthouse on a cliff by the sea, a window lit for each page, a boat for each chapter");
         h.type_text(request);
         h.click_widget("Make it");
-        h.frames_until("the request weighed", |a| a.making.choosing().is_some());
-        h.frames(2, vec![], Modifiers::NONE);
         server
     }
 
@@ -7961,38 +7950,21 @@ mod tests {
     }
 
     #[test]
-    fn a_request_is_weighed_and_the_writer_chooses_a_simple_or_a_rich_theme() {
+    fn a_theme_is_begun_as_soon_as_the_writer_asks_with_no_choice_of_room() {
+        // Every theme is given the same room for now: no weighing, no simple or rich (2026-11-20).
         let mut h = Harness::new();
-        let rich = r#"{"tier":"rich","parts":10}"#;
         let fireflies = || written(FIREFLIES_SOURCE, "Fireflies at dusk");
-        let server = request_theme(&mut h, "rich", vec![fireflies(), fireflies()], "Treehouses", false, Some(rich));
-        assert_eq!(server.0.borrow().weighed, [b"Treehouses".to_vec()], "the writer's words, weighed");
-        assert!(h.painted_at(making::LOOKS_RICH).is_some(), "{}", h.painted_texts());
-        assert!(server.0.borrow().theme_rounds.is_empty(), "nothing made before the writer chooses");
-
-        // Asked again in other words, and the server cannot say: the writer chooses unhelped.
-        h.click_widget("Change what I asked");
-        assert!(h.painted_at("Make it").is_some() && h.labels().contains("Treehouses"), "back to the request, as written");
-        server.0.borrow_mut().weighs = Some("{}");
-        h.click_widget("Make it");
-        h.frames_until("weighed again", |a| a.making.choosing().is_some());
-        h.frames(2, vec![], Modifiers::NONE);
-        assert!(h.painted_at(making::EITHER).is_some(), "{}", h.painted_texts());
-        h.click_widget("Make it rich");
+        let server = ask_for_theme(&mut h, "begun", vec![fireflies()], "Treehouses", false);
+        h.frames(1, vec![], Modifiers::NONE);
+        assert!(h.app.making.busy(), "at work at once");
+        assert!(h.painted_at("Make it rich").is_none() && h.painted_at("Make it simple").is_none(), "{}", h.painted_texts());
         until_made(&mut h);
-        let rounds = server.0.borrow().theme_rounds.clone();
-        let tier = |r: &cloud::stand_in::Round| r.3.iter().find(|(k, _)| k == "X-Caprice-Tier").map(|(_, v)| v.clone());
-        assert_eq!(tier(&rounds[0]).as_deref(), Some("rich"), "begun rich");
-        assert_eq!(tier(&rounds[1]), None, "later rounds are of the theme's tier, which the server keeps");
         assert!(h.painted_at("Keep it").is_some());
-
-        // A rich theme takes longer, and the window says so while it is written.
-        let mut h = Harness::new();
-        let _server = request_theme(&mut h, "rich-time", vec![fireflies()], "Treehouses", true, Some(rich));
-        h.click_widget("Make it rich");
-        h.frames(3, vec![], Modifiers::NONE);
-        let told = format!("up to {} minutes", making::UP_TO_MINUTES_RICH);
-        assert!(h.painted_texts().contains(&told), "{}", h.painted_texts());
+        let o = server.0.borrow();
+        assert!(!o.asked.iter().any(|a| a.contains("/api/theme-estimate")), "the request is not weighed: {:?}", o.asked);
+        let (_, _, body, headers) = &o.theme_rounds[0];
+        assert_eq!(body.as_slice(), b"Treehouses");
+        assert!(!headers.iter().any(|(k, _)| k == "X-Caprice-Tier"), "never rich: {headers:?}");
     }
 
     #[test]
@@ -8007,6 +7979,9 @@ mod tests {
         };
         let mut h = Harness::new();
         let server = make_with_claude(&mut h, "dear", vec![written("// not yet a theme", "Jars"), dear(FIREFLIES_SOURCE)], "Jars of light");
+        // The steps counted a look (seven of them) until the server said there is none: then they
+        // promise no more than come.
+        h.frames_until("the look taken off the steps", |a| a.making.step().is_some_and(|(_, of, _)| of == 4));
         until_made(&mut h);
         let kinds: Vec<Option<String>> = server.0.borrow().theme_rounds.iter().map(|r| r.1.clone()).collect();
         assert_eq!(kinds.iter().map(Option::as_deref).collect::<Vec<_>>(), [None, Some("errors")], "no look at its pictures");
@@ -8101,7 +8076,7 @@ mod tests {
     }
 
     #[test]
-    fn a_theme_whose_sky_stops_short_of_the_window_zoomed_out_goes_back_to_claude_unseen_by_the_writer() {
+    fn a_theme_whose_sky_stops_short_of_the_window_zoomed_out_is_told_claude_with_its_pictures_unseen_by_the_writer() {
         use platform::program::{Stand, stand_in};
         let short = wat::parse_str(r#"(module (memory (export "memory") 15 512)
             (func (export "cabi_realloc") (param i32 i32 i32 i32) (result i32) i32.const 600000)
@@ -8115,11 +8090,11 @@ mod tests {
         until_made(&mut h);
         let rounds = server.0.borrow().theme_rounds.clone();
         let kinds: Vec<Option<&str>> = rounds.iter().map(|r| r.1.as_deref()).collect();
-        assert_eq!(kinds, [None, Some("checks"), Some("frames")]);
+        assert_eq!(kinds, [None, Some("frames")], "told with the pictures, not in a round of its own");
         let said = String::from_utf8_lossy(&rounds[1].2).into_owned();
         assert!(said.contains("stop short") && said.contains("`Input::shown`, not `Input::area`"), "{said}");
-        let moments = rounds[2].3.iter().find(|(k, _)| k == "X-Caprice-Moments").map(|(_, v)| v.clone());
-        assert_eq!(moments.as_deref(), Some("begun,written,finishing,carried,zoomed out"), "Claude sees it zoomed out too");
+        let moments = rounds[1].3.iter().find(|(k, _)| k == "X-Caprice-Moments").map(|(_, v)| v.clone());
+        assert_eq!(moments.as_deref(), Some("begun,written,finishing,zoomed out"), "Claude sees it zoomed out too");
         assert!(h.painted_at("Keep it").is_some() && painted_texts(&h).iter().all(|t| !t.contains("stop short")), "never the checks to the writer");
     }
 
@@ -8143,7 +8118,7 @@ mod tests {
     }
 
     #[test]
-    fn a_theme_that_slides_as_the_writer_zooms_goes_back_to_claude_unseen_by_the_writer() {
+    fn a_theme_that_slides_as_the_writer_zooms_is_told_claude_with_its_pictures_or_alone_without_them() {
         use platform::program::{Stand, stand_in};
         let sliding = wat::parse_str(r#"(module (memory (export "memory") 16 512)
             (func (export "cabi_realloc") (param i32 i32 i32 i32) (result i32) i32.const 600000)
@@ -8152,16 +8127,38 @@ mod tests {
             (func (export "cabi_post_frame") (param i32)))"#).unwrap();
         stand_in(&sliding, || Stand::Theme(Box::new(theme_sdk::Running::<GrassFromShown>::new())));
         platform::compiler::stand_in("// grass from shown", Ok(platform::compiler::Built::Module { module: sliding, toolchain: "the tests' stand-in".into(), ms: 1 }));
+        // Claude still to see its pictures: told with them, one round where there were two.
         let mut h = Harness::new();
         let server = make_with_claude(&mut h, "sliding", vec![written("// grass from shown", "Meadow"), written(FIREFLIES_SOURCE, "Jars")], "A meadow");
         until_made(&mut h);
         let rounds = server.0.borrow().theme_rounds.clone();
         let kinds: Vec<Option<&str>> = rounds.iter().map(|r| r.1.as_deref()).collect();
-        assert_eq!(kinds, [None, Some("checks"), Some("frames")]);
-        let said = String::from_utf8_lossy(&rounds[1].2).into_owned();
-        assert!(said.contains("slides as the writer zooms") && said.contains("never from where `shown` begins"), "{said}");
+        assert_eq!(kinds, [None, Some("frames")]);
+        let (body, pngs) = (&rounds[1].2, body_pictures(&rounds[1].2));
+        let said = String::from_utf8_lossy(&body[pngs..]).into_owned();
+        assert!(said.starts_with("It plays, but part of it slides as the writer zooms") && said.contains("never from where `shown` begins"), "{said}");
         assert!(!said.contains("stop short"), "only what is wrong: {said}");
         assert!(h.painted_at("Keep it").is_some() && painted_texts(&h).iter().all(|t| !t.contains("slides")), "never the checks to the writer");
+
+        // No look to come (the theme dear already): told alone, as a fix.
+        let mut dear = written("// grass from shown", "Meadow");
+        let mut answer: serde_json::Value = serde_json::from_slice(&dear.body).unwrap();
+        answer["left"]["frames"] = 0.into();
+        dear.body = answer.to_string().into_bytes();
+        let mut h = Harness::new();
+        let server = make_with_claude(&mut h, "sliding-dear", vec![dear, written(FIREFLIES_SOURCE, "Jars")], "A meadow");
+        until_made(&mut h);
+        let rounds = server.0.borrow().theme_rounds.clone();
+        let kinds: Vec<Option<&str>> = rounds.iter().map(|r| r.1.as_deref()).collect();
+        assert_eq!(kinds, [None, Some("checks")]);
+        assert!(String::from_utf8_lossy(&rounds[1].2).starts_with("It plays, but part of it slides as the writer zooms"));
+        assert!(h.painted_at("Keep it").is_some());
+    }
+
+    /// Where the words after a picture round's PNGs begin: a count, the lengths, the PNGs.
+    fn body_pictures(body: &[u8]) -> usize {
+        let count = body[0] as usize;
+        1 + 4 * count + (0..count).map(|k| u32::from_le_bytes(body[1 + 4 * k..5 + 4 * k].try_into().unwrap()) as usize).sum::<usize>()
     }
 
     #[test]

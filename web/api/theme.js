@@ -61,10 +61,12 @@ export async function body(request, most) {
 const words = (bytes) => new TextDecoder().decode(bytes).trim();
 
 // The pictures of a round, as the browser sends them: how many (a byte), each one's length (four
-// bytes, little-endian), then the PNGs. Each is checked to be a PNG of a sensible size, never
-// decoded; they go to Claude as they came, made base64 here (as JSON from the browser, parsing and
-// writing them again cost the Worker more than its 10 ms: the plan's step 0d).
-function pictures(bytes) {
+// bytes, little-endian), then the PNGs, then what Caprice's checks found of how it looks, in words
+// (at most `most` bytes; none for a version that passed them all). Each picture is checked to be a
+// PNG of a sensible size, never decoded; they go to Claude as they came, made base64 here (as JSON
+// from the browser, parsing and writing them again cost the Worker more than its 10 ms: the plan's
+// step 0d). The words go to Claude as a `checks` round's do, inside a sentence the Worker wrote.
+function pictures(bytes, most) {
   const count = bytes[0];
   if (!count || count > 6 || bytes.length < 1 + 4 * count) return null;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -81,7 +83,8 @@ function pictures(bytes) {
     out.push(png);
     at += length;
   }
-  return at === bytes.length ? out : null;
+  if (bytes.length - at > most) return null;
+  return { pngs: out, found: words(bytes.subarray(at)) };
 }
 
 // What the writer may have changed (a round's words) as Claude is told it.
@@ -92,7 +95,8 @@ const asked = {
   // story through, the budget of points): what it found, in its own words.
   checks: (said) => `It built, but Caprice's checks found:\n\n<checks>\n${said}\n</checks>\n\nFix it, and give the palette and the whole file again.`,
   change: (said) => `The writer asks for a change:\n\n<change>\n${said}\n</change>\n\nMake it, and give the palette and the whole file again.`,
-  frames: (moments, points) => `It built. Here it is as Caprice drew it, at these moments of a story: ${moments.join(", ")}. `
+  frames: (moments, points, found) => `It built. Here it is as Caprice drew it, at these moments of a story: ${moments.join(", ")}. `
+    + (found ? `Caprice's checks found, which you mend first:\n\n<checks>\n${found}\n</checks>\n\n` : "")
     + `At most ${points.phone} points a frame on a phone's desk, ${points.computer} on a computer's (zoomed out included). `
     + "Look at it as the writer will, beside their page for hours, and make it better. Is it as finished as the guide asks: "
     + "depth from far to near, light from one side, small parts on the things that grow with the story? Does it reach the "
@@ -114,11 +118,11 @@ export async function themeProgram(request, env, user, id) {
   // What is said this round: its words for Claude, and what of it is kept in the conversation.
   let content, kept;
   if (kind === "frames") {
-    const pngs = pictures(got.bytes);
+    const { pngs, found } = pictures(got.bytes, l.THEME_ERRORS_BYTES) ?? {};
     const moments = (request.headers.get("X-Caprice-Moments") ?? "").split(",").filter(m => /^[a-z ]{1,24}$/.test(m));
     const [phone, computer] = (request.headers.get("X-Caprice-Points") ?? "").split(",").map(Number);
     if (!pngs || moments.length !== pngs.length || !Number.isInteger(phone) || !Number.isInteger(computer)) return text(400, "Not pictures of a theme");
-    const said = asked.frames(moments, { phone, computer });
+    const said = asked.frames(moments, { phone, computer }, found);
     content = [...pngs.map(png => ({ type: "image", source: { type: "base64", media_type: "image/png", data: png.toBase64() } })), { type: "text", text: said }];
     kept = `[${pngs.length} pictures were shown here.] ${said}`;
   } else {
@@ -139,7 +143,7 @@ export async function themeProgram(request, env, user, id) {
     try {
       const messages = [...round.turns.map(t => ({ role: t.role, content: t.text })), { role: "user", content }];
       const rich = round.tier === "rich";
-      const effort = rich ? env.THEME_EFFORT_RICH || "medium" : env.THEME_EFFORT || "low";
+      const effort = rich ? env.THEME_EFFORT_RICH || "medium" : env.THEME_EFFORT || "medium";
       const written = await write(messages, env, rich ? l.THEME_TOKENS_RICH : l.THEME_TOKENS, rich ? l.THEME_BUDGET_RICH : l.THEME_BUDGET, effort);
       spent = written.spent ?? null;
       if (written.error) {
@@ -244,9 +248,9 @@ async function keptAlive(answer, beat) {
 // Claude's answer in one piece, not streamed, as a scene is (worker.js, `paint`): waiting costs the
 // Worker none of its 10 ms. Thinking is adaptive; the prompt is cached, and the conversation too.
 // `max_tokens` is a wall Claude cannot see: thinking that runs into it leaves no program, and the
-// round is paid for all the same. So a rich theme is also told its room (`task_budget`, `budget`),
-// which it sees counting down and finishes within, and `most` stays the most a round can cost. A
-// simple one (`budget` 0) is told none: it fits without, and a tight budget can cut its answer short.
+// round is paid for all the same. So it is also told its room (`task_budget`, `budget`), which it
+// sees counting down and finishes within, and `most` stays the most a round can cost. A `budget` of
+// 0 tells it none (a tight budget can cut an answer short).
 // For an hour, not the usual five minutes: a round takes seven or more, and the five are counted
 // from when it was asked, so the next round would always find the cache gone and write it again.
 // Writing it for an hour costs more once (twice the input's price instead of 1.25 times), and is

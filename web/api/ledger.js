@@ -43,19 +43,19 @@ const DEFAULTS = {
   THEME_REQUEST_BYTES: 2_000,
   THEME_ERRORS_BYTES: 20_000,
   THEME_FRAMES_BYTES: 4_000_000,
-  THEME_TOKENS: 64_000,
+  THEME_TOKENS: 128_000,
   // The room Claude is told it has in a round (a task budget, which it sees counting down, where
-  // THEME_TOKENS it never sees), 0 for none. A simple theme has none: at effort low it took at most
-  // 48,000 tokens without one (2026-11-20), and the first simple round told 52,000 came back with
-  // no program.
-  THEME_BUDGET: 0,
+  // THEME_TOKENS it never sees), 0 for none. At effort medium a first round took 56,000 to over
+  // 128,000 tokens (2026-11-20), so a simple theme is told 110,000 of its 128,000, the most Opus 5.5
+  // writes. (Told only 52,000 at effort low, a round came back with no program: a tight budget can
+  // cut an answer short.)
+  THEME_BUDGET: 110_000,
   // A rich theme (the writer's choice, suggested by `themeEstimate`): its rounds may be this long,
   // with this much room, and each counts as THEME_RICH_WEIGHT rounds, and the theme as as many themes.
+  // The app offers none for now (2026-11-20); an older app still may ask for one.
   THEME_TOKENS_RICH: 128_000,
   THEME_BUDGET_RICH: 110_000,
   THEME_RICH_WEIGHT: 2,
-  // A request is suggested as rich from this many parts counted in it (things, growth, events,
-  // motion: measured, those with 8 or more took 76,000 tokens or more at medium, 2026-11-20).
   THEME_RICH_FROM: 8,
   // How often a request may be weighed before it is made (by a small model, for next to nothing):
   // for one writer a day, and for everyone.
@@ -63,8 +63,8 @@ const DEFAULTS = {
   SITE_THEME_ESTIMATES_PER_DAY: 2_000,
   // A theme that has cost this much already, in millionths of a dollar, is shown to the writer as
   // it is, without the look at its pictures (a round as dear as writing it): one that needed a
-  // mistake put right, as rounds cost today.
-  THEME_LOOK_MICRO: 2_000_000,
+  // mistake put right, as rounds cost at effort medium.
+  THEME_LOOK_MICRO: 4_000_000,
   THEME_DAYS: 7,
   // The gallery of theme programs (gallery.js): what one theme file may hold, the themes one writer
   // may send in a day, how many may wait for the owner at once, the room all of them may take in
