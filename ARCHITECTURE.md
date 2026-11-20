@@ -2562,8 +2562,14 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   the next comes (`Shown::made_at`): it covers only the desk as it was then, so drawn at the zoom
   of the moment its sky stopped short of the window's edges while the writer zoomed out quickly
   (seen live, 2026-11-16, and never in the built-in themes, which draw in Caprice's own frame).
-  Zoomed in, it covers more than the window, and follows the view at once. Test:
-  `a_program_theme_zoomed_out_quickly_never_leaves_the_edges_of_the_window_bare`.
+  Zoomed in, it covers more than the window, and follows the view at once, **zoomed about the
+  ground it was asked with, put where the ground is now** (`made_at` keeps that point too): zooming
+  about the pointer moves the page's middle, and the ground under it, a long way each frame, and
+  drawn about the ground of the moment the world was that far off times the zoom (870 points at four
+  times), and shook as frames came (seen live with the gallery's Magic Castle, 2026-11-20). Zoomed
+  out, the held frame is still drawn about its own ground, so it covers the window. Tests:
+  `a_program_theme_zoomed_out_quickly_never_leaves_the_edges_of_the_window_bare`,
+  `a_program_theme_zoomed_in_about_the_pointer_stays_under_the_page_between_its_frames`.
 - **The Magic Snow and the Magic Vineyard draw the same as their ports, frame for frame**
   (`themes/snow/theme.rs` and `themes/vineyard/theme.rs`, built into `tests/fixtures/`): two
   `Harness`es given the same story, window and keys (`Twins`), one in the built-in theme, one in its

@@ -371,9 +371,10 @@ pub struct Shown {
     said: bool,
     /// The zoom its shapes are drawn at, and about where.
     zoom: egui::emath::TSTransform,
-    /// The zoom the frame on its way was asked at, and the one the newest frame was made for.
-    asked_at: Option<egui::emath::TSTransform>,
-    made_at: egui::emath::TSTransform,
+    /// The zoom the frame on its way was asked at, and the one the newest frame was made for, each
+    /// with the point it was zoomed about (the theme's ground under the page's middle).
+    asked_at: Option<(egui::emath::TSTransform, Pos2)>,
+    made_at: (egui::emath::TSTransform, Pos2),
     /// For tests: what it was drawn last frame, and everything it was told, in order.
     pub seen: Option<Seen>,
     #[cfg(test)]
@@ -463,7 +464,7 @@ impl App {
                 match read(&words) {
                     Ok(d) => {
                         (p.drawn, p.over, p.frames) = (d, 0, p.frames + 1);
-                        p.made_at = p.asked_at.take().unwrap_or(p.zoom);
+                        p.made_at = p.asked_at.take().unwrap_or((p.zoom, p.made_at.1));
                     }
                     Err(Unread::Over(points)) => {
                         p.over += 1;
@@ -537,13 +538,18 @@ impl App {
             #[cfg(test)]
             p.told.extend_from_slice(&p.events);
             p.events.clear();
-            p.asked_at = Some(now_at);
+            p.asked_at = Some((now_at, anchor));
         }
         // Its newest frame covers the desk as it was when asked: zoomed further out since, it would
         // leave the edges of the window bare until the next frame came (its sky ends where that
         // desk did), so it stays at the zoom it was made for until then. Zoomed in, it covers more
-        // than the window, and follows at once.
-        p.zoom = if now_at.scaling < p.made_at.scaling { p.made_at } else { now_at };
+        // than the window, and follows at once: about where its ground was when asked, put where
+        // the ground is now. Zooming about the pointer moves the page's middle, and with it the
+        // ground, a long way each frame; drawn about the ground of the moment instead, the world
+        // the frame laid out about the old one was off by that much times the zoom, and shook as
+        // frames came.
+        let (made, about) = p.made_at;
+        p.zoom = if now_at.scaling < made.scaling { made } else { egui::emath::TSTransform::new(anchor.to_vec2() - about.to_vec2() * z, z) };
         let zoom = p.zoom;
         let d = &p.drawn;
         p.seen = Some(Seen { id: id.to_owned(), desk: d.desk.len(), window: d.window.len(), over: d.over.len(), points: d.points, frames: p.frames, stopped: None, zoom: zoom.scaling, view: z });
