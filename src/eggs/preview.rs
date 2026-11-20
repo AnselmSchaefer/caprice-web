@@ -8,6 +8,8 @@
 //! on a computer's, zoomed out too. A theme drawn zoomed out as far as a writer zooms is pictured
 //! as well, with how much of the window's edges its own shapes cover there and at the fitting zoom:
 //! a sky stretched over the desk instead of what shows stops short of them (`Previewed::bare`).
+//! And one moment is drawn again a step out and a step in, to find what slides as the writer zooms:
+//! anything laid out from what shows rather than from the desk (`Previewed::slides`).
 //!
 //! The program runs where every program theme runs (`platform::Program`: a worker in the browser,
 //! played natively under the tests, nowhere on the desktop), so a preview is asked for and taken
@@ -36,6 +38,20 @@ const PAPER_SIZE: Vec2 = vec2(595.0, 842.0);
 const FPS: f64 = 10.0;
 /// How much of the window's edges a theme's shapes must cover to count as reaching them.
 const COVERED: f32 = 0.95;
+/// The zooms the steady moment is drawn at again: a step out and a step in. Each moves the edge of
+/// what shows by some units, and what is stepped along from that edge by a step that divides them
+/// comes back to the same places (at 0.9 the edge moved 80, and grass stepped by 4 or 5 was not seen
+/// to move; at 0.93 alone, grass stepped by 3 moved a fifth of a unit). Of these two, one or the other
+/// moves anything stepped by 1 to 40 units by a third of a unit or more (by a third of its step,
+/// below 2).
+const STEADY_ZOOMS: [f32; 2] = [0.93, 1.08];
+/// How many times larger than the window the two drawings of the steady moment are compared, so
+/// that what moves by a unit or two is seen; the outline of a fill drifting by less is not.
+const STEADY_SCALE: f32 = 2.0;
+/// How many of the compared pixels may move before a theme is said to slide. Caprice's own themes
+/// move none; the gallery's Magic Lighthouse moved 725 with its lighthouse on the right, where the
+/// grass on its cliff shuffled by a unit or so, and 1472 on the left, where it streamed along the top.
+const MOVED: usize = 32;
 
 /// The desk as Caprice lays it out for a window of `size` at the fitting zoom, the page bar along
 /// its foot (`App::page_rect`, `App::fitting_zoom`, `App::dock_rect`), and how big things are on it
@@ -73,13 +89,17 @@ struct Moment {
 
 /// The story a preview tells: begun; three chapters written (shown afresh, as when the theme is
 /// picked); the fourth begun, the third finishing; a title carried, if the theme carries titles;
-/// three chapters written, zoomed out as far as a writer zooms; then the same desk on a phone and
-/// on a computer, there zoomed out too, to count its points.
+/// three chapters written, zoomed out as far as a writer zooms; the same, held still, its last frame
+/// drawn again a step out and a step in (`STEADY_ZOOMS`) at the same moment; then the same desk on a phone
+/// and on a computer, there zoomed out too, to count its points.
 fn story() -> Vec<Moment> {
     let at = |from: f64, seconds: f64, size: Vec2, zoom: f32, carried: bool| -> Vec<Frame> {
         (0..=(seconds * FPS) as usize).map(|k| Frame { time: from + k as f64 / FPS, size, zoom, carried }).collect()
     };
     let written = vec![14, 10, 6];
+    let mut steady = at(37.0, 1.0, PICTURE, 1.0, false);
+    let last = steady[steady.len() - 1];
+    steady.extend(STEADY_ZOOMS.map(|zoom| Frame { zoom, ..last }));
     let finishing = vec![14, 10, 6, 1];
     vec![
         Moment { name: "begun", picture: true, garden: vec![1], events: vec![Event::Fresh], frames: at(0.0, 2.0, PICTURE, 1.0, false) },
@@ -90,6 +110,7 @@ fn story() -> Vec<Moment> {
         },
         Moment { name: "carried", picture: true, garden: finishing.clone(), events: vec![], frames: at(30.0, 1.5, PICTURE, 1.0, true) },
         Moment { name: "zoomed out", picture: true, garden: written.clone(), events: vec![Event::Fresh], frames: at(35.0, 1.0, PICTURE, ZOOMED_OUT, false) },
+        Moment { name: "steady", picture: false, garden: written.clone(), events: vec![Event::Fresh], frames: steady },
         Moment { name: "phone", picture: false, garden: written.clone(), events: vec![Event::Fresh], frames: at(40.0, 0.5, PHONE, 1.0, false) },
         Moment { name: "computer", picture: false, garden: written.clone(), events: vec![Event::Fresh], frames: at(50.0, 0.5, COMPUTER, 1.0, false) },
         Moment { name: "computer zoomed out", picture: false, garden: written, events: vec![Event::Fresh], frames: at(60.0, 0.5, COMPUTER, ZOOMED_OUT, false) },
@@ -117,6 +138,15 @@ pub struct Previewed {
     pub phone_points: usize,
     pub computer_points: usize,
     pub edges: (f32, f32),
+    pub slid: Slid,
+}
+
+/// What moved on the desk between the steady moment's drawings, the same moment at three zooms:
+/// how many of the pixels compared, and the rectangle around them, in points on the desk.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Slid {
+    pub pixels: usize,
+    pub around: Option<Rect>,
 }
 
 impl Previewed {
@@ -134,6 +164,27 @@ impl Previewed {
             the window's edges there, against {}% at the fitting zoom. Stretch every fill that must reach the edges (the \
             sky, the ground, the water, a field) over `Input::shown`, not `Input::area`; keep placing things from \
             `area`, the page and the ground.", percent(out), percent(fitted)))
+    }
+
+    /// What Claude is told when part of the theme slides as the writer zooms: drawn at the same
+    /// moment at two zooms, its shapes on the desk are not where they were. Something is laid out
+    /// from `Input::shown` (the gallery's Magic Lighthouse laid the grass on its cliff from the
+    /// window's edge, and it streamed along the clifftop while the writer zoomed). A fill stretched
+    /// over `shown` is left alone: it changes only gradually, which the comparison does not count.
+    pub fn slides(&self) -> Option<String> {
+        let around = self.slid.around.filter(|_| self.slid.pixels >= MOVED)?;
+        let (area, page, _, _) = layout(PICTURE);
+        Some(format!(
+            "It plays, but part of it slides as the writer zooms. Drawn at the same moment at the fitting zoom and \
+            a step out and in ({} and {}), the shapes between x {} and {} and y {} and {} on the desk (a desk \
+            {} by {}, the page from x {} to {}) are not where they were: something there is laid out from \
+            `Input::shown`, which changes with every step of the zoom. Use `shown` only to stretch fills to the \
+            window's edges. Lay everything else out from fixed points (`area`, the page, the ground, the things you \
+            placed), and that includes what lies along such a fill (grass on a ground, foam along a sea, posts along \
+            a shore) and the points a fill's outline is sampled at: step them from a fixed point (`x = start + k * step`), \
+            never from where `shown` begins.",
+            STEADY_ZOOMS[0], STEADY_ZOOMS[1], around.left().round(), around.right().round(), around.top().round(), around.bottom().round(),
+            area.width(), area.height(), page.left().round(), page.right().round()))
     }
 
     /// The gallery's picture of the theme: three chapters written, as wide as the gallery keeps them.
@@ -166,6 +217,9 @@ pub struct Preview {
     pictures: Vec<Picture>,
     points: (usize, usize),
     edges: (f32, f32),
+    /// The steady moment's first drawing, held to compare the others with, and what moved.
+    held: Option<Held>,
+    slid: Slid,
     done: Option<Result<Previewed, String>>,
 }
 
@@ -174,7 +228,8 @@ impl Preview {
     pub fn start(module: &[u8], palette: Palette, wake: Waker, now: f64) -> Preview {
         Preview {
             program: Program::load(module, wake, now), palette, story: story(), at: (0, 0), asked: false,
-            ground: 0.0, asks_lift: false, pictures: Vec::new(), points: (0, 0), edges: (0.0, 0.0), done: None,
+            ground: 0.0, asks_lift: false, pictures: Vec::new(), points: (0, 0), edges: (0.0, 0.0), held: None,
+            slid: Slid::default(), done: None,
         }
     }
 
@@ -195,8 +250,8 @@ impl Preview {
                 }
                 if !self.next() {
                     let (phone_points, computer_points) = self.points;
-                    let (pictures, edges) = (std::mem::take(&mut self.pictures), self.edges);
-                    self.done = Some(Ok(Previewed { pictures, phone_points, computer_points, edges }));
+                    let (pictures, edges, slid) = (std::mem::take(&mut self.pictures), self.edges, self.slid);
+                    self.done = Some(Ok(Previewed { pictures, phone_points, computer_points, edges, slid }));
                     break;
                 }
             }
@@ -252,6 +307,24 @@ impl Preview {
         self.asks_lift |= drawn.asked;
         let anchor = desk_of(frame, self.ground).4;
         self.ground = drawn.ground;
+        let again = STEADY_ZOOMS.len();
+        if moment.name == "steady" && f + again + 1 >= moment.frames.len() {
+            // The desk's shapes as the program lays them out, as at the fitting zoom, before Caprice
+            // zooms them: at the same moment, a theme that stays put draws the same each time, where
+            // both drawings show the desk (zoomed in, less of it).
+            if f + again + 1 == moment.frames.len() {
+                self.held = Some(Held { shapes: drawn.desk.clone(), drawn: Drawing::of(layout(frame.size).0, 1.0, &drawn.desk) });
+            } else if let Some(held) = &self.held {
+                let back = |p: Pos2| anchor + (p - anchor) / frame.zoom;
+                let shown = Rect::from_min_max(back(Pos2::ZERO), back(frame.size.to_pos2()));
+                let moved = slid(held, shown, &drawn.desk);
+                let around = match (self.slid.around, moved.around) {
+                    (Some(a), Some(b)) => Some(a.union(b)),
+                    (a, b) => a.or(b),
+                };
+                self.slid = Slid { pixels: self.slid.pixels + moved.pixels, around };
+            }
+        }
         if moment.picture && f + 1 == moment.frames.len() {
             // On the screen: the desk, the page and the bar where they lie at this zoom (the page
             // zoomed with the desk, about the theme's ground under its middle).
@@ -377,23 +450,187 @@ fn docks(area: Rect, bar: Rect, p: &Palette) -> Vec<Shape> {
 pub fn rasterize(size: Vec2, shapes: Vec<Shape>) -> ColorImage {
     let (w, h) = (size.x as usize, size.y as usize);
     let mut px = vec![[0f32; 4]; w * h];
+    paint(&mut px, w, h, shapes);
+    let pixels = px.iter().map(|c| Color32::from_rgba_premultiplied(c[0] as u8, c[1] as u8, c[2] as u8, c[3] as u8)).collect();
+    ColorImage::new([w, h], pixels)
+}
+
+/// `shapes` tessellated and filled into `px`, a picture `w` pixels wide and `h` high.
+fn paint<P: Blend>(px: &mut [P], w: usize, h: usize, shapes: impl IntoIterator<Item = Shape>) {
     let mut tess = epaint::Tessellator::new(1.0, epaint::TessellationOptions::default(), [1, 1], Vec::new());
     for shape in shapes {
         let mut mesh = epaint::Mesh::default();
         tess.tessellate_shape(shape, &mut mesh);
         for t in mesh.indices.as_chunks::<3>().0 {
             let v = t.map(|i| &mesh.vertices[i as usize]);
-            fill(&mut px, w, h, v);
+            fill(px, w, h, v);
         }
     }
-    let pixels = px.iter().map(|c| Color32::from_rgba_premultiplied(c[0] as u8, c[1] as u8, c[2] as u8, c[3] as u8)).collect();
-    ColorImage::new([w, h], pixels)
+}
+
+/// A pixel a colour is blended over, premultiplied: kept as numbers for the pictures, as bytes
+/// where only two drawings are compared, which then take a quarter of the room.
+trait Blend {
+    fn blend(&mut self, src: [f32; 4]);
+}
+
+impl Blend for [f32; 4] {
+    fn blend(&mut self, src: [f32; 4]) {
+        let keep = 1.0 - src[3] / 255.0;
+        for k in 0..4 {
+            self[k] = (src[k] + self[k] * keep).min(255.0);
+        }
+    }
+}
+
+impl Blend for [u8; 4] {
+    fn blend(&mut self, src: [f32; 4]) {
+        let keep = 1.0 - src[3] / 255.0;
+        for k in 0..4 {
+            self[k] = (src[k] + f32::from(self[k]) * keep).round().min(255.0) as u8;
+        }
+    }
+}
+
+/// The desk's shapes as a program laid them out, filled `scale` times their size over black:
+/// `region` of the desk, in bytes.
+struct Drawing {
+    region: Rect,
+    scale: f32,
+    w: usize,
+    h: usize,
+    px: Vec<[u8; 4]>,
+}
+
+impl Drawing {
+    fn of(region: Rect, scale: f32, shapes: &[Shape]) -> Drawing {
+        let (w, h) = ((region.width() * scale).round() as usize, (region.height() * scale).round() as usize);
+        let mut px = vec![[0u8; 4]; w * h];
+        let zoom = egui::emath::TSTransform::new(-region.min.to_vec2() * scale, scale);
+        paint(&mut px, w, h, shapes.iter().cloned().map(|mut s| {
+            s.transform(zoom);
+            s
+        }));
+        Drawing { region, scale, w, h, px }
+    }
+
+    /// The part of it within `r`, on its whole pixels; none if that is not two pixels each way.
+    fn within(&self, r: Rect) -> Option<Drawing> {
+        let at = |v: f32, lo: f32, n: usize, round: fn(f32) -> f32| (round((v - lo) * self.scale).max(0.0) as usize).min(n);
+        let o = self.region;
+        let (x0, y0) = (at(r.left(), o.left(), self.w, f32::ceil), at(r.top(), o.top(), self.h, f32::ceil));
+        let (x1, y1) = (at(r.right(), o.left(), self.w, f32::floor), at(r.bottom(), o.top(), self.h, f32::floor));
+        if x1 < x0 + 2 || y1 < y0 + 2 {
+            return None;
+        }
+        let (w, h) = (x1 - x0, y1 - y0);
+        let region = Rect::from_min_size(o.min + vec2(x0 as f32, y0 as f32) / self.scale, vec2(w as f32, h as f32) / self.scale);
+        let px = (y0..y1).flat_map(|y| self.px[y * self.w + x0..y * self.w + x1].iter().copied()).collect();
+        Some(Drawing { region, scale: self.scale, w, h, px })
+    }
+}
+
+/// The steady moment's first drawing: its shapes, and the desk filled at its own size.
+struct Held {
+    shapes: Vec<Shape>,
+    drawn: Drawing,
+}
+
+/// What moved between two drawings of the desk at the same moment, `before` (drawn already) and
+/// `after`, each laid out as at the fitting zoom, compared where both show (`shown`, what `after`
+/// showed). A fill stretched over what shows changes its colours gradually, which the difference
+/// less its average nearby takes away (`sharp`); first at the desk's own size, to find where
+/// anything differs sharply at all (in a theme that stays put, nowhere), then there alone at
+/// `STEADY_SCALE`, where an outline drifting by less than a pixel leaves each pixel among its
+/// neighbours' colours in the other drawing. What is left moved.
+fn slid(before: &Held, shown: Rect, after: &[Shape]) -> Slid {
+    const NEAR: f32 = 12.0;
+    const SLACK: i32 = 4;
+    // At the desk's own size, any sharp difference at all is looked at closely.
+    const FOUND: f32 = 6.0;
+    let Some(a) = before.drawn.within(shown) else { return Slid::default() };
+    let b = Drawing::of(a.region, 1.0, after);
+    let Some(found) = sharp(&a, &b, FOUND, None).1 else { return Slid::default() };
+    // A little around it, for the averages nearby and the neighbours.
+    let close = found.expand(8.0).intersect(a.region);
+    let (a, b) = (Drawing::of(close, STEADY_SCALE, &before.shapes), Drawing::of(close, STEADY_SCALE, after));
+    let (pixels, around) = sharp(&a, &b, NEAR, Some(SLACK));
+    Slid { pixels, around }
+}
+
+/// The pixels of `b` (the same region as `a`, at the same size) far from `a`'s: their colour's
+/// difference farther than `near` from the average difference around them, and, given a `slack`, not
+/// among the colours of their neighbours in the other drawing, give or take it. How many, and the
+/// rectangle around them on the desk.
+fn sharp(a: &Drawing, b: &Drawing, near: f32, slack: Option<i32>) -> (usize, Option<Rect>) {
+    const BLOCK: usize = 16;
+    let (w, h, region, scale, (a, b)) = (a.w, a.h, a.region, a.scale, (&a.px, &b.px));
+    let diff = |i: usize| -> [i32; 3] { std::array::from_fn(|k| i32::from(a[i][k]) - i32::from(b[i][k])) };
+    // The average difference in each block of pixels, then between the blocks' middles at each pixel.
+    let (bw, bh) = (w.div_ceil(BLOCK), h.div_ceil(BLOCK));
+    let mut mean = vec![[0f32; 3]; bw * bh];
+    for (j, m) in mean.iter_mut().enumerate() {
+        let (bx, by) = (j % bw, j / bw);
+        let (xs, ys) = (bx * BLOCK..((bx + 1) * BLOCK).min(w), by * BLOCK..((by + 1) * BLOCK).min(h));
+        let n = (xs.len() * ys.len()) as f32;
+        for y in ys {
+            for x in xs.clone() {
+                let d = diff(y * w + x);
+                for k in 0..3 {
+                    m[k] += d[k] as f32 / n;
+                }
+            }
+        }
+    }
+    let around = |x: usize, y: usize| -> [f32; 3] {
+        let f = |p: usize, n: usize| ((p as f32 + 0.5) / BLOCK as f32 - 0.5).clamp(0.0, (n - 1) as f32);
+        let (fx, fy) = (f(x, bw), f(y, bh));
+        let (x0, y0) = (fx as usize, fy as usize);
+        let (x1, y1) = ((x0 + 1).min(bw - 1), (y0 + 1).min(bh - 1));
+        let (tx, ty) = (fx - x0 as f32, fy - y0 as f32);
+        std::array::from_fn(|k| {
+            let top = mean[y0 * bw + x0][k] * (1.0 - tx) + mean[y0 * bw + x1][k] * tx;
+            let low = mean[y1 * bw + x0][k] * (1.0 - tx) + mean[y1 * bw + x1][k] * tx;
+            top * (1.0 - ty) + low * ty
+        })
+    };
+    // Whether the pixel at `x`, `y` in `one` has a colour among those around it in `other`.
+    let among = |one: &[[u8; 4]], other: &[[u8; 4]], x: usize, y: usize, slack: i32| {
+        let c = one[y * w + x];
+        (0..3).all(|k| {
+            let (mut lo, mut hi) = (255, 0);
+            for yy in y.saturating_sub(1)..(y + 2).min(h) {
+                for xx in x.saturating_sub(1)..(x + 2).min(w) {
+                    let v = i32::from(other[yy * w + xx][k]);
+                    (lo, hi) = (lo.min(v), hi.max(v));
+                }
+            }
+            (lo - slack..=hi + slack).contains(&i32::from(c[k]))
+        })
+    };
+    let (mut moved, mut lo, mut hi) = (0usize, (usize::MAX, usize::MAX), (0, 0));
+    for y in 0..h {
+        for x in 0..w {
+            let i = y * w + x;
+            if a[i] == b[i] {
+                continue;
+            }
+            let (d, m) = (diff(i), around(x, y));
+            if (0..3).all(|k| (d[k] as f32 - m[k]).abs() <= near) || slack.is_some_and(|s| among(a, b, x, y, s) && among(b, a, x, y, s)) {
+                continue;
+            }
+            moved += 1;
+            (lo, hi) = ((lo.0.min(x), lo.1.min(y)), (hi.0.max(x + 1), hi.1.max(y + 1)));
+        }
+    }
+    let on_desk = |(x, y): (usize, usize)| region.min + vec2(x as f32, y as f32) / scale;
+    (moved, (moved > 0).then(|| Rect::from_min_max(on_desk(lo), on_desk(hi))))
 }
 
 /// One triangle, every pixel whose middle lies in it, its colour between its corners'. The middle is
 /// taken a hair off the pixel's centre, so a pixel on an edge two triangles share falls in just one
 /// of them, never in both (a see-through shape blended twice there) or neither.
-fn fill(px: &mut [[f32; 4]], w: usize, h: usize, v: [&epaint::Vertex; 3]) {
+fn fill<P: Blend>(px: &mut [P], w: usize, h: usize, v: [&epaint::Vertex; 3]) {
     let [a, b, c] = v.map(|v| (f64::from(v.pos.x), f64::from(v.pos.y)));
     let edge = |(ax, ay): (f64, f64), (bx, by): (f64, f64), (px, py): (f64, f64)| (bx - ax) * (py - ay) - (by - ay) * (px - ax);
     let area = edge(a, b, c);
@@ -414,11 +651,7 @@ fn fill(px: &mut [[f32; 4]], w: usize, h: usize, v: [&epaint::Vertex; 3]) {
             }
             let (wa, wb, wc) = (wa as f32, wb as f32, wc as f32);
             let src: [f32; 4] = std::array::from_fn(|k| colours[0][k] * wa + colours[1][k] * wb + colours[2][k] * wc);
-            let dst = &mut px[y * w + x];
-            let keep = 1.0 - src[3] / 255.0;
-            for k in 0..4 {
-                dst[k] = (src[k] + dst[k] * keep).min(255.0);
-            }
+            px[y * w + x].blend(src);
         }
     }
 }
@@ -485,6 +718,10 @@ mod tests {
         for (name, p) in [("snow", &snow), ("fireflies", &fireflies), ("vineyard", &vineyard)] {
             assert_eq!(p.bare(), None, "{name}: {:?}", p.edges);
         }
+        // And nothing of theirs slides as the writer zooms.
+        for (name, p) in [("snow", &snow), ("fireflies", &fireflies), ("vineyard", &vineyard)] {
+            assert_eq!(p.slid, Slid::default(), "{name}");
+        }
     }
 
     /// A sky from top to foot, stretched over `area` (the desk at the fitting zoom) or over
@@ -537,5 +774,61 @@ mod tests {
         let whole = previewed("sky-over-shown", &whole, palette);
         assert_eq!(whole.edges, (1.0, 1.0));
         assert_eq!(whole.bare(), None);
+    }
+
+    /// A sky stretched over what shows, its colours changing half way down it (so they change as the
+    /// writer zooms, gradually), a field along the foot, and grass on the field every four units:
+    /// from where `shown` begins (it streams sideways with the zoom), or stepped from a fixed point.
+    struct Field<const FROM_SHOWN: bool>;
+
+    impl<const FROM_SHOWN: bool> theme_sdk::Theme for Field<FROM_SHOWN> {
+        fn new() -> Self {
+            Field
+        }
+
+        fn frame(&mut self, input: &theme_sdk::Input, out: &mut theme_sdk::Out) {
+            use theme_sdk::{Color, pt};
+            let (s, u, foot) = (input.shown, input.unit, input.ground.y);
+            let mut sky = theme_sdk::Mesh::new();
+            for (y, c) in [(s.top(), Color::rgb(20, 20, 60)), ((s.top() + foot) / 2.0, Color::rgb(90, 70, 130)), (foot, Color::rgb(220, 150, 120))] {
+                sky.vertex(pt(s.left(), y), c);
+                sky.vertex(pt(s.right(), y), c);
+            }
+            for a in [0, 2] {
+                sky.triangle(a, a + 1, a + 3);
+                sky.triangle(a, a + 3, a + 2);
+            }
+            out.desk.mesh(sky);
+            let field = theme_sdk::Rect::from_min_max(pt(s.left(), foot), pt(s.right(), s.bottom().max(foot + 1.0)));
+            out.desk.solid(field.corners(), Color::rgb(40, 70, 40));
+            let step = 4.0 * u;
+            let mut x = if FROM_SHOWN { s.left() } else { input.area.left() - ((input.area.left() - s.left()) / step).ceil() * step };
+            while x < s.right() {
+                out.desk.line(pt(x, foot), pt(x + u, foot - 7.0 * u), 1.2 * u, Color::rgb(150, 220, 110));
+                x += step;
+            }
+        }
+    }
+
+    #[test]
+    fn a_theme_whose_grass_is_laid_from_what_shows_is_told_that_it_slides_as_the_writer_zooms() {
+        use crate::platform::program::{Stand, stand_in};
+        let (sliding, fixed) = (sky_module(15), sky_module(16));
+        stand_in(&sliding, || Stand::Theme(Box::new(theme_sdk::Running::<Field<true>>::new())));
+        stand_in(&fixed, || Stand::Theme(Box::new(theme_sdk::Running::<Field<false>>::new())));
+        let palette = crate::theme::Theme::Midnight.palette();
+        // Stepped from a fixed point, the grass stays where it is, and the sky's colours, moving
+        // gradually with the zoom, are not counted.
+        let fixed = previewed("grass-fixed", &fixed, palette);
+        assert_eq!(fixed.slid, Slid::default());
+        assert_eq!(fixed.slides(), None);
+        // From where what shows begins, every blade is somewhere else: along the field, the width
+        // of the window.
+        let sliding = previewed("grass-from-shown", &sliding, palette);
+        let around = sliding.slid.around.expect("it moved");
+        let ground = desk_of(Frame { time: 0.0, size: PICTURE, zoom: 1.0, carried: false }, 0.0).4.y;
+        assert!(around.width() > PICTURE.x * 0.9 && around.top() > ground - 10.0 && around.bottom() < ground + 2.0, "{around:?}");
+        let said = sliding.slides().expect("told it slides");
+        assert!(said.contains("slides as the writer zooms") && said.contains("`Input::shown`") && said.contains("grass on a ground"), "{said}");
     }
 }

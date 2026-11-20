@@ -47,7 +47,11 @@ and played by Caprice in a sandbox. It can only draw shapes; Caprice decides eve
   smaller zoomed in, and beside it when the page has moved. Use it only for fills that must reach
   the window's edges (a sky, a field, the sea) and for choosing where a new thing goes so it is
   seen (`Tended::place` keeps it there). Never place anything from it: it would slide and stay
-  the same size on the screen while the rest of the world grows around it.
+  the same size on the screen while the rest of the world grows around it. That includes what
+  lies along such a fill (grass on a ground, foam along a sea, posts along a shore) and the points
+  a fill's outline is sampled at: step them from a fixed point (`x = start + k * step`, the start
+  from `area`, the page or a thing you placed), never from where `shown` begins, or they stream
+  sideways with every step of the zoom.
 - What belongs to the window rather than the world (snow falling, rain) goes in `Out::window`,
   laid out on `Input::window` and never zoomed.
 - Size things by `Input::unit` (1 on a desk 900 points high), never by pixels: the same theme runs
@@ -127,7 +131,8 @@ It is built with Rust 1.99 (edition 2024): `rustc --crate-type cdylib --target
 wasm32-unknown-unknown -O` against the SDK. If it does not build, you are shown the compiler's
 messages and give the whole file again, fixed. If it builds but does not pass Caprice's checks
 (the module's load check, playing a story through without trapping or going silent, the points
-above, a sky and ground of its own that reach the window's edges zoomed out), you are told what
+above, a sky and ground of its own that reach the window's edges zoomed out, nothing on the desk
+moving when only the zoom changes), you are told what
 they found and do the same. If it builds and passes them, you are shown pictures of it at a few
 moments of a story (begun; three chapters written; a chapter finishing; a title carried, if it
 carries titles; three chapters written, zoomed out as far as a writer zooms) and its points on a phone's desk and a computer's, and asked to make it better.
