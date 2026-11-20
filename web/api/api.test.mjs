@@ -1412,6 +1412,22 @@ test("the owner takes a published theme out of the gallery: listed and read no m
   assert.equal((await send(ada, SNOW_FILE)).status, 202, "and it may be sent again");
 });
 
+test("a theme refused or taken out is listed to its writer for a while, then forgotten", async t => {
+  // GALLERY_TOLD_DAYS of 0: told and forgotten at once. The two tests above show it told with the 30 days.
+  const mf = await start(t, { ...GALLERY, GALLERY_TOLD_DAYS: "0" });
+  const ada = await writer(mf, "1", "Ada");
+  const owner = await writer(mf, "9", "Owner");
+  const mine = async () => (await (await ada("/api/gallery/mine")).json()).themes.map(m => m.state);
+  const first = (await (await send(ada, SNOW_FILE)).json()).id;
+  await owner(`/api/gallery/waiting/${first}`, { method: "POST", body: JSON.stringify({ publish: false, why: "Not yet" }) });
+  const second = (await (await send(ada, SNOW_FILE)).json()).id;
+  assert.deepEqual(await mine(), ["waiting"], "the refused one forgotten, the one waiting kept");
+  await owner(`/api/gallery/waiting/${second}`, { method: "POST", body: JSON.stringify({ publish: true, module: sha(SNOW["theme.wasm"]) }) });
+  assert.deepEqual(await mine(), ["public"], "one in the gallery is never forgotten");
+  await owner(`/api/gallery/${second}`, { method: "DELETE" });
+  assert.deepEqual(await mine(), [], "and one taken out goes like a refused one");
+});
+
 test("a writer sends a few themes a day, the queue is bounded, and without a key nothing is signed", async t => {
   const mf = await start(t, { ...GALLERY, USER_PUBLISHED_PER_DAY: "2", GALLERY_WAITING: "3", GALLERY_SIGNING_KEY: "" });
   const [ada, bo] = [await writer(mf, "1", "Ada"), await writer(mf, "2", "Bo")];

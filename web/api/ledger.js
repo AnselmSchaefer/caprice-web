@@ -53,6 +53,8 @@ const DEFAULTS = {
   GALLERY_WAITING: 30,
   GALLERY_BYTES: 1e9,
   GALLERY_LIST: 60,
+  // A theme refused or taken out is listed to its writer, with why, for this many days after.
+  GALLERY_TOLD_DAYS: 30,
   // How many days the scenes painted, by hashed id, are kept for /api/admin/scenes.
   SCENE_DAYS: 30,
   // A picture painted is kept until the app has it (a reload, another story opened meanwhile):
@@ -385,6 +387,7 @@ export class Ledger extends DurableObject {
     const l = this.limits;
     // One that never reached R2 gives its place back.
     this.sql.exec("DELETE FROM gallery WHERE state = 'sending' AND at <= ?", now - 10 * MINUTE);
+    this.galleryForget(now);
     const same = this.rows("SELECT state FROM gallery WHERE module = ? AND state NOT IN ('refused', 'removed')", t.module)[0];
     if (same) return { error: 409, message: same.state === "public" ? "This theme is in the gallery already" : "This theme is waiting for the gallery already" };
     if (this.count(now, `published|${user}`) >= l.USER_PUBLISHED_PER_DAY) {
@@ -422,10 +425,17 @@ export class Ledger extends DurableObject {
   }
 
   // What one writer has sent, and what became of it.
-  galleryMine(user) {
+  galleryMine(user, now = Date.now()) {
     if (!this.known(user)) return { error: 401, message: "Not signed in" };
+    this.galleryForget(now);
     const rows = this.rows("SELECT id, name, module, state, why, at FROM gallery WHERE user = ? AND state != 'sending' ORDER BY at DESC", user);
     return { ok: true, themes: rows };
+  }
+
+  // A theme refused or taken out has its files gone already; once its writer has had GALLERY_TOLD_DAYS
+  // to read what became of it, it is forgotten, so that "Sent by you" does not keep it for ever.
+  galleryForget(now) {
+    this.sql.exec("DELETE FROM gallery WHERE state IN ('refused', 'removed') AND decided <= ?", now - this.limits.GALLERY_TOLD_DAYS * DAY);
   }
 
   // The themes waiting for the owner, oldest first, with what the Worker found of each.
