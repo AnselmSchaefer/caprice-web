@@ -100,7 +100,8 @@ const asked = {
     + `At most ${points.phone} points a frame on a phone's desk, ${points.computer} on a computer's (zoomed out included). `
     + "Look at it as the writer will, beside their page for hours, and make it better. Is it as finished as the guide asks: "
     + "depth from far to near, light from one side, small parts on the things that grow with the story? Does it reach the "
-    + "window's edges zoomed out, with no frame of the plain desk around it? Mend what is wrong, unclear, ugly or too heavy "
+    + "window's edges zoomed out, with no frame of the plain desk around it? Is the world whole without the page, nothing in it "
+    + "ending where the page's edge lies? Mend what is wrong, unclear, ugly or too heavy "
     + "first, then make it lovelier, within the points. Give the palette and the whole file again.",
 };
 

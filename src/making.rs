@@ -711,16 +711,20 @@ fn took(secs: f64) -> String {
     if s < 60 { format!("{s} s") } else { format!("{} min {:02} s", s / 60, s % 60) }
 }
 
-/// A version's pictures: three chapters written, large, and the others beside it, small.
+/// A version's pictures: three chapters written, large, and the others under it, small, in one row
+/// as wide as the large one (five of them with the carrier's and the one without the page).
 fn pictures(ui: &mut egui::Ui, g: &Good) {
     let at = g.previewed.pictures.iter().position(|p| p.name == "written").unwrap_or(0);
     if let Some(t) = g.textures.get(at) {
         ui.add(egui::Image::new(t).fit_to_exact_size(vec2(480.0, 300.0)));
     }
+    let others = g.textures.len().saturating_sub(1).max(1) as f32;
+    let gap = ui.spacing().item_spacing.x;
+    let w = ((480.0 - gap * (others - 1.0)) / others).min(152.0);
     ui.horizontal(|ui| {
         for (k, t) in g.textures.iter().enumerate() {
             if k != at {
-                ui.add(egui::Image::new(t).fit_to_exact_size(vec2(152.0, 95.0)));
+                ui.add(egui::Image::new(t).fit_to_exact_size(vec2(w, w * 0.625)));
             }
         }
     });

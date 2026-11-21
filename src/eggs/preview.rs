@@ -9,7 +9,10 @@
 //! as well, with how much of the window's edges its own shapes cover there and at the fitting zoom:
 //! a sky stretched over the desk instead of what shows stops short of them (`Previewed::bare`).
 //! And one moment is drawn again a step out and a step in, to find what slides as the writer zooms:
-//! anything laid out from what shows rather than from the desk (`Previewed::slides`).
+//! anything laid out from what shows rather than from the desk (`Previewed::slides`). Last, the desk
+//! is pictured with no page on it, as the welcome shows it and as the writer sees it who drags the
+//! page aside: a world cut off where the page's edge lies is seen there (the Lighthouse's cliff ended
+//! in a straight edge under it), and never in the pictures with the page.
 //!
 //! The program runs where every program theme runs (`platform::Program`: a worker in the browser,
 //! played natively under the tests, nowhere on the desktop), so a preview is asked for and taken
@@ -34,6 +37,9 @@ pub const COMPUTER: Vec2 = vec2(1920.0, 1080.0);
 const ZOOMED_OUT: f32 = crate::view::LEAST;
 /// A4, in points, as a new story's pages are.
 const PAPER_SIZE: Vec2 = vec2(595.0, 842.0);
+/// The moment pictured with no page on the desk, nor the bars: the whole world, as the welcome shows
+/// it behind its cards and as a writer sees it who drags the page aside.
+pub const BARE: &str = "without the page";
 /// Frames a second the story is told at.
 const FPS: f64 = 10.0;
 /// How much of the window's edges a theme's shapes must cover to count as reaching them.
@@ -91,7 +97,8 @@ struct Moment {
 /// picked); the fourth begun, the third finishing; a title carried, if the theme carries titles;
 /// three chapters written, zoomed out as far as a writer zooms; the same, held still, its last frame
 /// drawn again a step out and a step in (`STEADY_ZOOMS`) at the same moment; then the same desk on a phone
-/// and on a computer, there zoomed out too, to count its points.
+/// and on a computer, there zoomed out too, to count its points; and last, three chapters written with
+/// no page on the desk (`BARE`).
 fn story() -> Vec<Moment> {
     let at = |from: f64, seconds: f64, size: Vec2, zoom: f32, carried: bool| -> Vec<Frame> {
         (0..=(seconds * FPS) as usize).map(|k| Frame { time: from + k as f64 / FPS, size, zoom, carried }).collect()
@@ -113,7 +120,8 @@ fn story() -> Vec<Moment> {
         Moment { name: "steady", picture: false, garden: written.clone(), events: vec![Event::Fresh], frames: steady },
         Moment { name: "phone", picture: false, garden: written.clone(), events: vec![Event::Fresh], frames: at(40.0, 0.5, PHONE, 1.0, false) },
         Moment { name: "computer", picture: false, garden: written.clone(), events: vec![Event::Fresh], frames: at(50.0, 0.5, COMPUTER, 1.0, false) },
-        Moment { name: "computer zoomed out", picture: false, garden: written, events: vec![Event::Fresh], frames: at(60.0, 0.5, COMPUTER, ZOOMED_OUT, false) },
+        Moment { name: "computer zoomed out", picture: false, garden: written.clone(), events: vec![Event::Fresh], frames: at(60.0, 0.5, COMPUTER, ZOOMED_OUT, false) },
+        Moment { name: BARE, picture: true, garden: written, events: vec![Event::Fresh], frames: at(70.0, 1.0, PICTURE, 1.0, false) },
     ]
 }
 
@@ -341,7 +349,10 @@ impl Preview {
             }
             let mut shapes = desk(area, &self.palette);
             shapes.extend(own);
-            shapes.extend(paper(zoom.mul_rect(page)));
+            let whole = moment.name == BARE;
+            if !whole {
+                shapes.extend(paper(zoom.mul_rect(page)));
+            }
             shapes.extend(drawn.over.iter().cloned().map(|mut s| {
                 s.transform(zoom);
                 s
@@ -350,7 +361,9 @@ impl Preview {
                 let title = carried(page, 0.0).title;
                 shapes.push(Shape::rect_filled(title.translate(drawn.offset * frame.zoom), 2.0, INK.gamma_multiply(0.8)));
             }
-            shapes.extend(docks(area, bar, &self.palette));
+            if !whole {
+                shapes.extend(docks(area, bar, &self.palette));
+            }
             self.pictures.push(Picture { name: moment.name, image: rasterize(frame.size, shapes) });
         }
         Ok(())
@@ -693,7 +706,7 @@ mod tests {
     fn a_theme_is_shown_its_story_and_pictured_as_the_desk_looks_with_the_page_on_it() {
         let snow = previewed("snow", include_bytes!("../../tests/fixtures/snow.wasm"), crate::theme::Theme::Snow.palette());
         let names: Vec<_> = snow.pictures.iter().map(|p| p.name).collect();
-        assert_eq!(names, ["begun", "written", "finishing", "zoomed out"], "no carrier: the Snow brings no titles");
+        assert_eq!(names, ["begun", "written", "finishing", "zoomed out", BARE], "no carrier: the Snow brings no titles");
         let written = &snow.pictures[1].image;
         assert_eq!(written.size, [1280, 800]);
         let (area, page, bar, _) = layout(PICTURE);
@@ -705,11 +718,15 @@ mod tests {
         assert!(sky.b() > sky.r() && sky.b() < 140, "the dusk: {sky:?}");
         let hill = at(written, pos2(40.0, area.bottom() - 120.0));
         assert!(hill.b() > 200 && hill.b() >= hill.r(), "the hillside: {hill:?}");
+        // And the same desk with no page on it, nor the bars: the hillside goes on where the page lay.
+        let bare = &snow.pictures[4].image;
+        assert_ne!(at(bare, page.center()), PAPER);
+        assert_ne!(at(bare, pos2(bar.left() + 30.0, bar.center().y)), crate::theme::Theme::Snow.palette().dock);
         // Its points, counted on a phone's desk and a computer's.
         assert!(snow.phone_points > 1000 && snow.computer_points > snow.phone_points, "{} {}", snow.phone_points, snow.computer_points);
         // The fireflies bring titles: the carrier's moment is pictured too.
         let fireflies = previewed("fireflies", include_bytes!("../../tests/fixtures/fireflies.wasm"), crate::theme::Theme::Midnight.palette());
-        assert_eq!(fireflies.pictures.iter().map(|p| p.name).collect::<Vec<_>>(), ["begun", "written", "finishing", "carried", "zoomed out"]);
+        assert_eq!(fireflies.pictures.iter().map(|p| p.name).collect::<Vec<_>>(), ["begun", "written", "finishing", "carried", "zoomed out", BARE]);
         // The Vineyard, the theme of the most points: within the limit everywhere.
         let vineyard = previewed("vineyard", include_bytes!("../../tests/fixtures/vineyard.wasm"), crate::theme::Theme::Vineyard.palette());
         assert!(vineyard.computer_points > vineyard.phone_points && vineyard.computer_points < super::super::program::MOST_POINTS);
@@ -774,6 +791,45 @@ mod tests {
         let whole = previewed("sky-over-shown", &whole, palette);
         assert_eq!(whole.edges, (1.0, 1.0));
         assert_eq!(whole.bare(), None);
+    }
+
+    /// A sky stretched over what shows, and a cliff from the page's right edge to the window's: a
+    /// world drawn only where it is seen beside the page, as the Lighthouse's cliff was.
+    struct Cliff;
+
+    impl theme_sdk::Theme for Cliff {
+        fn new() -> Self {
+            Cliff
+        }
+
+        fn frame(&mut self, input: &theme_sdk::Input, out: &mut theme_sdk::Out) {
+            out.desk.solid(input.shown.corners(), theme_sdk::Color::rgb(40, 30, 90));
+            let top = input.page.center().y - 20.0;
+            let cliff = theme_sdk::Rect::from_min_max(theme_sdk::pt(input.page.right(), top), theme_sdk::pt(input.shown.right(), input.shown.bottom()));
+            out.desk.solid(cliff.corners(), theme_sdk::Color::rgb(70, 60, 60));
+        }
+    }
+
+    #[test]
+    fn a_world_cut_off_under_the_page_is_pictured_without_the_page_where_the_cut_shows() {
+        use crate::platform::program::{Stand, stand_in};
+        let module = sky_module(17);
+        stand_in(&module, || Stand::Theme(Box::new(theme_sdk::Running::<Cliff>::new())));
+        let cliff = previewed("cliff", &module, crate::theme::Theme::Midnight.palette());
+        let picture = |name: &str| &cliff.pictures.iter().find(|p| p.name == name).unwrap_or_else(|| panic!("pictured {name}")).image;
+        let (_, page, _, _) = layout(PICTURE);
+        let (beside, under) = (pos2(page.right() + 40.0, page.center().y + 40.0), pos2(page.right() - 40.0, page.center().y + 40.0));
+        let rock = Color32::from_rgb(70, 60, 60);
+        // With the page on the desk, the cliff is seen only beside it, and nothing looks amiss.
+        let written = picture("written");
+        assert_eq!((at(written, beside), at(written, under)), (rock, PAPER));
+        // Without it, the sky shows where the cliff stops at the page's edge.
+        let bare = picture(BARE);
+        assert_eq!(at(bare, beside), rock);
+        assert_eq!(at(bare, under), Color32::from_rgb(40, 30, 90), "the cut in plain sight");
+        // It is the last picture, and the gallery's picture is still three chapters written.
+        assert_eq!(cliff.pictures.last().map(|p| p.name), Some(BARE));
+        assert_eq!(cliff.gallery_picture().map(|p| p.size), Some(shrunk(written, crate::bundle::PREVIEW_WIDTH).size));
     }
 
     /// A sky stretched over what shows, its colours changing half way down it (so they change as the

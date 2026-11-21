@@ -95,7 +95,7 @@ igloos of blocks each cut and shaded, the Vineyard's posts, leaves and bunches i
   under each ledge, a reflection in the water below.
 - **A little life, slowly:** smoke from a chimney, birds now and then, ripples, a flag stirring,
   stars twinkling. Calm still comes first.
-- **Detail where it shows.** Nothing behind the page is seen, and far off detail is lost: spend the
+- **Detail where it shows.** Little behind the page is seen, and far off detail is lost: spend the
   points on the near things beside the page, and keep the rest plain. Build texture as meshes (a
   mesh of many small pieces costs a point a corner, and egui smooths no edge of it), so it keeps
   within the points on a phone too.
@@ -103,6 +103,10 @@ igloos of blocks each cut and shaded, the Vineyard's posts, leaves and bunches i
   `Input::shown`, so that zoomed out the world reaches the window's edges with no frame of the
   desk's plain colours around it. The palette's `desk_top` and `desk` are the sky's top and the
   ground's colour at the foot, so the moment before the first frame looks the same.
+- **Whole behind the page.** The world is seen without the page too: behind the welcome's cards,
+  and when the writer drags the page aside. Plain there, but whole: a cliff, a shore, a forest or a
+  road goes on behind the page or ends as it would in the world (a slope, the water's edge), never
+  in a straight line where the page's edge lies.
 
 ## What you may not do
 
@@ -133,13 +137,14 @@ messages and give the whole file again, fixed. If it builds but does not pass Ca
 (the module's load check, playing a story through without trapping or going silent, the points
 above), you are told what they found and do the same. If it builds and passes them, you are shown
 pictures of it at a few moments of a story (begun; three chapters written; a chapter finishing; a title carried, if it
-carries titles; three chapters written, zoomed out as far as a writer zooms) and its points on a
-phone's desk and a computer's, and asked to make it better. With them you are told what Caprice
+carries titles; three chapters written, zoomed out as far as a writer zooms; three chapters written
+without the page or the bars, to see the world whole) and its points on a phone's desk and a computer's,
+and asked to make it better. With them you are told what Caprice
 found of how it looks zoomed (a sky and ground of its own that stop short of the window's edges
 zoomed out, anything on the desk moving when only the zoom changes), if anything: mend that first.
 
 So the first version is the world laid out right, drawn plainly: where each thing stands, what is
 in front of what, where things that move go (a boat stays on the water, clear of the rocks), what
-grows with each page and each chapter, a sky and ground to the window's edges, depth and light from
-one side. Keep its small parts and textures for when you have seen it: then mend what is wrong
+grows with each page and each chapter, a sky and ground to the window's edges, a world whole behind the
+page, depth and light from one side. Keep its small parts and textures for when you have seen it: then mend what is wrong
 first, and make it as finished as "How finished it should look" asks.

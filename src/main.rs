@@ -7920,6 +7920,10 @@ mod tests {
             assert!(points.len() == 2 && points[0] > 0 && points[1] > 0, "{points:?}");
         }
         assert!(h.painted_at("Fireflies at dusk").is_some() && h.painted_at("Keep it").is_some(), "shown to the writer");
+        // Six pictures, the carrier's and the one without the page among them: the five small ones
+        // in a row as wide as the large one, the window no wider for them.
+        let window = h.ctx.memory(|m| m.area_rect(egui::Id::new("theme_making"))).expect("the window");
+        assert!(window.width() <= 520.0, "{}", window.width());
         assert!(h.app.themes.own.entries.is_empty(), "nothing kept before the writer says");
         assert!(h.painted_at(making::FREE).is_some(), "free, said beside Keep it too");
         assert!(server.0.borrow().themes_kept.is_empty());
@@ -8094,7 +8098,7 @@ mod tests {
         let said = String::from_utf8_lossy(&rounds[1].2).into_owned();
         assert!(said.contains("stop short") && said.contains("`Input::shown`, not `Input::area`"), "{said}");
         let moments = rounds[1].3.iter().find(|(k, _)| k == "X-Caprice-Moments").map(|(_, v)| v.clone());
-        assert_eq!(moments.as_deref(), Some("begun,written,finishing,zoomed out"), "Claude sees it zoomed out too");
+        assert_eq!(moments.as_deref(), Some("begun,written,finishing,zoomed out,without the page"), "Claude sees it zoomed out, and whole");
         assert!(h.painted_at("Keep it").is_some() && painted_texts(&h).iter().all(|t| !t.contains("stop short")), "never the checks to the writer");
     }
 

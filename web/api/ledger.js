@@ -42,7 +42,9 @@ const DEFAULTS = {
   THEME_CHANGE_ROUNDS: 3,
   THEME_REQUEST_BYTES: 2_000,
   THEME_ERRORS_BYTES: 20_000,
-  THEME_FRAMES_BYTES: 4_000_000,
+  // Six pictures at most (the carrier's and the one without the page among them): the Magic
+  // Vineyard's five came to 4.1 MB.
+  THEME_FRAMES_BYTES: 6_000_000,
   THEME_TOKENS: 128_000,
   // The room Claude is told it has in a round (a task budget, which it sees counting down, where
   // THEME_TOKENS it never sees), 0 for none. At effort medium a first round took 56,000 to over
