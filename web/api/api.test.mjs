@@ -63,6 +63,9 @@ function providers(request) {
 // The files the theme prompt is made of (api/theme.js imports them as text, as wrangler bundles them).
 const PROMPT = ["theme-sdk/GUIDE.md", "theme-sdk/src/lib.rs", "theme-sdk/wit/theme.wit", "themes/fireflies/theme.rs", "themes/snow/theme.rs", "themes/vineyard/theme.rs"];
 
+// What the Worker logged in the test running now (`console.log` and `console.error`), line by line.
+let logged = [];
+
 // The rooms each test opened, each with the sockets of the devices that came in (`device`).
 const opened = new WeakMap();
 
@@ -86,7 +89,9 @@ async function start(t, vars = {}, down = false) {
       ...vars,
     },
     outboundService: providers,
+    handleStructuredLogs: ({ message }) => logged.push(message),
   }));
+  logged = [];
   opened.set(mf, new Map());
   t.after(async () => {
     try {
@@ -1039,6 +1044,28 @@ test("a theme is begun from the writer's words, and only its source and palette 
   assert.deepEqual(body.system.at(-1).cache_control, { type: "ephemeral", ttl: "1h" }, "and is cached for longer than a round takes");
   assert.deepEqual(body.cache_control, { type: "ephemeral", ttl: "1h" }, "the conversation too");
   assert.deepEqual(body.messages, [{ role: "user", content: "<request>\nA lighthouse on a cliff, a window lit for each page\n</request>\n\nWrite this theme. Answer as the guide says: the palette's json block, then the whole rust file." }]);
+});
+
+test("each round is logged with its kind and what caprice found, never the writer's words", async t => {
+  const mf = await start(t);
+  const api = await writer(mf, "1", "Ada");
+  claude.writes = THEME_REPLY;
+  const { theme } = await (await begin(api, "A secret garden only I know of")).json();
+  const compiler = "error[E0425]: cannot find value `x` in this scope\n --> /theme/theme.rs:3:5\n\nerror: aborting due to 1 previous error";
+  assert.equal((await round(api, theme, "errors", compiler)).status, 200);
+  const checks = "It plays, but zoomed out its own sky stops short\nof the window's edges.\n\nIt plays, but part of it slides as the writer zooms.";
+  assert.equal((await round(api, theme, "checks", checks)).status, 200);
+  const lines = logged.filter(l => l.startsWith("theme: ")).map(l => [l.split(" ", 2).join(" "), JSON.parse(l.slice(l.indexOf("{")))]);
+  const asked = lines.filter(([what]) => what === "theme: asked").map(([, l]) => l);
+  assert.deepEqual(asked, [
+    { theme, kind: "begin" },
+    { theme, kind: "errors", found: ["error[E0425]: cannot find value `x` in this scope"] },
+    { theme, kind: "checks", found: ["It plays, but zoomed out its own sky stops short of the window's edges.", "It plays, but part of it slides as the writer zooms."] },
+  ]);
+  const answered = lines.filter(([what]) => what === "theme: answered").map(([, l]) => l);
+  assert.deepEqual(answered.map(l => l.kind), ["begin", "errors", "checks"]);
+  assert.ok(answered.every(l => l.theme === theme && Number.isInteger(l.spent.micro) && !l.error), JSON.stringify(answered));
+  assert.ok(!logged.some(l => l.includes("secret garden")), "the writer's words are never logged");
 });
 
 test("the next round tells claude the compiler's words, with the whole conversation kept by the worker", async t => {

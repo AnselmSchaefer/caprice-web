@@ -105,6 +105,15 @@ const asked = {
     + "first, then make it lovelier, within the points. Give the palette and the whole file again.",
 };
 
+// The gist of what Caprice found, as a round's log line gives it: the compiler's errors, or the first
+// words of each thing the checks found, a few of each. None for the writer's own words.
+function gist(kind, said) {
+  if (!said || (kind !== "errors" && kind !== "checks" && kind !== "frames")) return [];
+  const parts = kind === "errors" ? said.split("\n").filter(line => /^error(\[|: )/.test(line) && !line.startsWith("error: aborting"))
+    : said.split(/\n\s*\n/);
+  return parts.map(p => p.trim().replace(/\s+/g, " ").slice(0, 160)).filter(Boolean).slice(0, 4);
+}
+
 // Making a theme: `id` none to begin one (the writer's request), else a round of `kind`.
 export async function themeProgram(request, env, user, id) {
   if (env.THEMES_OFF === "1") return text(503, "Making themes is switched off for now", { "Retry-After": "3600" });
@@ -117,9 +126,10 @@ export async function themeProgram(request, env, user, id) {
   if (got.error) return refused(got);
 
   // What is said this round: its words for Claude, and what of it is kept in the conversation.
-  let content, kept;
+  let content, kept, found;
   if (kind === "frames") {
-    const { pngs, found } = pictures(got.bytes, l.THEME_ERRORS_BYTES) ?? {};
+    let pngs;
+    ({ pngs, found } = pictures(got.bytes, l.THEME_ERRORS_BYTES) ?? {});
     const moments = (request.headers.get("X-Caprice-Moments") ?? "").split(",").filter(m => /^[a-z ]{1,24}$/.test(m));
     const [phone, computer] = (request.headers.get("X-Caprice-Points") ?? "").split(",").map(Number);
     if (!pngs || moments.length !== pngs.length || !Number.isInteger(phone) || !Number.isInteger(computer)) return text(400, "Not pictures of a theme");
@@ -129,6 +139,7 @@ export async function themeProgram(request, env, user, id) {
   } else {
     const said = words(got.bytes);
     if (!said) return text(400, "Nothing was said");
+    found = said;
     kept = asked[kind](said);
     content = kept;
   }
@@ -139,6 +150,11 @@ export async function themeProgram(request, env, user, id) {
   // The site's owner tries themes out without a day's limits (the Ledger's `themeRound`).
   const round = await ledger.themeRound(user, id ?? null, kind, undefined, tier, isOwner(env, user));
   if (!round.ok) return refused(round);
+  // Each round for Workers Logs and `wrangler tail`: the theme, its kind, and the gist of what
+  // Caprice found (the compiler's errors, the checks' first words), so that a theme's way there
+  // can be followed. Never the writer's words.
+  const gisted = gist(kind, found);
+  console.log("theme: asked", JSON.stringify({ theme: round.id, kind, ...(gisted.length ? { found: gisted } : {}) }));
   const answer = (async () => {
     let answered = null, spent = null, done;
     try {
@@ -157,6 +173,7 @@ export async function themeProgram(request, env, user, id) {
       console.error("theme: the round failed", String(e).slice(0, 200));
       done = { error: 502, message: "Something went wrong while the theme was written: try again" };
     }
+    console.log("theme: answered", JSON.stringify({ theme: round.id, kind, ...(done.error ? { error: done.error, message: done.message } : {}), spent }));
     const after = await ledger.themeAnswered(user, round.id, answered, spent);
     // A theme dear enough already is offered no look at its pictures (THEME_LOOK_MICRO): the app
     // shows it to the writer as it is.
@@ -286,10 +303,9 @@ async function write(messages, env, most, budget, effort) {
       : { error: 502, message: "The theme could not be begun just now: try again later" };
   }
   const message = await sent.json();
-  // What the round cost, kept in the Ledger with the theme (and for `wrangler tail`): whether the
+  // What the round cost, kept in the Ledger with the theme (and logged with the round): whether the
   // cache was read or written again.
   const spent = cost(message.usage ?? {});
-  console.log("theme: a round", JSON.stringify(spent));
   if (message.stop_reason === "refusal") return { error: 422, message: "This theme cannot be made: ask for something else", spent };
   const reply = (message.content ?? []).filter(b => b.type === "text").map(b => b.text).join("");
   const theme = read(reply);
