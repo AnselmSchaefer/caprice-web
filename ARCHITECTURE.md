@@ -102,7 +102,7 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `theme.rs` | The themes (`Theme`, `Palette`): colours and egui visuals around the page, the palette in use (`pal`), fading from one to the next, the choice kept in the data folder (a theme's name, or one of the writer's own by its id); the page's own `PAPER` and `INK` |
 | `eggs.rs` | What is hidden in the magic themes: in the Magic Garden a plant a chapter growing on the desk and a balloon flying in each new chapter title; in the Magic City a street of houses a chapter, a floor a page, and a dragon flying a new title in held in its feet; in the Magic Sea a ship a chapter, built in a yard a part a page and launched into the bay when the next chapter begins; in the Magic Forest (`eggs/forest.rs`) an old forest at night with a swarm of lanterns, a lantern a page, each chapter's swarm becoming a big lantern on a branch near the page; in the Magic Reef (`eggs/reef.rs`) a sunlit sea with a coral a chapter, a branch a page, spawning and taking in a shoal of fish when the next chapter begins, and an octopus swimming down from above with each new title; in the Magic Snow (`eggs/snow.rs`) a frozen lake at the foot of a snowy hillside and an igloo a chapter spread about the hillside, a brick a page cut out of the lake and floated onto it, the igloo finished and lit inside when the next chapter begins; in the Magic Vineyard (`eggs/vineyard.rs`) a vineyard on rolling hills on a golden afternoon, a stretch of vines a chapter, a bunch of grapes a page, the stretch before turning gold and red and dropping its leaves when the next chapter begins, and now and then a murmuration of starlings; the country it lies in is `eggs/country.rs`; and a theme of the writer's own (`eggs/own.rs`, R35): its picture covering the desk and moving, a piece a chapter, a stage a page, finished when the next chapter begins, its carrier bringing new titles; or one that is a program (`eggs/program.rs`, R36) |
 | `eggs/program.rs` | Themes that are programs (R36): the check on every load, the input and events written as the canonical ABI lays them out, the frame's words read into egui's shapes (at most 450 000 points), drawn on the desk zoomed about the theme's ground and in the window unzoomed; what the program is told; its carrier |
-| `eggs/preview.rs` | A theme program's pictures, made off screen (R36): played through a short story (begun, three chapters written, a chapter finishing, a title carried, zoomed out) on the desk laid out as at the fitting zoom, tessellated by egui and filled in triangle by triangle; its points counted on a phone's desk and a computer's; whether its own sky stops short of the window's edges zoomed out; whether anything on its desk slides as the writer zooms; the gallery's picture of a theme that came with none |
+| `eggs/preview.rs` | A theme program's pictures, made off screen (R36): played through a short story (begun, three chapters written, a chapter finishing, a title carried, zoomed out, and without the page) on the desk laid out as at the fitting zoom, tessellated by egui and filled in triangle by triangle; its points counted on a phone's desk and a computer's; whether its own sky stops short of the window's edges zoomed out; whether anything on its desk slides as the writer zooms; the gallery's picture of a theme that came with none |
 | `platform/compiler.rs` | Where a theme program is built from its source (R36): in the browser rustc and wasm-ld as WebAssembly in a worker of their own (`web/compiler/`), ended when dropped; on the desktop not yet; under `cargo test` a stand-in (the sources of `themes/` build to their fixtures, anything else to what a test says) |
 | `platform/program.rs` | Where a theme program runs (R36): in the browser a worker of its own (`web/theme-worker.js`), ended when it does not answer; on the desktop not at all; under `cargo test` none, each module standing for its theme's source played natively (`played`: the input read out of Caprice's bytes, the output made into the same words) or for what a test says (`stand_in`) |
 | `theme-sdk/` | What theme programs are written against (R36): the WIT world `caprice:theme@1.0.0`, its bindings made ahead of time with a runtime of its own, shapes (and Caprice's own soft lights, ovals and clean fills), colours, `Seeds`, `Tended`, easing, the `theme!` macro; no dependencies |
@@ -2884,9 +2884,17 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   shows by any step of 1 to 40 units moves under one of them (one zoom alone has steps it cannot
   see: at 0.9 grass stepped by 4 or 5 units came back to the same places). Rendering the same
   moment again relies on a theme drawing the same at the same time: one that animated by frames
-  rather than by time would be told it slides. **What Claude is asked for, how finished a theme should look, is in the guide**
+  rather than by time would be told it slides. **The last picture is the desk without the page**
+  (`preview::BARE`: three chapters written at the fitting zoom, no page and no bars), for a writer
+  sees the world whole behind the welcome's cards and when they drag the page aside, and every
+  other picture hides what lies under the page: the Lighthouse's cliff ended in a straight edge
+  where the page's lay, 2026-11-21, seen by no one but the writer. Nothing measures a cut; Claude
+  is shown it and asked (the guide's "Whole behind the page", `asked.frames`). The gallery's
+  picture stays the one with the page (`gallery_picture`). The pictures go in one request, at most
+  `THEME_FRAMES_BYTES`: a picture more is room more there (the Vineyard's five came to 4.1 MB).
+  **What Claude is asked for, how finished a theme should look, is in the guide**
   (`GUIDE.md`, "How finished it should look": depth, small parts on what grows, a little life,
-  detail where it shows, to the window's edges), and the look at the pictures asks for it again
+  detail where it shows, to the window's edges, whole behind the page), and the look at the pictures asks for it again
   (`theme.js`, `asked.frames`): a theme that needed a second session to be finished (the Castle's
   texture) should not, and a change to what the guide asks goes with the check that holds it, where
   there is one. A program theme
@@ -2898,6 +2906,7 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   (`CAPRICE_PREVIEW_OUT=dir` keeps the pictures to look at),
   `a_theme_whose_sky_stops_short_of_the_window_zoomed_out_is_told_so`,
   `a_theme_whose_grass_is_laid_from_what_shows_is_told_that_it_slides_as_the_writer_zooms`,
+  `a_world_cut_off_under_the_page_is_pictured_without_the_page_where_the_cut_shows`,
   `a_program_theme_kept_with_no_picture_is_given_one_made_from_its_program`; in the browser
   `smoke.mjs`, "kept, it is the very module the toolchain builds anywhere, with its source and a
   picture, and it plays".

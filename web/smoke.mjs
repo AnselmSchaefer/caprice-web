@@ -550,7 +550,7 @@ if (!compiler) {
     looked?.kind === "frames" && looked.path === "/api/theme-program/0123456789abcdef" && looked.body[0] >= 3 && rounds.length === 2, `${rounds.map(r => r.kind).join(", ")} in ${seconds} s, toolchain ${compiler.id}`);
   check("and the compiler is ended once there is nothing more to build", !compiling(), `${((Date.now() - t0) / 1000).toFixed(1)} s`);
   const before = new Set(await kept(maker));
-  await click(421, 635, maker);
+  await click(421, 612, maker);
   let built;
   const t1 = Date.now();
   while (!built && Date.now() - t1 < 15000) {
