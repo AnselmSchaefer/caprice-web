@@ -336,35 +336,7 @@ struct Yours<'a> {
 pub fn theme_tile(ui: &mut egui::Ui, name: &str, about: &str, c: crate::theme::Palette, picture: Option<egui::TextureId>, chosen: bool) -> bool {
     let (rect, resp) = ui.allocate_exact_size(vec2(150.0, 84.0), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
-    let p = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
-    p.rect_filled(rect, 6.0, c.desk);
-    if let Some(picture) = picture {
-        // The picture's middle, as the desk shows it, cut to the tile.
-        p.image(picture, rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
-    } else {
-        let glow = Rect::from_min_max(rect.min, pos2(rect.right(), rect.center().y));
-        p.rect_filled(glow, egui::CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 }, c.desk_top.gamma_multiply(0.7));
-    }
-    let dock = Rect::from_min_size(rect.min + vec2(14.0, 7.0), vec2(rect.width() - 28.0, 14.0));
-    p.rect_filled(dock, 5.0, c.dock);
-    p.rect_stroke(dock, 5.0, Stroke::new(1.0, c.dock_edge), egui::StrokeKind::Inside);
-    for (j, fill) in [c.btn, c.btn, c.accent, c.btn].into_iter().enumerate() {
-        let b = Rect::from_min_size(dock.min + vec2(4.0 + j as f32 * 13.0, 3.0), vec2(10.0, 8.0));
-        p.rect_filled(b, 2.0, fill);
-    }
-    let line = Rect::from_min_size(pos2(dock.right() - 34.0, dock.center().y - 1.0), vec2(28.0, 2.0));
-    p.rect_filled(line, 1.0, c.text_dim);
-    let page = Rect::from_min_size(pos2(rect.center().x - 22.0, dock.bottom() + 7.0), vec2(44.0, 52.0));
-    p.rect_filled(page, 1.0, crate::theme::PAPER);
-    for j in 0..6 {
-        let w = if j == 5 { 18.0 } else { 34.0 };
-        let y = page.top() + 7.0 + j as f32 * 6.0;
-        p.rect_filled(Rect::from_min_size(pos2(page.left() + 5.0, y), vec2(w, 1.5)), 0.0, Color32::from_gray(190));
-    }
-    if picture.is_none() {
-        p.circle_filled(pos2(page.right() + 12.0, page.bottom() - 6.0), 4.0, c.accent);
-        p.circle_filled(pos2(page.left() - 12.0, page.top() + 10.0), 2.5, c.caret);
-    }
+    paint_tile(&ui.painter().with_clip_rect(rect.intersect(ui.clip_rect())), rect, c, picture, egui::CornerRadius::same(6));
     if chosen {
         ui.painter().rect_stroke(rect.expand(1.5), 7.0, Stroke::new(2.0, pal().accent), egui::StrokeKind::Outside);
     } else if resp.hovered() {
@@ -372,6 +344,43 @@ pub fn theme_tile(ui: &mut egui::Ui, name: &str, about: &str, c: crate::theme::P
     }
     let resp = if about.is_empty() { resp } else { resp.on_hover_text(about) };
     resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+}
+
+/// A theme's tile drawn into `rect`, whatever its size (the menu's tiles are 150 points wide, the
+/// gallery's cards wider): its picture, rounded as `round` says, or else its desk, dock and page.
+pub fn paint_tile(p: &egui::Painter, rect: Rect, c: crate::theme::Palette, picture: Option<egui::TextureId>, round: egui::CornerRadius) {
+    let s = rect.width() / 150.0;
+    p.rect_filled(rect, round, c.desk);
+    if let Some(picture) = picture {
+        // The picture's middle, as the desk shows it, cut to the tile.
+        let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+        p.add(egui::epaint::RectShape::filled(rect, round, Color32::WHITE).with_texture(picture, uv));
+    } else {
+        let glow = Rect::from_min_max(rect.min, pos2(rect.right(), rect.center().y));
+        p.rect_filled(glow, egui::CornerRadius { sw: 0, se: 0, ..round }, c.desk_top.gamma_multiply(0.7));
+    }
+    let dock = Rect::from_min_size(rect.min + vec2(14.0, 7.0) * s, vec2(rect.width() - 28.0 * s, 14.0 * s));
+    p.rect_filled(dock, 5.0 * s, c.dock);
+    p.rect_stroke(dock, 5.0 * s, Stroke::new(1.0, c.dock_edge), egui::StrokeKind::Inside);
+    for (j, fill) in [c.btn, c.btn, c.accent, c.btn].into_iter().enumerate() {
+        let b = Rect::from_min_size(dock.min + vec2(4.0 + j as f32 * 13.0, 3.0) * s, vec2(10.0, 8.0) * s);
+        p.rect_filled(b, 2.0 * s, fill);
+    }
+    let line = Rect::from_min_size(pos2(dock.right() - 34.0 * s, dock.center().y - 1.0 * s), vec2(28.0, 2.0) * s);
+    p.rect_filled(line, 1.0 * s, c.text_dim);
+    // The page stands on the tile's floor, however high the tile is for its width.
+    let page_h = (rect.bottom() - dock.bottom() - 7.0 * s).min(52.0 * s);
+    let page = Rect::from_min_size(pos2(rect.center().x - 22.0 * s, dock.bottom() + 7.0 * s), vec2(44.0 * s, page_h));
+    p.rect_filled(page, 1.0 * s, crate::theme::PAPER);
+    for j in 0..6 {
+        let w = if j == 5 { 18.0 } else { 34.0 };
+        let y = page.top() + (7.0 + j as f32 * 6.0) * s;
+        p.rect_filled(Rect::from_min_size(pos2(page.left() + 5.0 * s, y), vec2(w, 1.5) * s), 0.0, Color32::from_gray(190));
+    }
+    if picture.is_none() {
+        p.circle_filled(pos2(page.right() + 12.0 * s, page.bottom() - 6.0 * s), 4.0 * s, c.accent);
+        p.circle_filled(pos2(page.left() - 12.0 * s, page.top() + 10.0 * s), 2.5 * s, c.caret);
+    }
 }
 
 /// How wide the themes' menu is: two tiles and the gap between them.

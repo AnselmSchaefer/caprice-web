@@ -2731,15 +2731,20 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   drawings apart, in that order; the themes' menu is two tiles wide whichever it shows
   (`THEMES_WIDE`: a menu never narrows again, so nothing in it may be wider). The Gallery window
   and the one that sends are no wider than the screen (`ui::window_width`, its themes one to three
-  to a row), and close with the story (`Gallery::close` in `leave`): they are not drawn over the
-  welcome page, and would wait there for the next story. Tests: `a_theme_made_with_claude_is_sent_built_again_by_the_owner_published_and_used_from_the_gallery`,
+  to a row, as cards: a theme's words on its card in two lines at most, and every part of a card
+  keeping its room, so the buttons of a row stand in line; a tile without a picture is
+  `ui::paint_tile`, the menu's drawing at any size). `smoke.mjs` clicks this window's tabs and
+  buttons where they are: a change to its layout moves them there too. Both windows close with the
+  story (`Gallery::close` in `leave`): they are not drawn over the welcome page,
+  and would wait there for the next story. Tests: `a_theme_made_with_claude_is_sent_built_again_by_the_owner_published_and_used_from_the_gallery`,
   `the_owner_refuses_a_theme_that_is_not_built_again_the_same_and_says_why`,
   `the_owner_takes_a_theme_down_from_the_gallery_once_asked_and_its_writer_is_told`,
   `only_the_owner_is_shown_the_themes_waiting_and_the_gallery_is_for_writers_signed_in`,
   `yours_shows_the_themes_from_the_gallery_those_made_with_claude_and_the_drawings_apart_and_sends_each_once`,
   `a_shelf_holding_a_theme_as_made_and_as_taken_from_the_gallery_keeps_the_gallery_s_alone`,
   `the_themes_menu_is_as_wide_as_its_two_tiles_whichever_themes_it_shows`,
-  `the_gallery_window_fits_a_phone_s_screen_and_goes_when_the_story_is_closed`; in the browser
+  `the_gallery_window_fits_a_phone_s_screen_and_goes_when_the_story_is_closed`,
+  `each_gallery_theme_shows_its_words_on_its_card_and_the_buttons_of_a_row_stand_in_line`; in the browser
   `smoke.mjs` sends the theme it made, checks the file the tab wrote with the Worker's own check
   (`web/api/theme-file.js`), and as the owner builds it again in the tab and publishes it: "a theme
   sent to the gallery passes the Worker's check, its module the one built", "the owner's tab builds
