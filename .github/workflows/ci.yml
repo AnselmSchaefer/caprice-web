@@ -61,7 +61,7 @@ jobs:
           n=$(echo "$out" | grep -oE 'generated [0-9]+ warnings?' | grep -oE '[0-9]+' | sort -n | tail -1)
           echo "clippy: ${n:-0} warnings, ${CLIPPY_WARNINGS_ALLOWED} allowed"
           [ "${n:-0}" -le "$CLIPPY_WARNINGS_ALLOWED" ] || { echo "$out"; exit 1; }
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: cargo-deny@0.20.2
       - name: Dependencies (vulnerabilities, licences, sources; deny.toml)
@@ -90,7 +90,7 @@ jobs:
         run: |
           cargo +"$NIGHTLY" fetch --locked
           cargo +"$NIGHTLY" fetch --locked --manifest-path "$(rustc +"$NIGHTLY" --print sysroot)/lib/rustlib/src/rust/library/Cargo.toml"
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: trunk@0.22.1,wasm-bindgen@0.2.130
       # The compiler theme programs are built with in the writer's tab (R36): the release of the
