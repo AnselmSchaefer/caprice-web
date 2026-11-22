@@ -75,7 +75,9 @@ pub fn check(module: &[u8]) -> Result<(), Vec<String>> {
                 }
             }
             Payload::ImportSection(r) => {
-                for import in r.into_iter().flatten() {
+                // One by one: the compact groups that wasmparser reads too are not WebAssembly 2.0,
+                // and the validator above has refused them already.
+                for import in r.into_imports().flatten() {
                     let wanted = IMPORTS.iter().find(|i| import.module == HOST && i.0 == import.name);
                     match (import.ty, wanted) {
                         (TypeRef::Func(t), Some((name, params, results))) => {
