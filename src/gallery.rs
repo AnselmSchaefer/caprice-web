@@ -572,10 +572,14 @@ impl App {
         let mut act = None;
         let g = &mut self.gallery;
         let shelf = &self.themes.own;
-        // Three themes to a row, or as many as a phone's screen has room for.
-        let wide = crate::ui::window_width(ctx, 500.0);
-        let gap = if wide < 500.0 { 8.0 } else { 12.0 };
+        // Three cards to a row, or two on a phone's screen.
+        let wide = crate::ui::window_width(ctx, 660.0);
+        let gap = if wide < 500.0 { 10.0 } else { 14.0 };
         let columns = (((wide + gap) / (150.0 + gap)).floor() as usize).clamp(1, 3);
+        // Room is left at the right for the scroll bar, which would otherwise lie over the last card.
+        let bar = ctx.global_style().spacing.scroll.allocated_width() + 2.0;
+        let card = ((wide - bar - gap * (columns - 1) as f32) / columns as f32).floor();
+        let high = (ctx.content_rect().height() * 0.62).clamp(240.0, 560.0);
         let id = egui::Id::new("theme_gallery_window");
         let mut closed = false;
         egui::Window::new("Gallery").id(id).open(&mut open).collapsible(false).resizable(false).default_width(wide)
@@ -583,103 +587,81 @@ impl App {
             closed = crate::ui::finger_close(ui, id);
             ui.set_max_width(wide);
             if !signed_in {
+                ui.add_space(6.0);
                 ui.label("Themes made in Caprice for writers using it, looked at by Caprice before they show here. The gallery is for writers signed in.");
-                if ui.button("Sign in\u{2026}").clicked() {
+                ui.add_space(8.0);
+                if ui.add(accent_button("Sign in\u{2026}")).clicked() {
                     act = Some(GalleryAct::SignIn);
                 }
+                ui.add_space(4.0);
                 return;
             }
             let before = g.tab;
-            ui.horizontal_wrapped(|ui| {
+            let listed = g.themes.len();
+            egui::Sides::new().show(ui, |ui| {
                 ui.selectable_value(&mut g.tab, Tab::New, "New");
                 ui.selectable_value(&mut g.tab, Tab::Mine, "Sent by you");
                 if owner {
                     ui.selectable_value(&mut g.tab, Tab::Waiting, format!("Waiting ({})", g.waiting.len()));
                 }
+            }, |ui| {
+                if before == Tab::New && listed > 0 {
+                    ui.label(egui::RichText::new(format!("{listed} theme{}", if listed == 1 { "" } else { "s" })).size(12.0).color(pal().text_dim));
+                }
             });
             if g.tab != before {
                 act = Some(GalleryAct::List);
             }
+            ui.add_space(2.0);
             ui.separator();
+            if g.tab == Tab::New {
+                ui.label(egui::RichText::new("Made by writers in Caprice, built again and looked at before they show here. \
+                    Taken, a theme is yours to keep.").size(12.0).color(pal().text_dim));
+                ui.add_space(4.0);
+            }
             if let Some(said) = &g.said {
-                ui.label(egui::RichText::new(said).color(pal().accent));
+                told(ui, said);
             }
             match g.tab {
                 Tab::New => {
                     if g.listing.is_some() && g.themes.is_empty() {
-                        ui.horizontal(|ui| {
-                            ui.spinner();
-                            ui.label("Looking in the gallery\u{2026}");
-                        });
+                        waiting_for(ui, "Looking in the gallery\u{2026}");
                     } else if g.themes.is_empty() {
-                        ui.label(egui::RichText::new("Nothing in the gallery yet. Have a theme made in Yours, and send it here.").color(pal().text_dim));
+                        nothing(ui, "Nothing in the gallery yet", "Have a theme made in Yours, and send it here.");
                     }
                     if g.taking.is_some() {
-                        ui.horizontal(|ui| {
-                            ui.spinner();
-                            ui.label("Taking the theme\u{2026}");
-                        });
+                        waiting_for(ui, "Taking the theme\u{2026}");
                     }
-                    egui::ScrollArea::vertical().max_height(460.0).show(ui, |ui| {
-                        egui::Grid::new("gallery_themes").num_columns(columns).spacing(vec2(gap, 8.0)).show(ui, |ui| {
+                    egui::ScrollArea::vertical().max_height(high).min_scrolled_height(high).auto_shrink([false, true]).show(ui, |ui| {
+                        egui::Grid::new("gallery_themes").num_columns(columns).spacing(vec2(gap, gap)).show(ui, |ui| {
                             for (k, t) in g.themes.iter().enumerate() {
-                                ui.vertical(|ui| {
-                                    ui.set_width(150.0);
-                                    ui.label(egui::RichText::new(&t.name).size(12.0).strong());
-                                    let palette = crate::own::with_colours(Theme::Midnight.palette(), &t.colours).0;
-                                    let on_shelf = shelf.signed(&t.signature).is_some();
-                                    if crate::ui::theme_tile(ui, &t.name, &t.about, palette, g.pictures.get(&t.id).map(|p| p.id()), false) {
-                                        act = Some(GalleryAct::Take(t.clone()));
-                                    }
-                                    // The button keeps its room; a long name is cut short before it, whole when pointed at.
-                                    egui::Sides::new().shrink_left().truncate().show(ui, |ui| {
-                                        ui.label(egui::RichText::new(format!("by {}", t.author)).size(11.0).color(pal().text_dim));
-                                    }, |ui| {
-                                        let word = if on_shelf { "On your shelf" } else { "Use" };
-                                        if ui.add_enabled(g.taking.is_none(), egui::Button::new(word).small()).clicked() {
-                                            act = Some(GalleryAct::Take(t.clone()));
-                                        }
-                                    });
-                                    // The owner may take it out again, once more asked: it goes for everyone.
-                                    if owner {
-                                        if g.down_asked.as_deref() == Some(t.id.as_str()) {
-                                            ui.label(egui::RichText::new("Out of the gallery for everyone?").size(11.0).color(pal().accent));
-                                            ui.horizontal(|ui| {
-                                                if ui.add_enabled(g.taking_down.is_none(), egui::Button::new("Take it down").small()).clicked() {
-                                                    act = Some(GalleryAct::TakeDown(t.clone()));
-                                                }
-                                                if ui.add(egui::Button::new("Keep it").small()).clicked() {
-                                                    act = Some(GalleryAct::Ask(None));
-                                                }
-                                            });
-                                        } else if ui.add_enabled(g.taking_down.is_none(), egui::Button::new(egui::RichText::new("Take down\u{2026}").size(11.0).color(pal().text_dim)).small().frame(false)).clicked() {
-                                            act = Some(GalleryAct::Ask(Some(t.id.clone())));
-                                        }
-                                    }
-                                });
+                                let shown = Shown {
+                                    picture: g.pictures.get(&t.id).map(|p| p.id()),
+                                    on_shelf: shelf.signed(&t.signature).is_some(),
+                                    may_take: g.taking.is_none(),
+                                    owner: owner.then_some((g.down_asked.as_deref() == Some(t.id.as_str()), g.taking_down.is_none())),
+                                };
+                                theme_card(ui, t, card, &shown, &mut act);
                                 if k % columns == columns - 1 {
                                     ui.end_row();
                                 }
                             }
                         });
+                        ui.add_space(4.0);
                     });
                 }
                 Tab::Mine => {
                     if g.mine.is_empty() {
-                        ui.label(egui::RichText::new("You have sent no theme. Send one from Yours: in the menu beside its name, \u{201c}Send to the gallery\u{2026}\u{201d}.").color(pal().text_dim));
+                        nothing(ui, "You have sent no theme", "Send one from Yours: in the menu beside its name, \u{201c}Send to the gallery\u{2026}\u{201d}.");
                     }
-                    for m in &g.mine {
-                        let state = match m.state.as_str() {
-                            "public" => "In the gallery".to_owned(),
-                            "refused" => format!("Not taken: {}", m.why),
-                            "removed" => "Taken out of the gallery".to_owned(),
-                            _ => "Waiting to be looked at".to_owned(),
-                        };
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label(egui::RichText::new(&m.name).strong());
-                            ui.label(egui::RichText::new(state).color(pal().text_dim));
-                        });
-                    }
+                    egui::ScrollArea::vertical().max_height(high).min_scrolled_height(high).auto_shrink([false, true]).show(ui, |ui| {
+                        for (k, m) in g.mine.iter().enumerate() {
+                            if k > 0 {
+                                ui.separator();
+                            }
+                            sent_row(ui, m);
+                        }
+                    });
                 }
                 Tab::Waiting => waiting_tab(ui, g, &mut act),
             }
@@ -760,6 +742,190 @@ enum GalleryAct {
     TakeDown(Listed),
 }
 
+/// What a card shows of a theme besides the theme itself: its picture, whether it is on the shelf
+/// already, whether one may be taken now, and for the owner whether they were asked to take it down
+/// and may.
+struct Shown {
+    picture: Option<egui::TextureId>,
+    on_shelf: bool,
+    may_take: bool,
+    owner: Option<(bool, bool)>,
+}
+
+/// How high a card's picture is for its width: as the shelf keeps them, 320 by 200.
+const PICTURE: f32 = 0.625;
+
+/// A theme in the gallery as a card `w` wide: its picture, its name, who made it, its words and
+/// colours, and the button that takes it. Every part keeps its room, a long name or few words
+/// alike, so the cards of a row are as high as each other and their buttons in line.
+fn theme_card(ui: &mut egui::Ui, t: &Listed, w: f32, shown: &Shown, act: &mut Option<GalleryAct>) {
+    let palette = crate::own::with_colours(Theme::Midnight.palette(), &t.colours).0;
+    let p = pal();
+    let fill = if p.light { p.field } else { p.btn };
+    let round = 10u8;
+    // A grid lays its cells out sideways: the card goes down.
+    let framed = ui.vertical(|ui| egui::Frame::new().fill(fill).stroke(egui::Stroke::new(1.0, p.dock_edge)).corner_radius(round).show(ui, |ui| {
+        ui.set_width(w - 2.0);
+        ui.spacing_mut().item_spacing.y = 2.0;
+        let inner = w - 2.0;
+        let (rect, picture) = ui.allocate_exact_size(vec2(inner, (inner * PICTURE).round()), egui::Sense::click());
+        picture.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &t.name));
+        let corners = egui::CornerRadius { nw: round - 1, ne: round - 1, sw: 0, se: 0 };
+        crate::ui::paint_tile(ui.painter(), rect, palette, shown.picture, corners);
+        if picture.hovered() && shown.may_take && !shown.on_shelf {
+            ui.painter().rect_filled(rect, corners, egui::Color32::from_white_alpha(14));
+        }
+        let picture = picture.on_hover_cursor(egui::CursorIcon::PointingHand);
+        if picture.clicked() && shown.may_take {
+            *act = Some(GalleryAct::Take(t.clone()));
+        }
+        egui::Frame::new().inner_margin(egui::Margin { left: 12, right: 12, top: 8, bottom: 10 }).show(ui, |ui| {
+            let text = inner - 24.0;
+            ui.set_width(text);
+            ui.add(egui::Label::new(egui::RichText::new(&t.name).size(14.0).strong()).truncate());
+            ui.add(egui::Label::new(egui::RichText::new(format!("by {}", t.author)).size(11.5).color(p.text_dim)).truncate());
+            ui.add_space(4.0);
+            about_lines(ui, &t.about, text);
+            ui.add_space(8.0);
+            take_row(ui, t, &palette, text, shown, act);
+            if let Some((asked, may)) = shown.owner {
+                take_down_row(ui, t, asked, may, act);
+            }
+        });
+    })).inner;
+    if framed.response.hovered() {
+        ui.painter().rect_stroke(framed.response.rect, round, egui::Stroke::new(1.0, p.text_dim), egui::StrokeKind::Inside);
+    }
+}
+
+/// A theme's words in two lines at most, cut short with an ellipsis and whole when pointed at. The
+/// two lines keep their room when the words are fewer, or none.
+fn about_lines(ui: &mut egui::Ui, about: &str, w: f32) {
+    let font = egui::FontId::proportional(12.0);
+    let row = ui.fonts_mut(|f| f.row_height(&font));
+    let mut job = egui::text::LayoutJob::single_section(about.to_owned(), egui::TextFormat::simple(font, pal().text));
+    job.wrap = egui::text::TextWrapping { max_width: w, max_rows: 2, break_anywhere: false, overflow_character: Some('\u{2026}') };
+    let galley = ui.fonts_mut(|f| f.layout_job(job));
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, row * 2.0), egui::Sense::hover());
+    let cut = galley.elided;
+    ui.painter().galley(rect.min, galley, pal().text);
+    if cut {
+        resp.on_hover_text(about);
+    }
+}
+
+/// The card's foot: the theme's colours, and "Use", or word that it is on the shelf already. The
+/// colours are left out where the card is too narrow for both.
+fn take_row(ui: &mut egui::Ui, t: &Listed, c: &crate::theme::Palette, w: f32, shown: &Shown, act: &mut Option<GalleryAct>) {
+    egui::Sides::new().height(28.0).show(ui, |ui| {
+        if w >= 150.0 {
+            swatches(ui, c);
+        }
+    }, |ui| {
+        if shown.on_shelf {
+            ui.label(egui::RichText::new("On your shelf").size(12.0).color(pal().text_dim));
+            tick(ui);
+        } else if ui.add_enabled(shown.may_take, accent_button("Use")).on_hover_text("Put it on your shelf, and use it").clicked() {
+            *act = Some(GalleryAct::Take(t.clone()));
+        }
+    });
+}
+
+/// The owner may take a theme out of the gallery again, once more asked: it goes for everyone.
+fn take_down_row(ui: &mut egui::Ui, t: &Listed, asked: bool, may: bool, act: &mut Option<GalleryAct>) {
+    ui.add_space(4.0);
+    if asked {
+        ui.label(egui::RichText::new("Out of the gallery for everyone?").size(11.0).color(pal().accent));
+        ui.horizontal(|ui| {
+            if ui.add_enabled(may, egui::Button::new("Take it down").small()).clicked() {
+                *act = Some(GalleryAct::TakeDown(t.clone()));
+            }
+            if ui.add(egui::Button::new("Keep it").small()).clicked() {
+                *act = Some(GalleryAct::Ask(None));
+            }
+        });
+    } else if ui.add_enabled(may, egui::Button::new(egui::RichText::new("Take down\u{2026}").size(11.0).color(pal().text_dim)).small().frame(false)).clicked() {
+        *act = Some(GalleryAct::Ask(Some(t.id.clone())));
+    }
+}
+
+/// A theme's colours as a row of dots: its desk, dock, accent and caret.
+fn swatches(ui: &mut egui::Ui, c: &crate::theme::Palette) {
+    let colours = [c.desk_top, c.dock, c.accent, c.caret];
+    let (rect, _) = ui.allocate_exact_size(vec2(colours.len() as f32 * 14.0, 12.0), egui::Sense::hover());
+    for (k, colour) in colours.into_iter().enumerate() {
+        let at = egui::pos2(rect.left() + 6.0 + k as f32 * 14.0, rect.center().y);
+        ui.painter().circle(at, 5.5, colour, egui::Stroke::new(1.0, pal().dock_edge));
+    }
+}
+
+/// A tick, drawn: the fonts may not have one.
+fn tick(ui: &mut egui::Ui) {
+    let (rect, _) = ui.allocate_exact_size(vec2(12.0, 12.0), egui::Sense::hover());
+    let s = egui::Stroke::new(1.6, pal().accent);
+    let (a, b, c) = (rect.left_center() + vec2(1.0, 0.5), rect.center_bottom() + vec2(-1.5, -2.5), rect.right_top() + vec2(-1.0, 2.5));
+    ui.painter().line_segment([a, b], s);
+    ui.painter().line_segment([b, c], s);
+}
+
+/// A button in the accent, for what a window is mostly for.
+fn accent_button(word: &str) -> egui::Button<'_> {
+    egui::Button::new(egui::RichText::new(word).color(pal().on_accent).strong()).fill(pal().accent).corner_radius(8).min_size(vec2(64.0, 28.0))
+}
+
+/// What came of something the writer did, set apart from the rest.
+fn told(ui: &mut egui::Ui, said: &str) {
+    egui::Frame::new().fill(pal().accent.gamma_multiply(0.14)).stroke(egui::Stroke::new(1.0, pal().accent.gamma_multiply(0.45)))
+        .corner_radius(8).inner_margin(egui::Margin::symmetric(10, 7)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.label(egui::RichText::new(said).color(pal().text));
+    });
+    ui.add_space(6.0);
+}
+
+/// Something on its way, in the middle with room around it.
+fn waiting_for(ui: &mut egui::Ui, what: &str) {
+    ui.add_space(14.0);
+    ui.vertical_centered(|ui| {
+        ui.spinner();
+        ui.label(egui::RichText::new(what).color(pal().text_dim));
+    });
+    ui.add_space(14.0);
+}
+
+/// An empty tab: what is not there, and what to do about it.
+fn nothing(ui: &mut egui::Ui, what: &str, then: &str) {
+    ui.add_space(24.0);
+    ui.vertical_centered(|ui| {
+        ui.label(egui::RichText::new(what).size(15.0).strong());
+        ui.add_space(2.0);
+        ui.label(egui::RichText::new(then).color(pal().text_dim));
+    });
+    ui.add_space(24.0);
+}
+
+/// A theme the writer sent, with what became of it in a coloured word, and why if it was not taken.
+fn sent_row(ui: &mut egui::Ui, m: &Mine) {
+    let (state, colour) = match m.state.as_str() {
+        "public" => ("In the gallery", pal().accent),
+        "refused" => ("Not taken", pal().text),
+        "removed" => ("Taken out of the gallery", pal().text_dim),
+        _ => ("Waiting to be looked at", pal().text_dim),
+    };
+    ui.add_space(2.0);
+    egui::Sides::new().height(24.0).shrink_left().truncate().show(ui, |ui| {
+        ui.label(egui::RichText::new(&m.name).strong());
+    }, |ui| {
+        egui::Frame::new().fill(colour.gamma_multiply(0.16)).corner_radius(10).inner_margin(egui::Margin::symmetric(8, 2)).show(ui, |ui| {
+            ui.label(egui::RichText::new(state).size(12.0).color(colour));
+        });
+    });
+    if m.state == "refused" && !m.why.is_empty() {
+        ui.label(egui::RichText::new(&m.why).size(12.0).color(pal().text_dim));
+    }
+    ui.add_space(2.0);
+}
+
 /// The owner's tab: the themes waiting, and the one being looked at.
 fn waiting_tab(ui: &mut egui::Ui, g: &mut Gallery, act: &mut Option<GalleryAct>) {
     if g.waiting.is_empty() && g.review.is_none() {
@@ -767,9 +933,11 @@ fn waiting_tab(ui: &mut egui::Ui, g: &mut Gallery, act: &mut Option<GalleryAct>)
     }
     for w in &g.waiting {
         let looking = g.review.as_ref().is_some_and(|r| r.theme.id == w.id);
-        ui.horizontal_wrapped(|ui| {
+        // The button at the row's end, where it is whatever the name.
+        egui::Sides::new().height(28.0).shrink_left().truncate().show(ui, |ui| {
             ui.label(egui::RichText::new(&w.name).strong());
             ui.label(egui::RichText::new(format!("by {}, {} KB, {}", w.author, w.size.div_ceil(1024), w.toolchain)).size(11.0).color(pal().text_dim));
+        }, |ui| {
             if !looking && ui.button("Look at it").clicked() {
                 *act = Some(GalleryAct::Review(w.clone()));
             }

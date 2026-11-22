@@ -3073,6 +3073,26 @@ mod tests {
 
     /// Where the button labelled `label`, or the field with that hint, is. A window titled the same
     /// is not it.
+    impl Harness {
+        /// A click on the button labelled `label` nearest under the text `near` painted last frame:
+        /// one of many alike, as the eye finds it (the order of the window's nodes says nothing of
+        /// where they are).
+        fn click_under(&mut self, label: &str, near: &str) {
+            self.ctx.enable_accesskit();
+            self.frames(1, vec![], Modifiers::NONE);
+            let from = self.painted_at(near).unwrap_or_else(|| panic!("no {near:?} painted"));
+            let nodes = self.access.as_ref().map_or(&[][..], |t| &t.nodes[..]);
+            let centre = |r: &egui::accesskit::Rect| egui::pos2(((r.x0 + r.x1) / 2.0) as f32, ((r.y0 + r.y1) / 2.0) as f32);
+            let at = nodes.iter().filter(|(_, n)| n.label() == Some(label) && n.role() == egui::accesskit::Role::Button)
+                .filter_map(|(_, n)| n.bounds()).map(|r| centre(&r)).filter(|c| c.y > from.y)
+                .min_by(|a, b| a.distance(from).total_cmp(&b.distance(from)))
+                .unwrap_or_else(|| panic!("no button {label:?} under {near:?}"));
+            self.press_at(at, true);
+            self.press_at(at, false);
+            self.frames(2, vec![], Modifiers::NONE);
+        }
+    }
+
     fn find_widget(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)], label: &str) -> Option<egui::accesskit::Rect> {
         use egui::accesskit::Role;
         let named = |n: &egui::accesskit::Node| {
@@ -7655,14 +7675,14 @@ mod tests {
         assert!(h.labels().contains("The Magic Castle") && h.labels().contains("Magic Lighthouse"), "{}", h.labels());
 
         // Asked once more, and thought better of: nothing goes.
-        h.click_widget("Take down\u{2026}");
+        h.click_under("Take down\u{2026}", "The Magic Castle");
         assert!(h.labels().contains("Out of the gallery for everyone?"), "{}", h.labels());
         h.click_widget("Keep it");
         assert!(!h.labels().contains("Out of the gallery for everyone?"));
         assert!(server.0.borrow().gallery.iter().all(|t| t.state == "public"), "nothing taken down");
 
         // Asked again, and taken down: the gallery shows it no more, and its writer reads why.
-        h.click_widget("Take down\u{2026}");
+        h.click_under("Take down\u{2026}", "The Magic Castle");
         h.click_widget("Take it down");
         h.frames_until("taken down", |a| !a.gallery.busy());
         h.frames(2, vec![], Modifiers::NONE);
@@ -7706,6 +7726,44 @@ mod tests {
         h.app.leave(&ctx, fileio::Leaving::Home);
         h.frames(3, vec![], Modifiers::NONE);
         assert!(h.app.start.open && !h.app.gallery.open, "closed with the story");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn each_gallery_theme_shows_its_words_on_its_card_and_the_buttons_of_a_row_stand_in_line() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "gallery-cards");
+        let server = online(&mut h, &dir, true);
+        let words = ["", "Hush, falling flakes, and a warm light",
+            "Snow falls on a frozen lake by the igloos, the lanterns glow, and far away the starlings turn over the hills at dusk"];
+        let public = |k: usize| {
+            let mut b = bundle::open(SNOW_FILE, "snow").unwrap().bundle;
+            b.manifest.name = format!("Snow {k}");
+            b.manifest.about = words[k].into();
+            cloud::stand_in::Sent { id: format!("00000000000000a{k}"), user: "bea".into(), file: bundle::write(&b).unwrap(), manifest: b.manifest,
+                module: b.module, source: String::new(), state: "public".into(), why: String::new(), signature: String::new() }
+        };
+        server.0.borrow_mut().gallery = (0..3).map(public).collect();
+        h.frames(12, vec![], Modifiers::NONE);
+        let ctx = h.ctx.clone();
+        h.app.open_gallery(&ctx);
+        h.frames_until("the gallery listed", |a| !a.gallery.busy());
+        h.frames(4, vec![], Modifiers::NONE);
+
+        // The words are on the card, not only under the pointer; long ones cut short in two lines.
+        let shown: Vec<_> = h.painted.iter().filter_map(|cs| match &cs.shape {
+            egui::Shape::Text(t) if words[1..].contains(&t.galley.job.text.as_str()) => Some((t.galley.job.text.clone(), t.galley.rows.len(), t.galley.elided)),
+            _ => None,
+        }).collect();
+        assert_eq!(shown.len(), 2, "{shown:?}");
+        assert!(shown.iter().all(|(_, rows, _)| *rows <= 2) && shown.iter().any(|(w, _, cut)| w == words[2] && *cut), "{shown:?}");
+        // Three cards in a row, and their buttons in line whatever their words.
+        let uses: Vec<_> = h.painted.iter().filter_map(|cs| match &cs.shape {
+            egui::Shape::Text(t) if t.galley.job.text == "Use" => Some(t.pos),
+            _ => None,
+        }).collect();
+        assert_eq!(uses.len(), 3, "{uses:?}");
+        assert!(uses.iter().all(|p| (p.y - uses[0].y).abs() < 0.5) && uses[0].x < uses[1].x - 100.0, "{uses:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

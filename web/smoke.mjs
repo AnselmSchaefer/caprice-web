@@ -596,7 +596,7 @@ if (!compiler) {
     shown.checked?.why ?? `${theme?.name}, ${theme?.toolchain}, module ${theme?.module.slice(0, 12)}`);
   await click(462, 550, maker);
   // Page → Theme → Gallery…, Waiting, Look at it.
-  for (const [x, y] of [[737, 38], [810, 113], [1113, 113], [590, 417], [812, 462]]) await click(x, y, maker);
+  for (const [x, y] of [[737, 38], [810, 113], [1113, 113], [510, 360], [930, 463]]) await click(x, y, maker);
   const t3 = Date.now();
   while (!compiling() && Date.now() - t3 < 60000) await maker.waitForTimeout(250);
   const rebuilt = compiling();
@@ -604,7 +604,7 @@ if (!compiler) {
   // Played through the preview's story, then Publish it, tried again until the button is there.
   while (!shown.decided && Date.now() - t3 < 240000) {
     await maker.waitForTimeout(2000);
-    if (!shown.decided) await click(428, 750, maker);
+    if (!shown.decided) await click(348, 750, maker);
   }
   await maker.screenshot({ path: `${out}/15-gallery-reviewed.png` });
   check("the owner's tab builds it again from its source, the same byte for byte, and publishes it",
@@ -620,10 +620,10 @@ if (!compiler) {
   // New, then the theme's Use: fetched, read, its signature checked.
   let fetched = 0;
   maker.on("request", q => { if (new URL(q.url()).pathname === `/api/gallery/${shown.id}/theme`) fetched++; });
-  await click(415, 417, maker);
+  await click(335, 405, maker);
   await maker.waitForTimeout(1000);
-  // The owner's "Take down…" under it makes the window taller, so Use is higher than a writer's.
-  await click(516, 530, maker);
+  // Its card's Use, above the owner's "Take down…".
+  await click(475, 596, maker);
   await maker.waitForTimeout(3000);
   await maker.screenshot({ path: `${out}/15-gallery-use-refused.png` });
   const shelfAfter = await maker.evaluate(() => new Promise(done => {
