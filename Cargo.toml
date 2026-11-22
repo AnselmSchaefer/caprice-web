@@ -23,7 +23,7 @@ ttf-parser = "0.25"
 zip = { version = "9.2.0", default-features = false, features = ["deflate"] }
 # Checking a theme program (R36): reading its sections, validating it against the fixed features,
 # a version fixed so the check is the same in every build. And the gallery's signatures over modules.
-wasmparser = { version = "=0.228.0", default-features = false, features = ["std", "validate", "features"] }
+wasmparser = { version = "=0.263.0", default-features = false, features = ["std", "validate", "features"] }
 ed25519-compact = { version = "2.6.0", default-features = false }
 sha2 = { version = "0.11.1", default-features = false }
 
