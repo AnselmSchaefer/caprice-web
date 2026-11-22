@@ -34,7 +34,7 @@ wat = "1.263.0"
 theme-sdk = { path = "theme-sdk", version = "1.0.0" }
 themes-played = { path = "themes/played", version = "0.0.0" }
 # Wraps the themes' modules into components, as `wasm-tools component new` does, to show they still can.
-wit-component = "0.262.0"
+wit-component = "0.263.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rfd = "0.18.0"
