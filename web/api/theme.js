@@ -87,6 +87,111 @@ function pictures(bytes, most) {
   return { pngs: out, found: words(bytes.subarray(at)) };
 }
 
+// The desk a hand-drawn sketch is laid out on (matching src/eggs/preview.rs `layout(PICTURE)`).
+const DESK_W = 1280, DESK_H = 800;
+const DESK_ZOOM = (DESK_H - 2 * 72 - 16) / 842;
+const DESK_PW = 595 * DESK_ZOOM, DESK_PH = 842 * DESK_ZOOM;
+const DESK_PAGE = { x: (DESK_W - DESK_PW) / 2, y: (DESK_H - DESK_PH) / 2, w: DESK_PW, h: DESK_PH };
+const DESK_BAR_Y = DESK_H - 14 - 48;
+const DESK_UNIT = Math.min(Math.max(DESK_H / 900, 0.6), 1.6);
+const SKETCH_INKS = ["black", "blue", "red", "green"];
+const SKETCH_PNG_BYTES = 1_400_000;
+const SKETCH_JSON_BYTES = 200_000;
+const MOST_SKETCH_STROKES = 500;
+const MOST_SKETCH_POINTS = 30_000;
+const MOST_STROKES_TEXT = 14_000;
+
+function simplified(pts, eps) {
+  if (pts.length < 3) return pts;
+  const keep = new Uint8Array(pts.length);
+  keep[0] = keep[pts.length - 1] = 1;
+  const spans = [[0, pts.length - 1]];
+  while (spans.length) {
+    const [a, b] = spans.pop();
+    const [ax, ay] = pts[a], dx = pts[b][0] - ax, dy = pts[b][1] - ay, len = Math.hypot(dx, dy);
+    let far = 0, at = -1;
+    for (let i = a + 1; i < b; i++) {
+      const [x, y] = pts[i];
+      const d = len > 0.5 ? Math.abs((x - ax) * dy - (y - ay) * dx) / len : Math.hypot(x - ax, y - ay);
+      if (d > far) [far, at] = [d, i];
+    }
+    if (far > eps) {
+      keep[at] = 1;
+      spans.push([a, at], [at, b]);
+    }
+  }
+  return pts.filter((_, i) => keep[i]);
+}
+
+function strokeList(strokes) {
+  const n = Math.round;
+  const ux = x => n((x - DESK_W / 2) / DESK_UNIT), uy = y => n((DESK_BAR_Y - y) / DESK_UNIT);
+  for (let eps = 2; ; eps *= 1.6) {
+    const said = strokes.map(s => `${s.ink} ${n(s.width / DESK_UNIT)}: ${simplified(s.pts, eps).map(p => `${ux(p[0])},${uy(p[1])}`).join(" ")}`).join("\n");
+    if (said.length <= MOST_STROKES_TEXT) return said;
+    if (eps > 40) return `${said.slice(0, MOST_STROKES_TEXT)}\n(and more: see the pictures)`;
+  }
+}
+
+// Validate a hand-drawn sketch sent to begin a theme: 1..5 PNGs (whole, then one per ink if >1 ink)
+// followed by JSON `{ words, strokes }`. Only validated ink names and numbers enter the prompt.
+function readSketch(bytes, l) {
+  const got = pictures(bytes, SKETCH_JSON_BYTES);
+  if (!got || got.pngs.length > 5 || got.pngs.some(p => p.length > SKETCH_PNG_BYTES)) return null;
+  let data;
+  try { data = JSON.parse(got.found); } catch { return null; }
+  if (!data || typeof data !== "object") return null;
+  const said = data.words === undefined ? "" : typeof data.words === "string" ? data.words.trim() : null;
+  if (said === null || new TextEncoder().encode(said).length > l.THEME_REQUEST_BYTES) return null;
+  if (!Array.isArray(data.strokes) || !data.strokes.length || data.strokes.length > MOST_SKETCH_STROKES) return null;
+  let total = 0;
+  const strokes = [];
+  for (const s of data.strokes) {
+    if (!s || !SKETCH_INKS.includes(s.ink) || typeof s.width !== "number" || !Number.isFinite(s.width) || s.width < 1 || s.width > 40) return null;
+    if (!Array.isArray(s.pts) || !s.pts.length || s.pts.length > 2000) return null;
+    total += s.pts.length;
+    if (total > MOST_SKETCH_POINTS) return null;
+    const pts = [];
+    for (const p of s.pts) {
+      if (!Array.isArray(p) || p.length < 2 || typeof p[0] !== "number" || typeof p[1] !== "number" || !Number.isFinite(p[0]) || !Number.isFinite(p[1])) return null;
+      pts.push([Math.min(DESK_W, Math.max(0, p[0])), Math.min(DESK_H, Math.max(0, p[1]))]);
+    }
+    strokes.push({ ink: s.ink, width: s.width, pts });
+  }
+  const used = SKETCH_INKS.filter(k => strokes.some(s => s.ink === k));
+  const expected = used.length > 1 ? 1 + used.length : 1;
+  if (got.pngs.length !== expected) return null;
+  return { pngs: got.pngs, words: said, strokes, used };
+}
+
+function sketchPrompt({ words: said, strokes, used }) {
+  const n = Math.round;
+  const ux = x => n((x - DESK_W / 2) / DESK_UNIT), uy = y => n((DESK_BAR_Y - y) / DESK_UNIT);
+  return [
+    `The writer drew the theme they want by hand. The first picture is the whole sketch, on a desk ${DESK_W} by ${DESK_H}; the faint border in it is the page and is no part of the drawing.`
+      + (used.length > 1 ? ` After it, the same sketch one ink at a time: ${used.join(", ")}.` : ""),
+    said ? `They say of it:\n\n<request>\n${said}\n</request>` : "They say nothing more of it: see for yourself what it shows.",
+    [
+      "**The inks say when a part moves, never what colour it is.** Give everything the colours the world asks for, and none the ink's because it was drawn in it: a wave in green is the sea's colour.",
+      "- **Black** is what is always there and stays still: the land, the sky's things, buildings, trees.",
+      "- **Blue** is what happens when a new page is written (`Event::Grown`, the garden's pages): it comes, grows, lights or moves then, and stays as it has become. Several alike are a page each, in the order they were drawn; go on in the same way for more pages than were drawn, and let a chapter's first page be the first of them.",
+      "- **Red** is what happens when a new chapter begins (`Event::Begun`, the garden's chapters): it comes, or does what it does, then. A thing in red is the thing a chapter; give the chapters after the ones drawn theirs in the same way, where there is room.",
+      "- **Green** is what moves all the time, whatever the story does: slowly and calmly, never resting the eye's whole attention.",
+      "A part of one thing in another ink moves as its ink says (a black house with a blue window is a house whose window lights with a page). A line in blue, red or green that shows a way rather than a thing (an arrow, a dotted line, a swirl beside something) is how the thing near it in that ink moves: follow it, and do not draw it.",
+    ].join("\n"),
+    [
+      "**Keep their composition.** What they drew on the left of the page stands on the left of it, as large beside the page as they drew it, as high above the ground, in front of what they drew it in front of. The picture is one desk: place things from the page's edges, the ground and the desk's, so it holds on others too, as the guide asks. "
+        + "Their strokes below are in units already, so nothing needs converting: each point is x from the page's middle (left of it is less than 0) and y up from the top of the page bar, and goes on any desk at\n\n"
+        + "```rust\nlet foot = input.bar.map_or(input.area.bottom(), |b| b.top());\nlet at = |x: f32, y: f32| pt(input.page.center().x + x * input.unit, foot - y * input.unit);\n```\n\n"
+        + `Place and size the things they drew by their numbers through that, and they land where they were drawn. In these numbers the page is x ${ux(DESK_PAGE.x)} to ${ux(DESK_PAGE.x + DESK_PAGE.w)} and y ${uy(DESK_PAGE.y + DESK_PAGE.h)} to ${uy(DESK_PAGE.y)}, and the sketch's desk x ${ux(0)} to ${ux(DESK_W)} and y ${uy(DESK_H)} to ${uy(0)}; below 0 is behind the page bar. Where a desk is narrower (a phone), bring things in as the guide asks. `,
+      "**What they drew inside the page's border** lies behind the page, seen when it is dragged aside and behind the welcome: draw it there, and never leave it out. Red drawn inside the border that reads as something coming to the page or carrying something over it is the carrier (`host::ask_lift`, `Out::over`).",
+      "**It is a sketch, not the drawing.** See what each thing is meant to be and draw that, finished as the guide asks; never their shaky lines. What they left out (a sky, a ground, the far distance, light) is yours to add, in keeping, and still. What the guide asks of every theme holds here too: if a chapter or a page has nothing drawn for it, find the smallest thing in the sketch that can show it.",
+    ].join("\n\n"),
+    `Their strokes, as drawn in order: ink, width, then points as x,y, all in units as said above.\n\n<strokes>\n${strokeList(strokes)}\n</strokes>`,
+    "Write this theme. Answer as the guide says: the palette's json block, then the whole rust file.",
+  ].join("\n\n");
+}
+
 // What the writer may have changed (a round's words) as Claude is told it.
 const asked = {
   begin: (said) => `<request>\n${said}\n</request>\n\nWrite this theme. Answer as the guide says: the palette's json block, then the whole rust file.`,
@@ -95,9 +200,10 @@ const asked = {
   // story through, the budget of points): what it found, in its own words.
   checks: (said) => `It built, but Caprice's checks found:\n\n<checks>\n${said}\n</checks>\n\nFix it, and give the palette and the whole file again.`,
   change: (said) => `The writer asks for a change:\n\n<change>\n${said}\n</change>\n\nMake it, and give the palette and the whole file again.`,
-  frames: (moments, points, found) => `It built. Here it is as Caprice drew it, at these moments of a story: ${moments.join(", ")}. `
+  frames: (moments, points, found, hasSketch = false) => `It built. Here it is as Caprice drew it, at these moments of a story: ${moments.join(", ")}. `
     + (found ? `Caprice's checks found, which you mend first:\n\n<checks>\n${found}\n</checks>\n\n` : "")
     + `At most ${points.phone} points a frame on a phone's desk, ${points.computer} on a computer's (zoomed out included). `
+    + (hasSketch ? "Hold it against the sketch: is every thing they drew there, where they drew it, moving when its ink says? Mend that first. " : "")
     + "Look at it as the writer will, beside their page for hours, and make it better. Is it as finished as the guide asks: "
     + "depth from far to near, light from one side, small parts on the things that grow with the story? Does it reach the "
     + "window's edges zoomed out, with no frame of the plain desk around it? Is the world whole without the page, nothing in it "
@@ -114,28 +220,36 @@ function gist(kind, said) {
   return parts.map(p => p.trim().replace(/\s+/g, " ").slice(0, 160)).filter(Boolean).slice(0, 4);
 }
 
-// Making a theme: `id` none to begin one (the writer's request), else a round of `kind`.
+// Making a theme: `id` none to begin one (the writer's request, or a hand-drawn sketch), else a
+// round of `kind`.
 export async function themeProgram(request, env, user, id) {
   if (env.THEMES_OFF === "1") return text(503, "Making themes is switched off for now", { "Retry-After": "3600" });
   if (!env.ANTHROPIC_API_KEY) return text(503, "Making themes is not set up", { "Retry-After": "3600" });
   const l = limits(env);
+  const isSketch = !id && request.headers.get("X-Caprice-Kind") === "sketch";
   const kind = id ? request.headers.get("X-Caprice-Kind") : "begin";
-  const most = { begin: l.THEME_REQUEST_BYTES, change: l.THEME_REQUEST_BYTES, errors: l.THEME_ERRORS_BYTES, checks: l.THEME_ERRORS_BYTES, frames: l.THEME_FRAMES_BYTES }[kind];
+  const most = isSketch
+    ? l.THEME_FRAMES_BYTES
+    : { begin: l.THEME_REQUEST_BYTES, change: l.THEME_REQUEST_BYTES, errors: l.THEME_ERRORS_BYTES, checks: l.THEME_ERRORS_BYTES, frames: l.THEME_FRAMES_BYTES }[kind];
   if (!most) return text(400, "Not a kind of round");
   const got = await body(request, most);
   if (got.error) return refused(got);
 
-  // What is said this round: its words for Claude, and what of it is kept in the conversation.
-  let content, kept, found;
-  if (kind === "frames") {
-    let pngs;
-    ({ pngs, found } = pictures(got.bytes, l.THEME_ERRORS_BYTES) ?? {});
+  // Validate before asking the Ledger so bad requests never count as a round.
+  let content, kept, found, sketchPngs = null, frameData = null;
+  if (isSketch) {
+    const parsed = readSketch(got.bytes, l);
+    if (!parsed) return text(400, "Not a sketch");
+    sketchPngs = parsed.pngs;
+    kept = sketchPrompt(parsed);
+    content = [...parsed.pngs.map(png => ({ type: "image", source: { type: "base64", media_type: "image/png", data: png.toBase64() } })), { type: "text", text: kept }];
+  } else if (kind === "frames") {
+    const parsed = pictures(got.bytes, l.THEME_ERRORS_BYTES);
     const moments = (request.headers.get("X-Caprice-Moments") ?? "").split(",").filter(m => /^[a-z ]{1,24}$/.test(m));
     const [phone, computer] = (request.headers.get("X-Caprice-Points") ?? "").split(",").map(Number);
-    if (!pngs || moments.length !== pngs.length || !Number.isInteger(phone) || !Number.isInteger(computer)) return text(400, "Not pictures of a theme");
-    const said = asked.frames(moments, { phone, computer }, found);
-    content = [...pngs.map(png => ({ type: "image", source: { type: "base64", media_type: "image/png", data: png.toBase64() } })), { type: "text", text: said }];
-    kept = `[${pngs.length} pictures were shown here.] ${said}`;
+    if (!parsed || moments.length !== parsed.pngs.length || !Number.isInteger(phone) || !Number.isInteger(computer)) return text(400, "Not pictures of a theme");
+    found = parsed.found;
+    frameData = { pngs: parsed.pngs, moments, points: { phone, computer } };
   } else {
     const said = words(got.bytes);
     if (!said) return text(400, "Nothing was said");
@@ -150,15 +264,31 @@ export async function themeProgram(request, env, user, id) {
   // The site's owner tries themes out without a day's limits (the Ledger's `themeRound`).
   const round = await ledger.themeRound(user, id ?? null, kind, undefined, tier, isOwner(env, user));
   if (!round.ok) return refused(round);
+  const hasSketch = Boolean(round.sketch?.length);
+  if (frameData) {
+    const said = asked.frames(frameData.moments, frameData.points, found, hasSketch);
+    content = [...frameData.pngs.map(png => ({ type: "image", source: { type: "base64", media_type: "image/png", data: png.toBase64() } })), { type: "text", text: said }];
+    kept = `[${frameData.pngs.length} pictures were shown here.] ${said}`;
+  }
   // Each round for Workers Logs and `wrangler tail`: the theme, its kind, and the gist of what
   // Caprice found (the compiler's errors, the checks' first words), so that a theme's way there
   // can be followed. Never the writer's words.
   const gisted = gist(kind, found);
-  console.log("theme: asked", JSON.stringify({ theme: round.id, kind, ...(gisted.length ? { found: gisted } : {}) }));
+  const loggedKind = isSketch ? "sketch" : kind;
+  console.log("theme: asked", JSON.stringify({ theme: round.id, kind: loggedKind, ...(gisted.length ? { found: gisted } : {}) }));
   const answer = (async () => {
     let answered = null, spent = null, done;
     try {
-      const messages = [...round.turns.map(t => ({ role: t.role, content: t.text })), { role: "user", content }];
+      const sketchImages = hasSketch
+        ? round.sketch.map(png => ({ type: "image", source: { type: "base64", media_type: "image/png", data: png.toBase64() } }))
+        : [];
+      const messages = [
+        ...round.turns.map((t, i) => ({
+          role: t.role,
+          content: i === 0 && sketchImages.length ? [...sketchImages, { type: "text", text: t.text }] : t.text,
+        })),
+        { role: "user", content },
+      ];
       const rich = round.tier === "rich";
       const effort = rich ? env.THEME_EFFORT_RICH || "medium" : env.THEME_EFFORT || "medium";
       const written = await write(messages, env, rich ? l.THEME_TOKENS_RICH : l.THEME_TOKENS, rich ? l.THEME_BUDGET_RICH : l.THEME_BUDGET, effort);
@@ -166,14 +296,14 @@ export async function themeProgram(request, env, user, id) {
       if (written.error) {
         done = written;
       } else {
-        answered = { asked: kept, answer: written.reply };
+        answered = { asked: kept, answer: written.reply, ...(sketchPngs ? { sketch: sketchPngs } : {}) };
         done = { theme: { theme: round.id, ...written.theme, left: round.left } };
       }
     } catch (e) {
       console.error("theme: the round failed", String(e).slice(0, 200));
       done = { error: 502, message: "Something went wrong while the theme was written: try again" };
     }
-    console.log("theme: answered", JSON.stringify({ theme: round.id, kind, ...(done.error ? { error: done.error, message: done.message } : {}), spent }));
+    console.log("theme: answered", JSON.stringify({ theme: round.id, kind: loggedKind, ...(done.error ? { error: done.error, message: done.message } : {}), spent }));
     const after = await ledger.themeAnswered(user, round.id, answered, spent);
     // A theme dear enough already is offered no look at its pictures (THEME_LOOK_MICRO): the app
     // shows it to the writer as it is.

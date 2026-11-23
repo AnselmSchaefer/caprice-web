@@ -147,6 +147,7 @@ export class Ledger extends DurableObject {
       CREATE TABLE IF NOT EXISTS theme_talks (id TEXT PRIMARY KEY, user TEXT, made INTEGER, errors INTEGER, frames INTEGER,
         changes INTEGER, busy INTEGER);
       CREATE TABLE IF NOT EXISTS theme_turns (id TEXT, n INTEGER, role TEXT, text TEXT, PRIMARY KEY (id, n));
+      CREATE TABLE IF NOT EXISTS theme_sketch (id TEXT, k INTEGER, png BLOB, PRIMARY KEY (id, k));
       CREATE TABLE IF NOT EXISTS theme_tiers (id TEXT PRIMARY KEY, tier TEXT);
       CREATE TABLE IF NOT EXISTS theme_costs (id TEXT PRIMARY KEY, user TEXT, begun INTEGER, rounds INTEGER, input INTEGER,
         written INTEGER, read INTEGER, output INTEGER, micro INTEGER, kept INTEGER);
@@ -341,6 +342,7 @@ export class Ledger extends DurableObject {
     const roundsMost = owner ? Infinity : l.USER_THEME_ROUNDS_PER_DAY;
     const old = this.rows("SELECT id FROM theme_talks WHERE made <= ?", now - l.THEME_DAYS * DAY);
     for (const o of old) this.sql.exec("DELETE FROM theme_turns WHERE id = ?", o.id);
+    for (const o of old) this.sql.exec("DELETE FROM theme_sketch WHERE id = ?", o.id);
     for (const o of old) this.sql.exec("DELETE FROM theme_tiers WHERE id = ?", o.id);
     this.sql.exec("DELETE FROM theme_talks WHERE made <= ?", now - l.THEME_DAYS * DAY);
     // A fix is a fix whichever kind: the compiler's errors, or what Caprice's checks found.
@@ -384,7 +386,8 @@ export class Ledger extends DurableObject {
     this.sql.exec("UPDATE theme_talks SET busy = ? WHERE id = ?", now + 15 * MINUTE, id);
     const talked = this.rows("SELECT * FROM theme_talks WHERE id = ?", id)[0];
     const left = { errors: most.errors - talked.errors, frames: most.frames - talked.frames, change: most.change - talked.changes };
-    return { ok: true, id, tier, turns: this.rows("SELECT role, text FROM theme_turns WHERE id = ? ORDER BY n", id), left };
+    const sketch = this.rows("SELECT png FROM theme_sketch WHERE id = ? ORDER BY k", id).map(r => new Uint8Array(r.png));
+    return { ok: true, id, tier, turns: this.rows("SELECT role, text FROM theme_turns WHERE id = ? ORDER BY n", id), sketch, left };
   }
 
   // A round done: what was asked and what Claude answered kept, whole, if it answered; the theme
@@ -402,6 +405,9 @@ export class Ledger extends DurableObject {
       const n = this.rows("SELECT COUNT(*) AS n FROM theme_turns WHERE id = ?", id)[0].n;
       this.sql.exec("INSERT INTO theme_turns VALUES (?, ?, 'user', ?)", id, n, answered.asked);
       this.sql.exec("INSERT INTO theme_turns VALUES (?, ?, 'assistant', ?)", id, n + 1, answered.answer);
+      if (answered.sketch?.length && n === 0) {
+        answered.sketch.forEach((png, k) => this.sql.exec("INSERT OR REPLACE INTO theme_sketch VALUES (?, ?, ?)", id, k, png));
+      }
     }
     this.sql.exec("UPDATE theme_talks SET busy = 0 WHERE id = ?", id);
     return { ok: true, look: this.themeSpent(id) < this.limits.THEME_LOOK_MICRO };
