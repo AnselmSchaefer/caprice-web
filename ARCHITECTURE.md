@@ -90,7 +90,8 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `motion.rs` | Scenes that move a little: the parts Claude marks by id (drift, wing, sway, smoke, flicker, shimmer), rendered apart from the still picture and moved every frame; and the kinds a theme of one's own may use besides (float, twinkle, pulse, wander, spin, and areas of snow, rain, fireflies, leaves, bubbles or embers that Caprice fills) |
 | `own.rs` | Themes of the writer's own (R35): one SVG drawing read into its desk, pieces and carrier (`Pack`), checked on import with the reasons in plain words (`check`), its palette taken from its picture (`palette_of`); the shelf of them in the data folder (`Shelf`); importing and exporting drawings (never a program), deleting, the template, the guide and the import's report (`Workshop`) |
 | `bundle.rs` | A theme that is a program as it travels (R36): a `.caprice-theme`, a zip of `manifest.json` (name, words, author, palette, the world, the toolchain), `theme.wasm`, `theme.rs` and `preview.png`; read and checked with the reasons in words (`open`; a file with a source and no module, or a source alone, `from_source`, to be built), written (`write`), the same bytes for the same parts; never a file a writer picks or saves |
-| `making.rs` | Making a theme with Claude (R36): the "Make a theme" window, its steps, time and lost connections told the writer without naming Claude; the request to `/api/theme-program`, the source built in the tab, checked and pictured, the compiler's words and a program that will not play sent back to Claude unseen, its pictures shown to Claude once, the last version that worked kept until the writer keeps it or asks for a change |
+| `making.rs` | Making a theme with Claude (R36): the "Make a theme" window (words, or on desktop `Held::Desk` a hand-drawn sketch via `sketch.rs`), its steps, time and lost connections told the writer without naming Claude; the request to `/api/theme-program`, the source built in the tab, checked and pictured, the compiler's words and a program that will not play sent back to Claude unseen, its pictures shown to Claude once, the last version that worked kept until the writer keeps it or asks for a change |
+| `sketch.rs` | Desktop-only hand-drawn theme sketch sheet (R36): 1280 by 800 desk matching `eggs::preview::PICTURE`, soft faded paintable page border, four semantic inks (black static, blue new page, red new chapter, green always moving), three sizes, bounding-box-accelerated eraser, undo/redo; committed strokes cached in one transparent GPU texture updated incrementally via `set_partial` so drawing has no lag |
 | `gallery.rs` | The gallery of theme programs (R33, R36): the Gallery window (New, Sent by you, and for the owner Waiting), each theme's picture, "Use" checking the gallery's signature before the shelf keeps it; sending a theme made with Claude; the owner's look, built again the same in the tab and played, and their decision |
 | `cast.rs` | The cast: people found by name in what is painted, their looks and model sheets in the scene's prompt; the Cast window and its example |
 | `start.rs` | The welcome page when Caprice opens without a file: kinds of new story (`Kind`), the stories last opened with what they hold, the sheet flying to the desk; the list of stories last opened, kept in the data folder |
@@ -2080,16 +2081,18 @@ ask Claude anything else** (`/api/theme-program`, `web/api/theme.js`, R36, the p
   the tests' Miniflare loads them from the checkout's root). So **a change to the SDK, its world
   or a ported theme changes the prompt too**: keep `GUIDE.md` true to it.
 - **A round is one of a few kinds, each capped in size and number**: begun (the writer's request,
-  `THEME_REQUEST_BYTES`), `errors` (the compiler's words, `THEME_ERRORS_BYTES`), `checks` (what
+  `THEME_REQUEST_BYTES`; or on desktop a hand-drawn sketch with `X-Caprice-Kind: sketch`, 1 to 5
+  PNGs plus validated JSON strokes and optional words `<= THEME_REQUEST_BYTES`, `THEME_FRAMES_BYTES`,
+  its prompt and unit coordinates written by the Worker), `errors` (the compiler's words, `THEME_ERRORS_BYTES`), `checks` (what
   Caprice's checks found of a program that built, in Caprice's words, as large; with `errors` at
   most `THEME_ERRORS_ROUNDS` a theme, a fix being a fix whichever kind), `frames` (the preview's PNGs as bytes, checked to be PNGs of a
   desk's size, never decoded, made base64 here, with their moments and points, and after them
   what Caprice's checks found of how it looks, in words, at most `THEME_ERRORS_BYTES`, put in the
   Worker's sentence as a `checks` round's are; `THEME_FRAMES_BYTES`, `THEME_FRAMES_ROUNDS`), `change` (the writer's words, `THEME_CHANGE_ROUNDS`). The writer's words
   are one field in a sentence the Worker wrote. Anything else is refused before Claude is asked.
-- **The conversation is the Ledger's** (`theme_talks`, `theme_turns`, `themeRound`,
-  `themeAnswered`): each answer kept whole, so the browser cannot write Claude's side; pictures kept
-  as words only; one round of a theme at a time; forgotten after `THEME_DAYS`. A theme is the
+- **The conversation is the Ledger's** (`theme_talks`, `theme_turns`, `theme_sketch`, `themeRound`,
+  `themeAnswered`): each answer kept whole, so the browser cannot write Claude's side; preview pictures kept
+  as words only, while a sketch's PNGs stay in `theme_sketch` so turn 0 stays identical across rounds (hitting the prompt cache and letting `frames` hold previews against the sketch); one round of a theme at a time; forgotten after `THEME_DAYS`. A theme is the
   writer's who began it: anyone else's round is 404.
 - **The Ledger counts every round before Claude is asked**: `SITE_THEME_ROUNDS_PER_DAY` for
   everyone, `USER_THEMES_PER_DAY` begun and `USER_THEME_ROUNDS_PER_DAY` for one writer. A round

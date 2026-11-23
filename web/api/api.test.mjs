@@ -1323,6 +1323,65 @@ test("the site's rounds for the day run out for everyone, and a round that fails
   assert.equal(claude.asked.length, 2);
 });
 
+const sketchBody = (pngs, data) => Buffer.concat([framed(pngs), Buffer.from(JSON.stringify(data))]);
+
+test("a theme begun from a sketch sends its pictures and strokes, keeps the sketch for later rounds, and holds previews against it", async t => {
+  const mf = await start(t);
+  const api = await writer(mf, "1", "Ada");
+  claude.writes = THEME_REPLY;
+  const pics = [png(1280, 800, 1), png(1280, 800, 2), png(1280, 800, 3)];
+  const data = {
+    words: "A secret lighthouse on a cliff",
+    strokes: [
+      { ink: "black", width: 7, pts: [[200, 600], [220, 400]] },
+      { ink: "blue", width: 3, pts: [[640, 500], [660, 500]] },
+    ],
+  };
+  const got = await api("/api/theme-program", { method: "POST", body: sketchBody(pics, data), headers: { "X-Caprice-Kind": "sketch" } });
+  assert.equal(got.status, 200);
+  const { theme } = await got.json();
+
+  // Round 1: whole + per-ink PNGs, ink rules, unit coordinates, and optional words.
+  const first = claude.asked[0].body.messages[0].content;
+  assert.equal(first.length, 4, "3 pictures + prompt text");
+  assert.deepEqual(first.slice(0, 3).map(c => c.source.data), pics.map(p => Buffer.from(p).toString("base64")));
+  assert.match(first[3].text, /one ink at a time: black, blue/);
+  assert.match(first[3].text, /<request>\nA secret lighthouse on a cliff\n<\/request>/);
+  assert.match(first[3].text, /<strokes>\nblack 8: -495,155 -472,380\nblue 3: 0,268 23,268\n<\/strokes>/);
+  assert.ok(!logged.some(l => l.includes("secret lighthouse")), "sketch words are never logged");
+
+  // Round 2 (frames): turn 0 keeps the exact sketch images (for cache hit & comparison),
+  // and the frames prompt asks Claude to hold the preview against the sketch.
+  const previews = [png(1280, 800, 4), png(1280, 800, 5)];
+  const looked = await round(api, theme, "frames", framed(previews), { "X-Caprice-Moments": "begun,written", "X-Caprice-Points": "3000,6000" });
+  assert.equal(looked.status, 200);
+  const second = claude.asked[1].body.messages;
+  assert.deepEqual(second[0].content, first, "turn 0 stays identical byte-for-byte for prompt cache hits");
+  assert.match(second[2].content[2].text, /Hold it against the sketch/);
+
+  // Round 3 (change): turn 0 still holds the sketch; preview pictures from round 2 became words.
+  assert.equal((await round(api, theme, "change", "More waves")).status, 200);
+  const third = claude.asked[2].body.messages;
+  assert.deepEqual(third[0].content, first);
+  assert.ok(typeof third[2].content === "string" && third[2].content.startsWith("[2 pictures were shown here.]"));
+});
+
+test("an invalid sketch is refused before claude is asked", async t => {
+  const mf = await start(t);
+  const api = await writer(mf, "1", "Ada");
+  claude.writes = THEME_REPLY;
+  const post = (pngs, data) => api("/api/theme-program", { method: "POST", body: sketchBody(pngs, data), headers: { "X-Caprice-Kind": "sketch" } });
+  const one = [png(1280, 800, 1)];
+  assert.equal((await post(one, { words: "", strokes: [] })).status, 400, "empty strokes");
+  assert.equal((await post(one, { words: "", strokes: [{ ink: "purple", width: 3, pts: [[10, 10]] }] })).status, 400, "unknown ink");
+  assert.equal((await post(one, { words: "", strokes: [{ ink: "black", width: 3, pts: [[10, 10]] }, { ink: "blue", width: 3, pts: [[20, 20]] }] })).status, 400, "2 inks need 3 pictures");
+  assert.equal((await post(one, { words: "x".repeat(2001), strokes: [{ ink: "black", width: 3, pts: [[10, 10]] }] })).status, 400, "words past cap");
+  // Cannot send sketch as a follow-up round on an existing theme.
+  const { theme } = await (await begin(api)).json();
+  assert.equal((await round(api, theme, "sketch", sketchBody(one, { words: "", strokes: [{ ink: "black", width: 3, pts: [[10, 10]] }] }))).status, 400);
+  assert.equal(claude.asked.length, 1, "only the valid text begin reached Claude");
+});
+
 test("without a key, or switched off, no theme is made", async t => {
   const off = await start(t, { THEMES_OFF: "1" });
   assert.equal((await begin(await writer(off, "1", "Ada"))).status, 503);

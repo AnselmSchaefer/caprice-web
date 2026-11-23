@@ -36,6 +36,7 @@ mod review;
 mod scratchpad;
 mod search;
 mod shelf;
+mod sketch;
 mod start;
 mod textbox;
 mod theme;
@@ -720,7 +721,7 @@ impl App {
             self.open_replace();
         }
 
-        if self.leaving.is_none() {
+        if self.leaving.is_none() && !self.making.is_sketching(self.holding) {
             self.process_input(&ctx);
             self.swipe_pages(&ctx, area);
         }
@@ -8357,6 +8358,95 @@ mod tests {
         until_made(&mut h);
         assert!(h.painted_at("This theme cannot be made: ask for something else.").is_some(), "{}", h.painted_texts());
         assert_eq!(names_claude(&h), None);
+    }
+
+    #[test]
+    fn a_sketch_option_is_offered_only_on_desktop_never_on_a_phone() {
+        // On a desktop screen, "Draw a sketch…" is offered beside "Make it" / "Sign in…".
+        let mut h = Harness::new();
+        h.frames(2, vec![], Modifiers::NONE);
+        h.app.make_theme();
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.painted_at("Draw a sketch\u{2026}").is_some(), "offered on desktop: {}", h.painted_texts());
+
+        // Switching to the sketch view shows the four inks and the canvas.
+        h.click_widget("Draw a sketch\u{2026}");
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.painted_at("Black").is_some() && h.painted_at("Blue").is_some() && h.painted_at("Red").is_some() && h.painted_at("Green").is_some());
+        assert!(h.painted_at("the pages lie here").is_some());
+
+        // On a phone held upright (narrow), the sketch option is hidden and it falls back to words.
+        h.width = 390.0;
+        h.height = 844.0;
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.painted_at("Draw a sketch\u{2026}").is_none(), "not offered on upright phone: {}", h.painted_texts());
+        assert!(h.painted_at("the pages lie here").is_none(), "sketch sheet hidden on narrow screen");
+
+        // On a phone held sideways (wide window, short physical screen), still hidden.
+        h.width = 844.0;
+        h.height = 390.0;
+        h.monitor = Some(egui::vec2(844.0, 390.0));
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.painted_at("Draw a sketch\u{2026}").is_none(), "not offered on sideways phone: {}", h.painted_texts());
+        assert!(h.painted_at("the pages lie here").is_none());
+    }
+
+    #[test]
+    fn a_theme_can_be_begun_from_a_hand_drawn_sketch_and_shortcuts_never_type_into_the_story() {
+        let mut h = Harness::new();
+        let dir = with_shelf(&mut h, "making-sketch");
+        let server = online(&mut h, &dir, true);
+        let answers = vec![written(FIREFLIES_SOURCE, "Sketched Jars"), written(FIREFLIES_SOURCE, "Sketched Jars")];
+        server.0.borrow_mut().theme_answers = answers.into();
+        h.frames(12, vec![], Modifiers::NONE);
+        assert!(h.app.cloud.who.is_some(), "signed in");
+        h.type_text("Chapter one.");
+        let before_story = h.text();
+
+        // Open "Make a theme" and switch to the sketch sheet.
+        h.app.make_theme();
+        h.frames(2, vec![], Modifiers::NONE);
+        h.click_widget("Draw a sketch\u{2026}");
+        h.frames(2, vec![], Modifiers::NONE);
+
+        // Ink shortcuts (1-4, E, Ctrl+Z) switch tools and never type into or undo the story behind.
+        h.key(Key::Num2, Modifiers::NONE);
+        assert_eq!(h.app.making.sketch.tool, sketch::Tool::Pen(sketch::Ink::Blue));
+        h.key(Key::Num3, Modifiers::NONE);
+        assert_eq!(h.app.making.sketch.tool, sketch::Tool::Pen(sketch::Ink::Red));
+        h.key(Key::E, Modifiers::NONE);
+        assert_eq!(h.app.making.sketch.tool, sketch::Tool::Rubber);
+        h.key(Key::Num1, Modifiers::NONE);
+        assert_eq!(h.app.making.sketch.tool, sketch::Tool::Pen(sketch::Ink::Black));
+        h.key(Key::Z, Modifiers::COMMAND);
+        assert_eq!(h.text(), before_story, "sketch shortcuts never touch the story");
+
+        // Draw two inks (including inside the page area) and add optional words, then click "Make it".
+        h.app.making.sketch.add_stroke(sketch::Ink::Black, 7.0, vec![egui::pos2(200.0, 600.0), egui::pos2(240.0, 320.0)]);
+        h.app.making.sketch.add_stroke(sketch::Ink::Blue, 7.0, vec![egui::pos2(640.0, 400.0), egui::pos2(680.0, 420.0)]);
+        h.app.making.request = "A cliff and waves".into();
+        h.frames(2, vec![], Modifiers::NONE);
+        h.click_widget("Make it");
+        until_made(&mut h);
+
+        let rounds = server.0.borrow().theme_rounds.clone();
+        assert_eq!(rounds.len(), 2, "sketch begin + frames look");
+        assert_eq!((rounds[0].0.as_str(), rounds[0].1.as_deref()), ("/api/theme-program", Some("sketch")));
+        let body = &rounds[0].2;
+        assert_eq!(body[0], 3, "whole + black + blue PNGs");
+        let tail_at = body_pictures(body);
+        let parsed: serde_json::Value = serde_json::from_slice(&body[tail_at..]).expect("valid sketch JSON");
+        assert_eq!(parsed["words"], "A cliff and waves");
+        assert_eq!(parsed["strokes"].as_array().unwrap().len(), 2);
+        assert_eq!(rounds[1].1.as_deref(), Some("frames"));
+        assert!(h.painted_at("Sketched Jars").is_some() && h.painted_at("Keep it").is_some());
+        assert_eq!(names_claude(&h), None);
+
+        // "Start again" keeps the sketch intact so the writer can adjust and retry.
+        h.click_widget("Start again");
+        h.frames(2, vec![], Modifiers::NONE);
+        assert!(h.app.making.sketching && h.app.making.sketch.strokes.len() == 2);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

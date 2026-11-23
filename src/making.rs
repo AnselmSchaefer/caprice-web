@@ -48,6 +48,8 @@ const FIXES: u8 = 3;
 const LOOKS: u8 = 1;
 /// What the writer is told of where their words go.
 pub const GOES_OUT: &str = "What you write here goes through Caprice's server to an AI model by Anthropic, which writes your theme.";
+/// What the writer is told in the sketch view.
+pub const SKETCH_GOES_OUT: &str = "What you draw and write here goes through Caprice's server to an AI model by Anthropic, which writes your theme.";
 /// What the writer is told of what a theme costs, while Caprice gives them away (the owner's call,
 /// 2026-11-19): the themes kept meanwhile stay the writer's whatever comes later.
 pub const FREE: &str = "Free while Caprice is new: a theme you keep now stays yours.";
@@ -122,6 +124,8 @@ struct Good {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Kind {
     Begin,
+    /// A theme begun from a hand-drawn sketch (desktop only).
+    Sketch,
     Errors,
     /// It built, but did not pass what every theme must: the load check, playing the preview's
     /// story through, the budget of points (the owner's decisions for step 5).
@@ -134,6 +138,7 @@ impl Kind {
     fn name(self) -> &'static str {
         match self {
             Kind::Begin => "begin",
+            Kind::Sketch => "sketch",
             Kind::Errors => "errors",
             Kind::Checks => "checks",
             Kind::Frames => "frames",
@@ -184,6 +189,9 @@ pub struct Making {
     pub open: bool,
     pub request: String,
     pub change: String,
+    /// Desktop-only hand-drawn sketch canvas and whether the writer switched to it.
+    pub sketch: crate::sketch::Sketch,
+    pub sketching: bool,
     step: Step,
     /// The theme's id on the server, once it is begun.
     theme: Option<String>,
@@ -204,6 +212,11 @@ pub struct Making {
 }
 
 impl Making {
+    /// Whether the writer is currently drawing on the desktop sketch sheet.
+    pub fn is_sketching(&self, holding: crate::ui::Held) -> bool {
+        self.open && self.sketching && holding == crate::ui::Held::Desk && matches!(self.step, Step::Writing)
+    }
+
     /// Whether Claude, the compiler or the preview is at work.
     pub fn busy(&self) -> bool {
         matches!(self.step, Step::Starting(..) | Step::Waiting(_) | Step::Building | Step::Picturing(_))
@@ -213,8 +226,8 @@ impl Making {
     pub fn step(&self) -> Option<(u8, u8, &'static str)> {
         let pass = self.run.looks.saturating_sub(self.looks_left) > 0;
         let doing = match &self.step {
-            Step::Starting(Kind::Begin | Kind::Change, ..) => "Getting ready",
-            Step::Waiting(Kind::Begin) => "Writing the theme",
+            Step::Starting(Kind::Begin | Kind::Sketch | Kind::Change, ..) => "Getting ready",
+            Step::Waiting(Kind::Begin | Kind::Sketch) => "Writing the theme",
             Step::Waiting(Kind::Change) => "Making your change",
             Step::Starting(Kind::Frames, ..) | Step::Waiting(Kind::Frames) => "Looking it over, to make it lovelier",
             Step::Starting(Kind::Errors | Kind::Checks, ..) | Step::Waiting(Kind::Errors | Kind::Checks) => "Putting a mistake right",
@@ -233,8 +246,8 @@ impl Making {
         let pass = self.run.looks.saturating_sub(self.looks_left);
         let at = |phase: u8| phase + 3 * pass;
         match &self.step {
-            Step::Starting(Kind::Begin | Kind::Change, ..) => 1,
-            Step::Starting(Kind::Frames, ..) | Step::Waiting(Kind::Begin | Kind::Change | Kind::Frames) => at(2),
+            Step::Starting(Kind::Begin | Kind::Sketch | Kind::Change, ..) => 1,
+            Step::Starting(Kind::Frames, ..) | Step::Waiting(Kind::Begin | Kind::Sketch | Kind::Change | Kind::Frames) => at(2),
             Step::Building => at(3),
             Step::Picturing(_) => at(4),
             _ => self.run.shown,
@@ -261,9 +274,9 @@ fn cut(text: &str, most: usize) -> &str {
 }
 
 /// A round's pictures as the server takes them: how many (a byte), each one's length (four bytes,
-/// little-endian), then the PNGs, then what Caprice's checks found of how it looks, in words (none
-/// for a version that passed them all).
-fn pictures_body(pngs: &[Vec<u8>], found: &str) -> Vec<u8> {
+/// little-endian), then the PNGs, then a trailing UTF-8 payload (what Caprice's checks found for
+/// `frames`, or the sketch's JSON for `sketch`).
+fn pictures_body(pngs: &[Vec<u8>], tail: &[u8]) -> Vec<u8> {
     let mut body = vec![pngs.len() as u8];
     for p in pngs {
         body.extend_from_slice(&(p.len() as u32).to_le_bytes());
@@ -271,7 +284,7 @@ fn pictures_body(pngs: &[Vec<u8>], found: &str) -> Vec<u8> {
     for p in pngs {
         body.extend_from_slice(p);
     }
-    body.extend_from_slice(cut(found, MOST_ERRORS).as_bytes());
+    body.extend_from_slice(tail);
     body
 }
 
@@ -296,6 +309,22 @@ impl App {
         self.round(ctx, Kind::Begin, request.into_bytes(), Vec::new());
     }
 
+    /// Begin a theme from the hand-drawn sketch (plus optional words): PNGs and strokes go to
+    /// `/api/theme-program` with `X-Caprice-Kind: sketch`.
+    fn begin_sketch(&mut self, ctx: &egui::Context) {
+        let words = cut(self.making.request.trim(), MOST_REQUEST).to_owned();
+        let Some((pngs, json)) = self.making.sketch.export(&words) else { return };
+        let body = pictures_body(&pngs, json.as_bytes());
+        let m = &mut self.making;
+        m.theme = None;
+        m.good = None;
+        m.note = None;
+        m.fixes_left = FIXES;
+        m.looks_left = LOOKS;
+        self.start_run(ctx);
+        self.round(ctx, Kind::Sketch, body, Vec::new());
+    }
+
     /// The steps counted from here: a request, or a change asked for.
     fn start_run(&mut self, ctx: &egui::Context) {
         let now = ctx.input(|i| i.time);
@@ -317,13 +346,18 @@ impl App {
             return;
         };
         let path = match (&self.making.theme, kind) {
-            (Some(id), k) if k != Kind::Begin => {
+            (Some(id), k) if !matches!(k, Kind::Begin | Kind::Sketch) => {
                 headers.push(("X-Caprice-Kind", kind.name().into()));
                 format!("/api/theme-program/{id}")
             }
-            _ => "/api/theme-program".into(),
+            _ => {
+                if kind == Kind::Sketch {
+                    headers.push(("X-Caprice-Kind", kind.name().into()));
+                }
+                "/api/theme-program".into()
+            }
         };
-        if kind != Kind::Frames {
+        if !matches!(kind, Kind::Frames | Kind::Sketch) {
             headers.push(("Content-Type", "text/plain; charset=utf-8".into()));
         }
         let (tx, rx) = channel();
@@ -531,7 +565,8 @@ impl App {
         let points = format!("{phone},{computer}");
         if look {
             self.making.looks_left -= 1;
-            let body = pictures_body(&pngs, &looks.join("\n\n"));
+            let found = looks.join("\n\n");
+            let body = pictures_body(&pngs, cut(&found, MOST_ERRORS).as_bytes());
             self.round(ctx, Kind::Frames, body, vec![("X-Caprice-Moments", moments), ("X-Caprice-Points", points)]);
         } else {
             self.making.compiler = None;
@@ -579,11 +614,48 @@ impl App {
             }
             _ => None,
         };
+        let desktop = self.holding == crate::ui::Held::Desk;
+        let sketching = m.is_sketching(self.holding);
+        let sheet = if sketching {
+            let content = ctx.content_rect();
+            let avail_w = (content.width() - 48.0).clamp(360.0, 960.0);
+            let avail_h = (content.height() - 230.0).max(225.0);
+            let aspect = crate::sketch::W as f32 / crate::sketch::H as f32;
+            let w = avail_w.min(avail_h * aspect);
+            vec2(w, w / aspect)
+        } else {
+            vec2(0.0, 0.0)
+        };
+        let win_w = if sketching { sheet.x + 16.0 } else { 480.0 };
+        let max_w = if sketching { sheet.x + 16.0 } else { 500.0 };
         let mut closed = false;
-        egui::Window::new("Make a theme").id(egui::Id::new("theme_making")).open(&mut open).collapsible(false).resizable(false).default_width(480.0).anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0)).show(ctx, |ui| {
+        egui::Window::new("Make a theme").id(egui::Id::new("theme_making")).open(&mut open).collapsible(false).resizable(false).default_width(win_w).anchor(egui::Align2::CENTER_CENTER, vec2(0.0, 0.0)).show(ctx, |ui| {
             closed = crate::ui::finger_close(ui, egui::Id::new("theme_making"));
-            ui.set_max_width(500.0);
+            ui.set_max_width(max_w);
             match &m.step {
+                Step::Writing if sketching => {
+                    m.sketch.show(ui, sheet);
+                    ui.add_space(6.0);
+                    ui.add(egui::TextEdit::singleline(&mut m.request).char_limit(MOST_REQUEST).desired_width(sheet.x)
+                        .hint_text("What is it? (optional)  e.g. A lighthouse on a cliff, a window lit for each page"));
+                    ui.label(egui::RichText::new(SKETCH_GOES_OUT).color(pal().text_dim).size(12.0));
+                    ui.label(egui::RichText::new(FREE).color(pal().text_dim).size(12.0));
+                    if !signed_in {
+                        ui.label(egui::RichText::new("Sign in first: themes are made for writers signed in.").color(pal().accent));
+                    }
+                    ui.horizontal(|ui| {
+                        if signed_in {
+                            if ui.add_enabled(!m.sketch.is_empty(), egui::Button::new("Make it")).clicked() {
+                                act = Some(Act::BeginSketch);
+                            }
+                        } else if ui.button("Sign in\u{2026}").clicked() {
+                            act = Some(Act::SignIn);
+                        }
+                        if ui.button("Describe in words").clicked() {
+                            m.sketching = false;
+                        }
+                    });
+                }
                 Step::Writing => {
                     ui.label("Say what you would like on the desk beside your pages: a thing for each chapter, growing a part with each page you write.");
                     ui.add(egui::TextEdit::multiline(&mut m.request).char_limit(MOST_REQUEST).desired_rows(3).desired_width(f32::INFINITY)
@@ -600,6 +672,9 @@ impl App {
                             }
                         } else if ui.button("Sign in\u{2026}").clicked() {
                             act = Some(Act::SignIn);
+                        }
+                        if desktop && ui.button("Draw a sketch\u{2026}").on_hover_text("Draw the desk by hand: four inks say when each part moves").clicked() {
+                            m.sketching = true;
                         }
                     });
                 }
@@ -678,11 +753,14 @@ impl App {
         }
         match act {
             Some(Act::Begin) => self.begin_theme(ctx),
+            Some(Act::BeginSketch) => self.begin_sketch(ctx),
             Some(Act::SignIn) => self.cloud.open = true,
             Some(Act::Keep) => self.keep_made(ctx),
             Some(Act::Again) => {
                 let request = std::mem::take(&mut self.making.request);
-                self.making = Making { open: true, request, ..Making::default() };
+                let sketch = std::mem::take(&mut self.making.sketch);
+                let sketching = self.making.sketching;
+                self.making = Making { open: true, request, sketch, sketching, ..Making::default() };
             }
             Some(Act::Change) => {
                 let said = cut(self.making.change.trim(), MOST_REQUEST).as_bytes().to_vec();
@@ -699,6 +777,7 @@ impl App {
 /// What the writer did in the window.
 enum Act {
     Begin,
+    BeginSketch,
     SignIn,
     Keep,
     Again,
