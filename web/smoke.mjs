@@ -583,8 +583,8 @@ if (!compiler) {
   // onto the shelf, is left open: no test holds the key, and the owner's machine checks that
   // `own::GALLERY_KEY` is its public half. THEME_PROGRAMS_PLAN.md, step 6.)
   const fixtureHash = createHash("sha256").update(fs.readFileSync(path.join(here, "../tests/fixtures/snow.wasm"))).digest("hex");
-  // Page → Theme → Yours → the theme's ▸ → Send to the gallery…, then Send it and Done.
-  for (const [x, y] of [[737, 38], [810, 113], [992, 113], [1085, 267], [1170, 267]]) await click(x, y, maker);
+  // Page → Theme → Yours → the theme's ⋯ → Send to the gallery…, then Send it and Done.
+  for (const [x, y] of [[737, 38], [810, 113], [1028, 113], [1009, 293], [1100, 300]]) await click(x, y, maker);
   await click(468, 531, maker);
   const t2 = Date.now();
   while (!shown.checked && Date.now() - t2 < 15000) await maker.waitForTimeout(250);
@@ -596,7 +596,7 @@ if (!compiler) {
     shown.checked?.why ?? `${theme?.name}, ${theme?.toolchain}, module ${theme?.module.slice(0, 12)}`);
   await click(462, 550, maker);
   // Page → Theme → Gallery…, Waiting, Look at it.
-  for (const [x, y] of [[737, 38], [810, 113], [1113, 113], [510, 360], [930, 463]]) await click(x, y, maker);
+  for (const [x, y] of [[737, 38], [810, 113], [1083, 113], [510, 360], [930, 463]]) await click(x, y, maker);
   const t3 = Date.now();
   while (!compiling() && Date.now() - t3 < 60000) await maker.waitForTimeout(250);
   const rebuilt = compiling();

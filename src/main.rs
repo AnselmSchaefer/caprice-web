@@ -7304,9 +7304,9 @@ mod tests {
         in_program_theme(&mut h, FIREFLIES, 0.0);
         let id = h.app.themes.own_id.clone().unwrap();
         h.click_widget("Page");
-        h.click_widget(&format!("{} ⏵", h.app.themes.name()));
+        h.click_widget(&format!("{} ⏵", ui::theme_button(&h.app.themes.name())));
         h.click_widget("Yours");
-        h.click_widget("\u{22ef} \u{23f5}");
+        h.click_widget(&format!("More for {}", h.app.themes.name()));
         h.frames(2, vec![], Modifiers::NONE);
         assert!(h.painted_at("Delete…").is_some() && h.painted_at("Export…").is_none(), "only Delete");
         let out = dir.join("given.caprice-theme");
@@ -7463,7 +7463,7 @@ mod tests {
         h.frames(12, vec![], Modifiers::NONE);
         assert!(h.app.cloud.who.is_some(), "signed in");
         h.click_widget("Page");
-        h.click_widget(&format!("{} \u{23f5}", h.app.themes.name()));
+        h.click_widget(&format!("{} \u{23f5}", ui::theme_button(&h.app.themes.name())));
         h.click_widget("Yours");
         h.click_widget("Have one made\u{2026}");
         h.frames(2, vec![], Modifiers::NONE);
@@ -7484,7 +7484,7 @@ mod tests {
     /// The Gallery window, opened from the themes' menu, its first listing and pictures in.
     fn open_gallery(h: &mut Harness) {
         h.click_widget("Page");
-        h.click_widget(&format!("{} \u{23f5}", h.app.themes.name()));
+        h.click_widget(&format!("{} \u{23f5}", ui::theme_button(&h.app.themes.name())));
         h.click_widget("Gallery\u{2026}");
         h.frames_until("the gallery listed", |a| !a.gallery.busy());
         h.frames(3, vec![], Modifiers::NONE);
@@ -7511,9 +7511,9 @@ mod tests {
 
         // Sent from its menu, under the name and words the writer gives it.
         h.click_widget("Page");
-        h.click_widget(&format!("{} \u{23f5}", h.app.themes.name()));
+        h.click_widget(&format!("{} \u{23f5}", ui::theme_button(&h.app.themes.name())));
         h.click_widget("Yours");
-        h.click_widget("\u{22ef} \u{23f5}");
+        h.click_widget(&format!("More for {}", h.app.themes.name()));
         h.click_widget("Send to the gallery\u{2026}");
         assert!(h.labels().contains(gallery::WHAT_HAPPENS), "the writer is told what happens to it");
         h.click_widget("Send it");
@@ -7529,8 +7529,8 @@ mod tests {
         h.click_widget("Done");
         assert_eq!(h.app.themes.own.get(&made).unwrap().sent.as_deref(), Some("0000000000000001"), "the shelf knows it was sent");
         h.click_widget("Page");
-        h.click_widget(&format!("{} \u{23f5}", h.app.themes.name()));
-        h.click_widget("\u{22ef} \u{23f5}");
+        h.click_widget(&format!("{} \u{23f5}", ui::theme_button(&h.app.themes.name())));
+        h.click_widget(&format!("More for {}", h.app.themes.name()));
         h.frames(2, vec![], Modifiers::NONE);
         assert!(h.painted_at("Sent to the gallery").is_some() && h.painted_at("Send to the gallery\u{2026}").is_none(), "sent once");
         h.key(Key::Escape, Modifiers::NONE);
@@ -7581,7 +7581,7 @@ mod tests {
         h.frames(2, vec![], Modifiers::NONE);
         assert!(h.painted_at("On your shelf").is_some(), "the gallery says it is taken");
         h.click_widget("Page");
-        h.click_widget(&format!("{} \u{23f5}", h.app.themes.name()));
+        h.click_widget(&format!("{} \u{23f5}", ui::theme_button(&h.app.themes.name())));
         h.click_widget("Yours");
         assert!(h.painted_at("From Gallery").is_some() && h.painted_at("Made for you").is_none(), "shown once, as the gallery's");
     }
@@ -7620,10 +7620,10 @@ mod tests {
     }
 
     #[test]
-    fn the_themes_menu_is_as_wide_as_its_two_tiles_whichever_themes_it_shows() {
+    fn the_themes_menu_is_as_wide_as_its_row_of_tiles_whichever_themes_it_shows() {
         let mut h = Harness::new();
         h.click_widget("Page");
-        h.click_widget(&format!("{} \u{23f5}", h.app.themes.name()));
+        h.click_widget(&format!("{} \u{23f5}", ui::theme_button(&h.app.themes.name())));
         let wide = |h: &mut Harness, tab: &str| {
             h.click_widget(tab);
             h.frames(3, vec![], Modifiers::NONE);
@@ -7633,8 +7633,140 @@ mod tests {
         };
         // Yours first, whose words about making a theme are long.
         let (yours, magic, classic) = (wide(&mut h, "Yours"), wide(&mut h, "Magic"), wide(&mut h, "Classic"));
-        assert!(magic < 340.0, "two tiles and the frame, no wider: {magic}");
+        assert!(magic < 370.0, "three tiles and the frame, no wider: {magic}");
         assert!(yours == magic && magic == classic, "{yours} {magic} {classic}");
+    }
+
+    #[test]
+    fn a_theme_with_a_long_name_leaves_the_themes_menu_its_room_beside_the_page_menu() {
+        let mut h = Harness::new();
+        h.width = 1280.0;
+        let dir = ten_of_each(&mut h, "yours-long", "Made 9");
+        h.key(Key::Escape, Modifiers::NONE);
+        h.app.themes.own.entries.iter_mut().find(|e| e.name == "Made 9").unwrap().name = "Grandmother's very long garden wall".into();
+        h.frames(10, vec![], Modifiers::NONE);
+        h.click_widget("Page");
+        let button = h.widget_rect(&format!("{} \u{23f5}", ui::theme_button(&h.app.themes.name()))).expect("the theme's button");
+        h.click_widget(&format!("{} \u{23f5}", ui::theme_button(&h.app.themes.name())));
+        h.frames(10, vec![], Modifiers::NONE);
+        let menu = menu_at(&h, "Have one made\u{2026}");
+        assert!(menu.left() >= button.right() && menu.right() <= h.width, "beside it: {menu:?}, the button {button:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Ten themes of one's own of each kind on the shelf, the last put there the newest, and the
+    /// themes' menu open at Yours. `chosen` is in use.
+    fn ten_of_each(h: &mut Harness, name: &str, chosen: &str) -> std::path::PathBuf {
+        let dir = with_shelf(h, name);
+        let picture = own::Entry { id: String::new(), name: String::new(), about: String::new(), author: String::new(), colours: Default::default(),
+            grows: false, carries: false, added: 0, program: false, toolchain: String::new(), gallery: None, from_gallery: false, sent: None };
+        for (kind, program, from_gallery) in [("Taken", true, true), ("Made", true, false), ("Drawn", false, false)] {
+            for k in 1..=10 {
+                let name = format!("{kind} {k}");
+                h.app.themes.own.entries.push(own::Entry { id: name.to_lowercase(), name, program, from_gallery, ..picture.clone() });
+            }
+        }
+        h.frames(3, vec![], Modifiers::NONE);
+        h.app.themes.theme = theme::Theme::Own;
+        h.app.themes.own_id = Some(chosen.to_lowercase());
+        if h.widget_rect("Page").is_none() {
+            h.click_widget("More tools");
+        }
+        h.click_widget("Page");
+        h.click_widget(&format!("{} \u{23f5}", ui::theme_button(&h.app.themes.name())));
+        h.frames(10, vec![], Modifiers::NONE);
+        dir
+    }
+
+    /// The menu on screen at `words`, which are painted in it.
+    fn menu_at(h: &Harness, words: &str) -> egui::Rect {
+        let at = h.painted_at(words).unwrap_or_else(|| panic!("no {words:?}"));
+        h.ctx.memory(|m| m.layer_id_at(at).and_then(|l| m.area_rect(l.id))).expect("the menu")
+    }
+
+    /// Where `words` are painted, if they are there whole and not scrolled out of what they are in:
+    /// the last painted, in the menu and not on the button under it that says the theme in use.
+    fn in_sight(h: &Harness, words: &str) -> Option<egui::Pos2> {
+        let shape = h.painted.iter().rev().find_map(|cs| match &cs.shape {
+            egui::Shape::Text(t) if t.galley.job.text == words => Some((cs.clip_rect, t)),
+            _ => None,
+        });
+        shape.filter(|(clip, t)| clip.expand(1.0).contains_rect(t.visual_bounding_rect())).map(|(_, t)| t.pos)
+    }
+
+    #[test]
+    fn many_themes_of_one_s_own_show_the_newest_of_each_kind_together_and_the_rest_when_asked() {
+        let mut h = Harness::new();
+        h.height = 860.0;
+        let dir = ten_of_each(&mut h, "yours-many", "Made 9");
+        let menu = menu_at(&h, "Have one made\u{2026}");
+        assert!(menu.top() >= 0.0 && menu.bottom() <= h.height && menu.right() <= h.width, "on the screen: {menu:?}");
+        for words in ["From Gallery", "Made for you", "From SVG", "Taken 10", "Taken 5", "Made 10", "Made 5", "Drawn 10", "Drawn 5"] {
+            assert!(in_sight(&h, words).is_some(), "{words} in sight with all the others");
+        }
+        assert!(h.painted_at("Taken 4").is_none() && h.painted_at("Drawn 4").is_none(), "two rows of each");
+        // In even columns, whatever is in them.
+        let x = |h: &Harness, s: &str| h.painted_at(s).unwrap_or_else(|| panic!("no {s:?}")).x;
+        assert!(x(&h, "Taken 10") == x(&h, "Made 7") && x(&h, "Taken 9") == x(&h, "Drawn 6") && x(&h, "Made 8") == x(&h, "Drawn 5"), "three columns");
+
+        h.click_widget("Show all 10, Made for you");
+        h.frames(10, vec![], Modifiers::NONE);
+        assert!(in_sight(&h, "Made 1").is_some() && h.painted_at("Taken 4").is_none(), "all of those, two rows of the others");
+        let grown = menu_at(&h, "Have one made\u{2026}");
+        assert!(grown.bottom() <= h.height, "it scrolls, rather than grow past the screen: {grown:?}");
+        h.click_widget("Show fewer, Made for you");
+        h.frames(10, vec![], Modifiers::NONE);
+        assert!(h.painted_at("Made 1").is_none() && in_sight(&h, "Drawn 5").is_some());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_theme_in_use_is_in_sight_when_the_menu_opens_however_old_it_is() {
+        let mut h = Harness::new();
+        h.height = 600.0;
+        let dir = ten_of_each(&mut h, "yours-oldest", "Drawn 1");
+        let over = in_sight(&h, "Drawn 1").expect("its kind shown whole, and scrolled to");
+        assert!(over.x > menu_at(&h, "Have one made\u{2026}").left(), "in the menu: {over:?}");
+        // Scrolled away from, it is left alone: only opening goes there.
+        let wheel = egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: egui::vec2(0.0, 2000.0), modifiers: Modifiers::NONE, phase: egui::TouchPhase::Move };
+        h.frames(1, vec![egui::Event::PointerMoved(over)], Modifiers::NONE);
+        h.frames(1, vec![wheel], Modifiers::NONE);
+        h.frames(40, vec![], Modifiers::NONE);
+        assert!(in_sight(&h, "From Gallery").is_some() && in_sight(&h, "Drawn 2").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_theme_s_menu_opens_when_clicked_and_not_when_the_pointer_passes_it() {
+        let mut h = Harness::new();
+        let dir = ten_of_each(&mut h, "yours-more", "Made 9");
+        let more = h.widget_rect("More for Drawn 8").expect("its menu's button").center();
+        h.frames(20, vec![egui::Event::PointerMoved(more)], Modifiers::NONE);
+        assert!(h.painted_at("Export\u{2026}").is_none(), "passed over");
+        h.click_widget("More for Drawn 8");
+        h.frames(10, vec![], Modifiers::NONE);
+        assert!(h.painted_at("Export\u{2026}").is_some() && h.painted_at("Send to the gallery\u{2026}").is_none(), "a drawing's");
+        h.click_widget("Delete\u{2026}");
+        h.frames(3, vec![], Modifiers::NONE);
+        assert!(h.painted_at("Delete theme?").is_some() && h.labels().contains("Drawn 8"), "{}", h.labels());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn on_a_phone_the_themes_menu_fits_the_screen_its_tiles_two_to_a_row_where_three_have_no_room() {
+        for (width, height) in [(340.0, 700.0), (390.0, 844.0), (844.0, 390.0)] {
+            let mut h = Harness::new();
+            (h.width, h.height) = (width, height);
+            let dir = ten_of_each(&mut h, "yours-phone", "Made 9");
+            let menu = menu_at(&h, "Have one made\u{2026}");
+            assert!(menu.left() >= 0.0 && menu.right() <= width && menu.top() >= 0.0 && menu.bottom() <= height, "{width} x {height}: {menu:?}");
+            // Two to a row on the narrowest, three where there is room.
+            let first = h.painted_at("Made 10").expect("the newest");
+            let here = in_sight(&h, "Made 9").expect("the theme in use");
+            let next = h.painted_at("Made 8").expect("the next");
+            assert!(here.y == first.y && (next.y == first.y) == (width > 340.0), "{width} x {height}: {first:?} {here:?} {next:?}");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
     }
 
     /// The Gallery window open on a phone's screen, three themes in it by `author`.
@@ -7872,16 +8004,16 @@ mod tests {
         assert_eq!(h.app.themes.own.entries.len(), 3);
 
         h.click_widget("Page");
-        h.click_widget(&format!("{} \u{23f5}", h.app.themes.name()));
+        h.click_widget(&format!("{} \u{23f5}", ui::theme_button(&h.app.themes.name())));
         h.click_widget("Yours");
-        assert_eq!(h.missing_glyphs(), Vec::<String>::new(), "every letter is in its font, the \u{22ef} of each theme's menu too");
+        assert_eq!(h.missing_glyphs(), Vec::<String>::new(), "every letter is in its font");
         let at = |h: &Harness, s: &str| h.painted_at(s).unwrap_or_else(|| panic!("no {s:?}")).y;
         let (gallery, claude, svg) = (at(&h, "From Gallery"), at(&h, "Made for you"), at(&h, "From SVG"));
         assert!(gallery < claude && claude < svg, "in that order");
         let gallery_name = at(&h, "Fireflies in the gallery");
         assert!(gallery < gallery_name && gallery_name < claude, "shown under the gallery's name, among the gallery's");
         // The one sent says so; none of them offers to be sent again.
-        h.click_widget("\u{22ef} \u{23f5}");
+        h.click_widget("More for Fireflies in the gallery");
         h.frames(2, vec![], Modifiers::NONE);
         assert!(h.painted_at("Send to the gallery\u{2026}").is_none(), "the gallery's own is not sent back");
     }
