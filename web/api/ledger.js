@@ -34,7 +34,7 @@ const DEFAULTS = {
   // rounds a day for everyone together, the themes a writer may begin in a day and the rounds they
   // may ask for; in one theme, the rounds of each kind; what each may hold, and what Claude may
   // write in one, its thinking counted. A conversation is kept this many days, then forgotten.
-  SITE_THEME_ROUNDS_PER_DAY: 12,
+  SITE_THEME_ROUNDS_PER_DAY: 30,
   USER_THEMES_PER_DAY: 2,
   USER_THEME_ROUNDS_PER_DAY: 12,
   THEME_ERRORS_ROUNDS: 3,
@@ -149,6 +149,7 @@ export class Ledger extends DurableObject {
       CREATE TABLE IF NOT EXISTS theme_turns (id TEXT, n INTEGER, role TEXT, text TEXT, PRIMARY KEY (id, n));
       CREATE TABLE IF NOT EXISTS theme_sketch (id TEXT, k INTEGER, png BLOB, PRIMARY KEY (id, k));
       CREATE TABLE IF NOT EXISTS theme_tiers (id TEXT PRIMARY KEY, tier TEXT);
+      CREATE TABLE IF NOT EXISTS theme_reserves (id TEXT PRIMARY KEY, day TEXT, n INTEGER);
       CREATE TABLE IF NOT EXISTS theme_costs (id TEXT PRIMARY KEY, user TEXT, begun INTEGER, rounds INTEGER, input INTEGER,
         written INTEGER, read INTEGER, output INTEGER, micro INTEGER, kept INTEGER);
       CREATE TABLE IF NOT EXISTS gallery (id TEXT PRIMARY KEY, user TEXT, name TEXT, about TEXT, author TEXT, colours TEXT,
@@ -165,9 +166,9 @@ export class Ledger extends DurableObject {
     return this.rows("SELECT n FROM counts WHERE key = ?", `${day(now)}|${what}`)[0]?.n ?? 0;
   }
 
-  bump(now, what) {
+  bump(now, what, by = 1) {
     this.sql.exec("DELETE FROM counts WHERE key < ?", day(now));
-    this.sql.exec("INSERT INTO counts VALUES (?, 1) ON CONFLICT (key) DO UPDATE SET n = n + 1", `${day(now)}|${what}`);
+    this.sql.exec("INSERT INTO counts VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET n = n + ?", `${day(now)}|${what}`, by, by);
   }
 
   known(user) {
@@ -335,6 +336,9 @@ export class Ledger extends DurableObject {
   // The site's owner (GALLERY_OWNERS, `owner`), who tries themes out, has no day's limits: neither a
   // writer's nor the site's, and their rounds leave the site's for everyone else. What they cost is
   // still kept with each theme.
+  // A theme is made in two rounds, laid out and then made finished, so a theme begun holds one more
+  // of the site's rounds back for its next (`theme_reserves`): the day running out never leaves a
+  // writer with the plain first version. Without two of the site's rounds left, no theme begins.
   themeRound(user, id, kind, now = Date.now(), tier = "light", owner = false) {
     if (!this.known(user)) return { error: 401, message: "Not signed in" };
     const l = this.limits;
@@ -344,6 +348,7 @@ export class Ledger extends DurableObject {
     for (const o of old) this.sql.exec("DELETE FROM theme_turns WHERE id = ?", o.id);
     for (const o of old) this.sql.exec("DELETE FROM theme_sketch WHERE id = ?", o.id);
     for (const o of old) this.sql.exec("DELETE FROM theme_tiers WHERE id = ?", o.id);
+    for (const o of old) this.sql.exec("DELETE FROM theme_reserves WHERE id = ?", o.id);
     this.sql.exec("DELETE FROM theme_talks WHERE made <= ?", now - l.THEME_DAYS * DAY);
     // A fix is a fix whichever kind: the compiler's errors, or what Caprice's checks found.
     const most = { errors: l.THEME_ERRORS_ROUNDS, checks: l.THEME_ERRORS_ROUNDS, frames: l.THEME_FRAMES_ROUNDS, change: l.THEME_CHANGE_ROUNDS };
@@ -364,20 +369,23 @@ export class Ledger extends DurableObject {
         : `You can begin ${themesMost} themes a day. More tomorrow.`;
       return { error: 429, message, retry: untilTomorrow(now) };
     }
-    if (!owner && this.count(now, "theme_rounds") + weight > l.SITE_THEME_ROUNDS_PER_DAY) {
+    // The round held back for this theme, if this is its second: counted already, on the day it began.
+    const reserved = talk === null ? null : this.rows("SELECT n FROM theme_reserves WHERE id = ?", id)[0] ?? null;
+    const site = talk === null ? 2 * weight : weight;
+    if (!owner && !reserved && this.count(now, "theme_rounds") + site > l.SITE_THEME_ROUNDS_PER_DAY) {
       return { error: 503, message: "Caprice makes no more themes today, for anyone. More tomorrow.", retry: untilTomorrow(now) };
     }
     if (this.count(now, `theme_rounds:${user}`) + weight > roundsMost) {
       return { error: 429, message: "You have made as much as a day allows. More tomorrow.", retry: untilTomorrow(now) };
     }
-    for (let k = 0; k < weight; k++) {
-      if (!owner) this.bump(now, "theme_rounds");
-      this.bump(now, `theme_rounds:${user}`);
-      if (talk === null) this.bump(now, `themes:${user}`);
-    }
+    if (!owner && !reserved) this.bump(now, "theme_rounds", site);
+    this.bump(now, `theme_rounds:${user}`, weight);
+    if (talk === null) this.bump(now, `themes:${user}`, weight);
+    if (reserved) this.sql.exec("DELETE FROM theme_reserves WHERE id = ?", id);
     if (talk === null) {
       id = [...crypto.getRandomValues(new Uint8Array(8))].map(b => b.toString(16).padStart(2, "0")).join("");
       this.sql.exec("INSERT INTO theme_talks VALUES (?, ?, ?, 0, 0, 0, 0)", id, user, now);
+      if (!owner) this.sql.exec("INSERT INTO theme_reserves VALUES (?, ?, ?)", id, day(now), weight);
       if (tier === "rich") this.sql.exec("INSERT INTO theme_tiers VALUES (?, 'rich')", id);
       this.sql.exec("INSERT INTO theme_costs VALUES (?, ?, ?, 0, 0, 0, 0, 0, 0, 0)", id, user, now);
     } else {
@@ -394,9 +402,20 @@ export class Ledger extends DurableObject {
   // free for its next round either way.
   // What the round cost (`spent`, its tokens and millionths of a dollar) is added to the theme's
   // costs whether or not a theme came of it: Claude was paid either way.
-  themeAnswered(user, id, answered, spent = null) {
-    const talk = this.rows("SELECT 1 FROM theme_talks WHERE id = ? AND user = ?", id, user)[0];
+  // A first round that brought nothing back gives the round it held back to the site again: the
+  // writer begins anew, and nobody goes on with this theme (its own round still counts).
+  themeAnswered(user, id, answered, spent = null, now = Date.now()) {
+    const talk = this.rows("SELECT * FROM theme_talks WHERE id = ? AND user = ?", id, user)[0];
     if (!talk) return { ok: true };
+    const first = talk.errors + talk.frames + talk.changes === 0
+      && this.rows("SELECT COUNT(*) AS n FROM theme_turns WHERE id = ?", id)[0].n === 0;
+    const reserved = this.rows("SELECT day, n FROM theme_reserves WHERE id = ?", id)[0];
+    if (!answered && first && reserved) {
+      this.sql.exec("DELETE FROM theme_reserves WHERE id = ?", id);
+      if (reserved.day === day(now)) {
+        this.sql.exec("UPDATE counts SET n = MAX(n - ?, 0) WHERE key = ?", reserved.n, `${reserved.day}|theme_rounds`);
+      }
+    }
     if (spent) {
       this.sql.exec(`UPDATE theme_costs SET rounds = rounds + 1, input = input + ?, written = written + ?, read = read + ?,
         output = output + ?, micro = micro + ? WHERE id = ?`, spent.input, spent.written, spent.read, spent.output, spent.micro, id);
