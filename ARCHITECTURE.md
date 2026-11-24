@@ -2096,7 +2096,16 @@ ask Claude anything else** (`/api/theme-program`, `web/api/theme.js`, R36, the p
   writer's who began it: anyone else's round is 404.
 - **The Ledger counts every round before Claude is asked**: `SITE_THEME_ROUNDS_PER_DAY` for
   everyone, `USER_THEMES_PER_DAY` begun and `USER_THEME_ROUNDS_PER_DAY` for one writer. A round
-  counts whether or not a theme comes of it. **The site's owner** (`GALLERY_OWNERS`, the owner's
+  counts whether or not a theme comes of it. **A theme begun holds the site's next round for
+  itself** (`theme_reserves`, the owner's call of 2026-11-21): a theme is made in two rounds, so
+  the day running out between them would leave a writer with the plain first version. Beginning
+  counts two of the site's rounds (two rounds' weight for a rich one), the theme's next round of any
+  kind takes the one held and is never refused by the site's limit, and with fewer than two left no
+  theme begins. A first round that brings back no program gives the held one back to the day it was
+  taken (the writer begins anew; nobody goes on with that theme). Rounds after the second are
+  counted as before and may be refused. Tests: "a theme begun holds the site's next round for
+  itself, and none begins with only one left", "the site's rounds for the day run out for everyone,
+  and a first round that fails still counts but gives back what it held". **The site's owner** (`GALLERY_OWNERS`, the owner's
   call of 2026-11-20, to try themes out) has none of these, nor the weighing's, and their rounds
   leave the site's to everyone else: what the owner spends is bounded by nothing but their choice,
   and kept with each theme as anyone's. A theme's own rounds of each kind bound them as anyone. `THEME_TOKENS` is `max_tokens`; the prompt (about
@@ -2121,7 +2130,8 @@ ask Claude anything else** (`/api/theme-program`, `web/api/theme.js`, R36, the p
   written at `THEME_EFFORT_RICH` with `THEME_TOKENS_RICH` and `THEME_BUDGET_RICH`, each round counted
   as `THEME_RICH_WEIGHT` rounds of the site's and the writer's, and the theme as as many themes;
   else at `THEME_EFFORT` (`medium`) with `THEME_TOKENS` and `THEME_BUDGET`. A round of either costs
-  at most about $3, so `SITE_THEME_ROUNDS_PER_DAY` (6) is what keeps the day within the owner's $18;
+  at most about $3, so `SITE_THEME_ROUNDS_PER_DAY` (30 since 2026-11-21, to let people make themes for
+  free; 6 before) is what keeps the day within the owner's $90;
   the weight counts a rich theme as two: change both with the tokens. Before choosing, an older app had the writer's words
   weighed (`POST /api/theme-estimate`, `themeEstimate`, `themeWeighed`'s own count a day): a small
   model (`WEIGHER`) counts the request's things, growth, events and motion as structured output,

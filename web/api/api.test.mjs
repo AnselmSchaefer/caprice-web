@@ -1246,7 +1246,7 @@ test("a request is weighed by a small model before it is made, and only simple o
 });
 
 test("a rich theme, which only an older app asks for, counts as two, and its later rounds stay rich", async t => {
-  const mf = await start(t, { USER_THEMES_PER_DAY: "3", SITE_THEME_ROUNDS_PER_DAY: "5" });
+  const mf = await start(t, { USER_THEMES_PER_DAY: "3", SITE_THEME_ROUNDS_PER_DAY: "7" });
   const ada = await writer(mf, "1", "Ada");
   claude.writes = THEME_REPLY;
   const rich = said => ada("/api/theme-program", { method: "POST", body: said, headers: { "X-Caprice-Tier": "rich" } });
@@ -1262,7 +1262,7 @@ test("a rich theme, which only an older app asks for, counts as two, and its lat
   assert.equal((await begin(ada)).status, 200, "a simple one still fits");
   assert.equal(claude.asked[2].body.max_tokens, 128000, "as much room: the model's most");
   assert.equal(claude.asked[2].body.output_config.effort, "medium", "a simple one at medium too");
-  assert.equal((await round(ada, theme, "change", "Bluer")).status, 503, "four of the site's five rounds used, and a rich one takes two");
+  assert.equal((await round(ada, theme, "change", "Bluer")).status, 503, "six of the site's seven used (two held back by each theme), and a rich one takes two");
   assert.equal(claude.asked.length, 3);
 });
 
@@ -1308,19 +1308,35 @@ test("the site's owner makes themes without a day's limits, and leaves the site'
   assert.equal((await begin(ada)).status, 429, "who keeps a writer's limits");
 });
 
-test("the site's rounds for the day run out for everyone, and a round that fails still counts", async t => {
-  const mf = await start(t, { SITE_THEME_ROUNDS_PER_DAY: "2" });
+test("the site's rounds for the day run out for everyone, and a first round that fails still counts but gives back what it held", async t => {
+  const mf = await start(t, { SITE_THEME_ROUNDS_PER_DAY: "3" });
   const ada = await writer(mf, "1", "Ada");
   claude.writes = "I would rather not write any code today.";
   const nothing = await begin(ada);
   assert.equal(nothing.status, 502, "a reply without a program gives nothing back");
   claude.writes = THEME_REPLY;
-  assert.equal((await begin(ada)).status, 200);
+  assert.equal((await begin(ada)).status, 200, "the failed one's own round counted, the one it held given back");
   const bob = await writer(mf, "2", "Bob");
   const refused = await begin(bob);
   assert.equal(refused.status, 503);
   assert.match(await refused.text(), /no more themes today/);
   assert.equal(claude.asked.length, 2);
+});
+
+test("a theme begun holds the site's next round for itself, and none begins with only one left", async t => {
+  const mf = await start(t, { SITE_THEME_ROUNDS_PER_DAY: "5" });
+  claude.writes = THEME_REPLY;
+  const ada = await writer(mf, "1", "Ada"), bob = await writer(mf, "2", "Bob"), carol = await writer(mf, "3", "Carol");
+  const adas = (await (await begin(ada)).json()).theme;
+  const bobs = (await (await begin(bob)).json()).theme;
+  const late = await begin(carol);
+  assert.equal(late.status, 503, "one round left: not enough for a theme's two");
+  assert.match(await late.text(), /no more themes today/);
+  assert.equal((await round(ada, adas, "errors", "error: one")).status, 200, "Ada's second round was held for her");
+  assert.equal((await round(bob, bobs, "change", "Bluer")).status, 200, "and Bob's for him");
+  assert.equal((await round(ada, adas, "change", "Bluer")).status, 200, "a third round takes the one left");
+  assert.equal((await round(bob, bobs, "change", "Greener")).status, 503, "and then the day's are gone");
+  assert.equal(claude.asked.length, 5);
 });
 
 const sketchBody = (pngs, data) => Buffer.concat([framed(pngs), Buffer.from(JSON.stringify(data))]);
