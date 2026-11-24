@@ -381,7 +381,7 @@ a `TOC` field (Caprice's page numbers are only its cached result, and Word updat
 | No bending of text | Tessellate galleys, move vertices | `render.rs`, `book.rs`, `notes.rs` |
 | Modifiers unreliable on Hyprland | Track Ctrl from key events | `view.rs` |
 | In a window that sizes itself (`Modal`, `Area`), `with_layout` takes all the height left: a row centred in it, or anything after it, makes the window grow every frame | Give such rows their height with `allocate_ui_with_layout`. `keep_or_drop_keeps_its_size_with_the_hint_under_its_buttons` | `leave.rs::leave_dialog` |
-| The UI font has no symbols like ✕, → or ⋯ (drawn as an empty box) | Draw icons with lines, labelled for tests; in words, › stands for an arrow ("File › Versions"). A ⋯ standing alone (a theme's menu in Yours, the backups in Versions) is in the monospace face, Hack, which has it (`RichText::monospace`). `Harness::missing_glyphs` lists what was painted without its letters: the tests of the page numbers menu, the leaving dialog, the review and Yours check it is empty. egui's `has_glyph` says no for every letter of the face holding its empty box, which in the monospace family is all of Hack: the helper tells those by their drawing (`missing_glyph`) | `ui.rs::paint_icon`, `search.rs::bar_button`, the ✕ of a page numbering change in `ui.rs` |
+| The UI font has no symbols like ✕, → or ⋯ (drawn as an empty box) | Draw icons with lines, labelled for tests; in words, › stands for an arrow ("File › Versions"). A ⋯ standing alone (the backups in Versions) is in the monospace face, Hack, which has it (`RichText::monospace`). `Harness::missing_glyphs` lists what was painted without its letters: the tests of the page numbers menu, the leaving dialog, the review and Yours check it is empty. egui's `has_glyph` says no for every letter of the face holding its empty box, which in the monospace family is all of Hack: the helper tells those by their drawing (`missing_glyph`) | `ui.rs::paint_icon`, `search.rs::bar_button`, the ✕ of a page numbering change in `ui.rs` |
 | `ctx.fonts_mut` inside `ctx.fonts_mut` hangs (the context's lock is taken twice) | Build a job (`paragraph_job`, `run_format`, which ask the fonts for a row's height) before taking the fonts to lay it out. Drop caps with line spacing hung: `a_new_novel_begins_on_book_pages_at_chapter_one_and_a_journal_at_today` | `dropcap.rs::drop_cap` |
 | Justified rows are lined up by their first and last letters: whitespace in front goes out to the left, a tab or space at a paragraph's end gives the caret no room | `justified_edges` moves the glyphs (and their quads) back: the whitespace in front keeps its room, a stretched row still ends at the margin, the last row is as wide as all its chars. Underlines and highlights of such a row are not moved. `justified_text_keeps_a_tab_before_it_and_after_it` | `layout.rs::justified_edges` |
 | Tab moves egui's keyboard focus to the next widget, even when the page took the key | The editor cancels the move when it types a tab (`move_focus(FocusDirection::None)`); the caret is hidden while a widget has the keyboard. `a_tab_typed_beside_a_drop_cap_moves_the_caret_at_once` | `editor.rs` (keys) |
@@ -2731,8 +2731,18 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   one they made and sent), it is given the signature and becomes the gallery's, source and `sent`
   kept (`Shelf::sign`); a shelf read that holds both, from before, keeps the gallery's
   (`Shelf::join_doubles`). Yours shows the themes from the gallery, those made with Claude and the
-  drawings apart, in that order; the themes' menu is two tiles wide whichever it shows
-  (`THEMES_WIDE`: a menu never narrows again, so nothing in it may be wider). The Gallery window
+  drawings apart, in that order, the newest of each first. Of many, each shows two rows until asked
+  for the rest ("Show all 10"), so that all three are in sight together, and the list scrolls
+  (`yours_list`): it is never higher than the screen leaves it, which is taken from the screen's
+  height alone (from the menu's own place it would change with every frame, as egui moves a menu up
+  to make room). Opened, it shows the theme in use, its kind whole if it is an older one, and after
+  that the list is the writer's to scroll. A theme's "⋯" opens on a click alone (`yours_more`):
+  egui's own button opens when pointed at, also where a list has scrolled it out of sight, so its
+  menu is given only the part in sight. It is drawn where the pointer is, and on every theme for a
+  finger. The themes' menu is three tiles wide whichever it shows, or what a phone's screen has,
+  with two to a row (`themes_wide`, `theme_row`: a menu never narrows again, so nothing in it may be
+  wider); the Page menu's button keeps to `THEME_BUTTON_CHARS` of a theme's name (`theme_button`), for the menu
+  to have room beside it. The Gallery window
   and the one that sends are no wider than the screen (`ui::window_width`, its themes one to three
   to a row, as cards: a theme's words on its card in two lines at most, and every part of a card
   keeping its room, so the buttons of a row stand in line; a tile without a picture is
@@ -2745,7 +2755,12 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   `only_the_owner_is_shown_the_themes_waiting_and_the_gallery_is_for_writers_signed_in`,
   `yours_shows_the_themes_from_the_gallery_those_made_with_claude_and_the_drawings_apart_and_sends_each_once`,
   `a_shelf_holding_a_theme_as_made_and_as_taken_from_the_gallery_keeps_the_gallery_s_alone`,
-  `the_themes_menu_is_as_wide_as_its_two_tiles_whichever_themes_it_shows`,
+  `the_themes_menu_is_as_wide_as_its_row_of_tiles_whichever_themes_it_shows`,
+  `many_themes_of_one_s_own_show_the_newest_of_each_kind_together_and_the_rest_when_asked`,
+  `the_theme_in_use_is_in_sight_when_the_menu_opens_however_old_it_is`,
+  `a_theme_s_menu_opens_when_clicked_and_not_when_the_pointer_passes_it`,
+  `a_theme_with_a_long_name_leaves_the_themes_menu_its_room_beside_the_page_menu`,
+  `on_a_phone_the_themes_menu_fits_the_screen_its_tiles_two_to_a_row_where_three_have_no_room`,
   `the_gallery_window_fits_a_phone_s_screen_and_goes_when_the_story_is_closed`,
   `each_gallery_theme_shows_its_words_on_its_card_and_the_buttons_of_a_row_stand_in_line`; in the browser
   `smoke.mjs` sends the theme it made, checks the file the tab wrote with the Worker's own check

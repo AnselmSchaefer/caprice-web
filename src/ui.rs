@@ -332,18 +332,31 @@ struct Yours<'a> {
 }
 
 /// A theme drawn as a little desk with its dock, a page and the accent, over its picture if it has
-/// one; clicked, or not.
-pub fn theme_tile(ui: &mut egui::Ui, name: &str, about: &str, c: crate::theme::Palette, picture: Option<egui::TextureId>, chosen: bool) -> bool {
-    let (rect, resp) = ui.allocate_exact_size(vec2(150.0, 84.0), Sense::click());
+/// one, `wide` points wide.
+fn theme_tile(ui: &mut egui::Ui, wide: f32, name: &str, about: &str, c: crate::theme::Palette, picture: Option<egui::TextureId>, chosen: bool) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(wide, (wide * 0.56).round()), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
     paint_tile(&ui.painter().with_clip_rect(rect.intersect(ui.clip_rect())), rect, c, picture, egui::CornerRadius::same(6));
     if chosen {
-        ui.painter().rect_stroke(rect.expand(1.5), 7.0, Stroke::new(2.0, pal().accent), egui::StrokeKind::Outside);
+        // No further out than what a scrolled list draws around itself (three points): its edges would be cut.
+        ui.painter().rect_stroke(rect.expand(1.0), 7.0, Stroke::new(2.0, pal().accent), egui::StrokeKind::Outside);
     } else if resp.hovered() {
         ui.painter().rect_stroke(rect, 6.0, Stroke::new(1.0, pal().text_dim), egui::StrokeKind::Outside);
     }
     let resp = if about.is_empty() { resp } else { resp.on_hover_text(about) };
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// A theme's name under its tile, in one line as wide as it: cut short if it is longer than that
+/// (or than leaves `keep` points at its end), and then said whole when pointed at. The line's place.
+fn theme_name(ui: &mut egui::Ui, wide: f32, keep: f32, name: &str, chosen: bool) -> Rect {
+    let (line, _) = ui.allocate_exact_size(vec2(wide, THEME_NAME_H), Sense::hover());
+    let ink = if chosen { pal().text } else { pal().text_dim };
+    let label = egui::Label::new(egui::RichText::new(name).size(12.0).color(ink)).truncate().selectable(false);
+    let room = line.with_max_x(line.right() - keep);
+    // A child laid over the line: its own width, the name's, moves nothing.
+    ui.new_child(UiBuilder::new().max_rect(room).layout(egui::Layout::left_to_right(egui::Align::Center))).add(label);
+    line
 }
 
 /// A theme's tile drawn into `rect`, whatever its size (the menu's tiles are 150 points wide, the
@@ -383,8 +396,60 @@ pub fn paint_tile(p: &egui::Painter, rect: Rect, c: crate::theme::Palette, pictu
     }
 }
 
-/// How wide the themes' menu is: two tiles and the gap between them.
-const THEMES_WIDE: f32 = 2.0 * 150.0 + 12.0;
+/// The themes' menu: how wide a tile is when there is room for three to a row, the gap between two
+/// tiles, and how high the line of a theme's name is.
+const THEME_TILE: f32 = 108.0;
+const THEME_GAP: f32 = 10.0;
+const THEME_NAME_H: f32 = 18.0;
+/// How many letters of the theme's name the Page menu's button shows.
+const THEME_BUTTON_CHARS: usize = 16;
+
+/// A theme's name on the Page menu's button, a long one cut short: the button would be so wide that
+/// the themes had no room beside it, and opened over the menu instead.
+pub fn theme_button(name: &str) -> String {
+    if name.chars().count() <= THEME_BUTTON_CHARS {
+        return name.to_owned();
+    }
+    name.chars().take(THEME_BUTTON_CHARS - 1).collect::<String>().trim_end().to_owned() + "\u{2026}"
+}
+
+/// How wide the themes' menu is: three tiles and the room for a scroll bar beside them, or what a
+/// phone's screen has.
+fn themes_wide(ui: &egui::Ui) -> f32 {
+    let m = ui.spacing().menu_margin;
+    fit_width(ui.ctx(), 3.0 * THEME_TILE + 2.0 * THEME_GAP + themes_bar(ui), (m.leftf() + m.rightf()) / 2.0 + 1.0)
+}
+
+/// The room at the right of the tiles for a scroll bar, which would otherwise lie over the last one.
+fn themes_bar(ui: &egui::Ui) -> f32 {
+    ui.spacing().scroll.allocated_width() + 4.0
+}
+
+/// How many tiles go to a row of the themes' menu, and how wide each is.
+fn theme_row(ui: &egui::Ui) -> (usize, f32) {
+    let wide = themes_wide(ui) - themes_bar(ui);
+    let columns = (((wide + THEME_GAP) / (THEME_TILE + THEME_GAP) + 0.01).floor() as usize).clamp(1, 3);
+    (columns, ((wide - THEME_GAP * (columns - 1) as f32) / columns as f32).floor())
+}
+
+/// `n` tiles in rows, each drawn by `cell` in a column as wide as it.
+fn theme_rows(ui: &mut egui::Ui, n: usize, mut cell: impl FnMut(&mut egui::Ui, usize, f32)) {
+    let (columns, wide) = theme_row(ui);
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.y = 6.0;
+        for row in (0..n).step_by(columns) {
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing = vec2(THEME_GAP, 1.0);
+                for k in row..n.min(row + columns) {
+                    ui.vertical(|ui| {
+                        ui.set_width(wide);
+                        cell(ui, k, wide);
+                    });
+                }
+            });
+        }
+    });
+}
 
 /// The themes: the classic ones, of colours alone, the magic ones, or the writer's own, as the
 /// switch at the top says (first those of the theme in use, then as last switched); the one clicked
@@ -395,9 +460,9 @@ fn theme_gallery(ui: &mut egui::Ui, theme: &mut Theme, yours: &Yours) -> Option<
     let first = if *theme == Theme::Own { 2u8 } else { u8::from(theme.magic()) };
     let mut shown = ui.data(|d| d.get_temp::<u8>(id)).unwrap_or(first);
     let mut ask = None;
-    // As wide as its two tiles, whichever it shows: a menu keeps the width of the widest thing it
+    // As wide as its row of tiles, whichever it shows: a menu keeps the width of the widest thing it
     // ever held, so a long line under Yours would leave Classic and Magic wide and half empty.
-    ui.set_width(THEMES_WIDE);
+    ui.set_width(themes_wide(ui));
     ui.horizontal(|ui| {
         ui.selectable_value(&mut shown, 0, "Classic").on_hover_text("Colours around the page");
         ui.selectable_value(&mut shown, 1, "Magic").on_hover_text("Themes that hide things to find");
@@ -435,83 +500,156 @@ fn theme_gallery(ui: &mut egui::Ui, theme: &mut Theme, yours: &Yours) -> Option<
             }
             return ask;
         }
-        // Those taken from the gallery, those made with Claude (for the writer: made for them), and the
-        // drawings, apart.
-        type Holds = fn(&crate::own::Entry) -> bool;
-        let sections: [(&str, Holds); 3] = [
-            ("From Gallery", |e| e.from_gallery),
-            ("Made for you", |e| e.program && !e.from_gallery),
-            ("From SVG", |e| !e.program),
-        ];
-        for (title, holds) in sections {
-            if yours.entries.iter().any(holds) {
-                ui.add_space(4.0);
-                ui.label(egui::RichText::new(title).size(12.0).strong());
-                yours_section(ui, title, yours.entries.iter().filter(|e| holds(e)), theme, yours, &mut ask);
-            }
-        }
+        yours_list(ui, theme, yours, &mut ask);
         return ask;
     }
     let magic = shown == 1;
-    let themes = Theme::ALL.into_iter().filter(|t| t.magic() == magic);
-    egui::Grid::new(("theme_gallery", magic)).num_columns(2).spacing(vec2(12.0, 6.0)).show(ui, |ui| {
-        for (k, t) in themes.enumerate() {
-            ui.vertical(|ui| {
-                ui.label(egui::RichText::new(t.name()).size(12.0).color(pal().text_dim));
-                if theme_tile(ui, t.name(), t.about(), t.palette(), None, *theme == t) {
-                    *theme = t;
-                }
-            });
-            if k % 2 == 1 {
-                ui.end_row();
-            }
+    let themes: Vec<Theme> = Theme::ALL.into_iter().filter(|t| t.magic() == magic).collect();
+    ui.add_space(2.0);
+    theme_rows(ui, themes.len(), |ui, k, wide| {
+        let (t, chosen) = (themes[k], *theme == themes[k]);
+        if theme_tile(ui, wide, t.name(), t.about(), t.palette(), None, chosen).clicked() {
+            *theme = t;
         }
+        theme_name(ui, wide, 0.0, t.name(), chosen);
     });
     ask
 }
 
-/// Some of the writer's own themes, two to a row, each with its "⋯" menu.
-fn yours_section<'a>(ui: &mut egui::Ui, title: &str, entries: impl Iterator<Item = &'a crate::own::Entry>, theme: &Theme, yours: &Yours,
-    ask: &mut Option<crate::own::Ask>) {
-    use crate::own::Ask;
-    egui::Grid::new(("theme_gallery_yours", title)).num_columns(2).spacing(vec2(12.0, 6.0)).show(ui, |ui| {
-        for (k, e) in entries.enumerate() {
-            ui.vertical(|ui| {
-                ui.horizontal(|ui| {
-                    ui.set_width(150.0);
-                    ui.label(egui::RichText::new(e.shown_name()).size(12.0).color(pal().text_dim));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        // The UI's font has no "⋯"; its monospace face has.
-                        ui.menu_button(egui::RichText::new("\u{22ef}").size(12.0).monospace(), |ui| {
-                            // A drawing goes to a file; a program only to the gallery (R36), once.
-                            if !e.program && ui.button("Export\u{2026}").on_hover_text("Save its drawing, to change it or give it to someone").clicked() {
-                                *ask = Some(Ask::Export(e.id.clone()));
-                            }
-                            if e.program && !e.from_gallery {
-                                if e.sent.is_some() {
-                                    ui.label(egui::RichText::new("Sent to the gallery").color(pal().text_dim));
-                                } else if ui.button("Send to the gallery\u{2026}").on_hover_text("For other writers to use, once Caprice has looked at it").clicked() {
-                                    *ask = Some(Ask::Send(e.id.clone()));
-                                    ui.close();
-                                }
-                            }
-                            if ui.button("Delete\u{2026}").clicked() {
-                                *ask = Some(Ask::Delete(e.id.clone()));
-                            }
-                        });
-                    });
-                });
-                let about = if e.author.is_empty() { e.about.clone() } else { format!("{} \u{2014} by {}", e.about, e.author) };
-                let chosen = *theme == Theme::Own && yours.chosen == Some(e.id.as_str());
-                if theme_tile(ui, e.shown_name(), about.trim_start_matches(" \u{2014} "), e.palette(), yours.thumbs.get(&e.id).map(|t| t.id()), chosen) {
-                    *ask = Some(Ask::Use(e.id.clone()));
-                }
-            });
-            if k % 2 == 1 {
-                ui.end_row();
+/// The writer's own themes: those taken from the gallery, those made with Claude (for the writer:
+/// made for them), and the drawings, apart, the newest of each first. Of many, each part shows its
+/// first two rows until asked for the rest, so that all three are in sight together, and the list
+/// scrolls rather than grow past the screen. Opened, it shows the theme in use.
+fn yours_list(ui: &mut egui::Ui, theme: &Theme, yours: &Yours, ask: &mut Option<crate::own::Ask>) {
+    type Holds = fn(&crate::own::Entry) -> bool;
+    let sections: [(&str, Holds); 3] = [
+        ("From Gallery", |e| e.from_gallery),
+        ("Made for you", |e| e.program && !e.from_gallery),
+        ("From SVG", |e| !e.program),
+    ];
+    // When it was first drawn and last, since it was last opened: for its first two frames the theme
+    // in use is brought into sight (a menu is only measured in the first).
+    let id = egui::Id::new("theme_gallery_yours_drawn");
+    let now = ui.ctx().cumulative_pass_nr();
+    let first = ui.data(|d| d.get_temp::<(u64, u64)>(id)).filter(|(_, last)| last + 1 >= now).map_or(now, |(first, _)| first);
+    ui.data_mut(|d| d.insert_temp(id, (first, now)));
+    let opened = now <= first + 1;
+    // By the screen alone, with room for the dock above and what the menu holds above the list: by the
+    // menu's own place, it would change with every frame as the menu moved up to make room for it.
+    let high = (ui.ctx().content_rect().height() - 230.0).clamp(170.0, 680.0);
+    egui::ScrollArea::vertical().id_salt("theme_gallery_yours").max_height(high).min_scrolled_height(high).auto_shrink([false, true]).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = 5.0;
+        let mut above = false;
+        for (title, holds) in sections {
+            let entries: Vec<&crate::own::Entry> = yours.entries.iter().rev().filter(|e| holds(e)).collect();
+            if entries.is_empty() {
+                continue;
             }
+            if above {
+                ui.add_space(6.0);
+            }
+            above = true;
+            yours_section(ui, title, &entries, opened, theme, yours, ask);
         }
     });
+}
+
+/// Some of the writer's own themes, under their title and how many they are.
+fn yours_section(ui: &mut egui::Ui, title: &str, entries: &[&crate::own::Entry], opened: bool, theme: &Theme, yours: &Yours,
+    ask: &mut Option<crate::own::Ask>) {
+    let in_use = |e: &crate::own::Entry| *theme == Theme::Own && yours.chosen == Some(e.id.as_str());
+    let few = 2 * theme_row(ui).0;
+    let id = egui::Id::new(("theme_gallery_yours_all", title));
+    let mut all = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
+    all |= opened && entries.iter().skip(few).any(|e| in_use(e));
+    ui.horizontal(|ui| {
+        ui.set_width(themes_wide(ui) - themes_bar(ui));
+        ui.spacing_mut().interact_size.y = 22.0;
+        ui.spacing_mut().button_padding.y = 2.0;
+        ui.label(egui::RichText::new(title).size(12.0).strong());
+        ui.label(egui::RichText::new(entries.len().to_string()).size(12.0).color(pal().text_dim));
+        if entries.len() > few {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let words = if all { "Show fewer".to_owned() } else { format!("Show all {}", entries.len()) };
+                let button = egui::Button::new(egui::RichText::new(words.as_str()).size(12.0).color(pal().text_dim));
+                let resp = ui.add(button).on_hover_cursor(egui::CursorIcon::PointingHand);
+                // Three parts may all say the same: a screen reader is told which.
+                resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("{words}, {title}")));
+                if resp.clicked() {
+                    all = !all;
+                }
+            });
+        }
+    });
+    ui.data_mut(|d| d.insert_temp(id, all));
+    let shown = if all { entries.len() } else { entries.len().min(few) };
+    theme_rows(ui, shown, |ui, k, wide| {
+        let e = entries[k];
+        // Known by the theme, not by its place, which changes as others come and go.
+        ui.push_id(&e.id, |ui| {
+            let about = if e.author.is_empty() { e.about.clone() } else { format!("{} \u{2014} by {}", e.about, e.author) };
+            let chosen = in_use(e);
+            let picture = yours.thumbs.get(&e.id).map(|t| t.id());
+            let tile = theme_tile(ui, wide, e.shown_name(), about.trim_start_matches(" \u{2014} "), e.palette(), picture, chosen);
+            if tile.clicked() {
+                *ask = Some(crate::own::Ask::Use(e.id.clone()));
+            }
+            let cell = Rect::from_min_max(tile.rect.min, tile.rect.max + vec2(0.0, THEME_NAME_H + 1.0));
+            if opened && chosen {
+                ui.scroll_to_rect_animation(cell, None, egui::style::ScrollAnimation::none());
+            }
+            let id = ui.id().with("more");
+            let open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
+            // Thirty of them at once are a lot of dots: they show where the pointer is, or on every
+            // theme for a finger, which points at nothing before it presses.
+            let more = open || ui.rect_contains_pointer(cell) || crate::platform::pressed_by_finger() || ui.memory(|m| m.has_focus(id));
+            let line = theme_name(ui, wide, if more { THEME_MORE_W } else { 0.0 }, e.shown_name(), chosen);
+            yours_more(ui, e, id, line.with_min_x(line.right() - THEME_MORE_W), more, open, ask);
+        });
+    });
+}
+
+/// How wide the "⋯" beside a theme's name is.
+const THEME_MORE_W: f32 = 26.0;
+
+/// The "⋯" of one of the writer's own themes, and its menu. It opens on a click alone: egui's own
+/// button opens as soon as it is pointed at, and the pointer passes many on its way to a tile.
+fn yours_more(ui: &mut egui::Ui, e: &crate::own::Entry, id: egui::Id, rect: Rect, drawn: bool, open: bool, ask: &mut Option<crate::own::Ask>) {
+    use crate::own::Ask;
+    let resp = ui.interact(rect, id, Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("More for {}", e.shown_name())));
+    let lit = open || resp.hovered() || resp.has_focus();
+    if lit {
+        ui.painter().rect_filled(rect.shrink2(vec2(0.0, 1.0)), 5.0, pal().btn_hover);
+    }
+    for k in if drawn { &[-1.0, 0.0, 1.0][..] } else { &[] } {
+        ui.painter().circle_filled(rect.center() + vec2(k * 4.5, 0.0), 1.4, if lit { pal().text } else { pal().text_dim });
+    }
+    if !open && !resp.clicked() {
+        return;
+    }
+    // Only the part of it in sight: egui goes by where the pointer is, and one scrolled away would
+    // be pointed at through what lies there.
+    let mut seen = resp.clone();
+    seen.rect = seen.rect.intersect(ui.clip_rect());
+    let shown = seen.rect.is_positive() && egui::containers::menu::SubMenu::new().show(ui, &seen, |ui| {
+        // A drawing goes to a file; a program only to the gallery (R36), once.
+        if !e.program && ui.button("Export\u{2026}").on_hover_text("Save its drawing, to change it or give it to someone").clicked() {
+            *ask = Some(Ask::Export(e.id.clone()));
+        }
+        if e.program && !e.from_gallery {
+            if e.sent.is_some() {
+                ui.label(egui::RichText::new("Sent to the gallery").color(pal().text_dim));
+            } else if ui.button("Send to the gallery\u{2026}").on_hover_text("For other writers to use, once Caprice has looked at it").clicked() {
+                *ask = Some(Ask::Send(e.id.clone()));
+                ui.close();
+            }
+        }
+        if ui.button("Delete\u{2026}").clicked() {
+            *ask = Some(Ask::Delete(e.id.clone()));
+        }
+    }).is_some();
+    ui.data_mut(|d| d.insert_temp(id, shown));
 }
 
 /// Something picked in the Insert menu.
@@ -1372,7 +1510,7 @@ impl App {
                         chosen: self.themes.own_id.as_deref(),
                         importing: self.workshop.importing(),
                     };
-                    let name = if theme == Theme::Own { self.themes.name() } else { theme.name().to_owned() };
+                    let name = theme_button(&if theme == Theme::Own { self.themes.name() } else { theme.name().to_owned() });
                     if let Some(Some(a)) = ui.menu_button(name, |ui| theme_gallery(ui, &mut theme, &yours)).inner {
                         asked = Some(a);
                     }
