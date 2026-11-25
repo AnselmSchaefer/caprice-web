@@ -59,11 +59,11 @@
     // hour after the first, for every writer), and a day at most about $90 (the owner's call,
     // 2026-11-21, to let people make themes for free; it was 6 and $18). A theme begun holds its
     // second round back, so none begins with only one left. The site's owner's own rounds are not counted.
-    // Every theme is written at effort medium, told 110,000 of its 128,000 (THEME_BUDGET): the owner's
-    // call, 2026-11-20, after a lighthouse written at low came out rough. Measured on six requests
-    // the same day: at effort medium a first round took 56,000 to over 128,000 tokens. The app no
+    // Every theme is written at effort high, told 110,000 of its 128,000 (THEME_BUDGET): the owner's
+    // call, 2026-11-25 (previously medium from 2026-11-20, after a lighthouse written at low came
+    // out rough, when six requests measured 56,000 to over 128,000 tokens at medium). The app no
     // longer offers a rich theme nor weighs a request; an older app still may, and a rich theme is
-    // then written at medium too (THEME_EFFORT_RICH) with the same room, counted as two rounds and
+    // then written at high too (THEME_EFFORT_RICH) with the same room, counted as two rounds and
     // two themes. A theme is written in two rounds, as on 2026-11-16: the world laid out plainly,
     // then, shown its pictures, made finished (the guide says so; the owner's call, 2026-11-20: one
     // round asked to be finished at once took 122,000 tokens and 18 minutes, two took less). So a
@@ -77,8 +77,8 @@
     "GALLERY_WAITING": "30",
     "GALLERY_FILE_BYTES": "3000000",
     "GALLERY_BYTES": "1000000000",
-    "THEME_EFFORT": "medium",
-    "THEME_EFFORT_RICH": "medium",
+    "THEME_EFFORT": "high",
+    "THEME_EFFORT_RICH": "high",
     "USER_THEMES_PER_DAY": "2",
     "USER_THEME_ROUNDS_PER_DAY": "12",
     // A story live on several devices: connections a day for the site, messages a day for one

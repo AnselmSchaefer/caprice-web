@@ -290,7 +290,7 @@ export async function themeProgram(request, env, user, id) {
         { role: "user", content },
       ];
       const rich = round.tier === "rich";
-      const effort = rich ? env.THEME_EFFORT_RICH || "medium" : env.THEME_EFFORT || "medium";
+      const effort = rich ? env.THEME_EFFORT_RICH || "high" : env.THEME_EFFORT || "high";
       const written = await write(messages, env, rich ? l.THEME_TOKENS_RICH : l.THEME_TOKENS, rich ? l.THEME_BUDGET_RICH : l.THEME_BUDGET, effort);
       spent = written.spent ?? null;
       if (written.error) {

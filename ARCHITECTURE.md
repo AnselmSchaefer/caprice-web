@@ -2121,15 +2121,15 @@ ask Claude anything else** (`/api/theme-program`, `web/api/theme.js`, R36, the p
   without a program is logged** ("theme: no program": how it stopped, what it spent, the model, how
   it ended; never the writer's words) to Workers Logs (`observability` in `wrangler.jsonc`), so it
   can be looked into afterwards.
-- **Every theme is written at effort medium for now** (`THEME_EFFORT` and `THEME_EFFORT_RICH`, the
-  owner's call of 2026-11-20, after a lighthouse written at low came out rough; six requests
-  measured that day: at effort medium a first round took 56 000 to over 128 000 tokens, at low
-  17 000 to 48 000). The app no longer offers a rich theme nor weighs a request (R36), but the
+- **Every theme is written at effort high for now** (`THEME_EFFORT` and `THEME_EFFORT_RICH`, the
+  owner's call of 2026-11-25; previously medium from 2026-11-20, after a lighthouse written at low
+  came out rough, when six requests measured 56 000 to over 128 000 tokens at medium and 17 000 to
+  48 000 at low). The app no longer offers a rich theme nor weighs a request (R36), but the
   server still serves an older app that does, so it can come back. Begun with `X-Caprice-Tier: rich`, a theme is
   rich for all its rounds (`theme_tiers`, the Ledger's, never the app's word after the first):
   written at `THEME_EFFORT_RICH` with `THEME_TOKENS_RICH` and `THEME_BUDGET_RICH`, each round counted
   as `THEME_RICH_WEIGHT` rounds of the site's and the writer's, and the theme as as many themes;
-  else at `THEME_EFFORT` (`medium`) with `THEME_TOKENS` and `THEME_BUDGET`. A round of either costs
+  else at `THEME_EFFORT` (`high`) with `THEME_TOKENS` and `THEME_BUDGET`. A round of either costs
   at most about $3, so `SITE_THEME_ROUNDS_PER_DAY` (30 since 2026-11-21, to let people make themes for
   free; 6 before) is what keeps the day within the owner's $90;
   the weight counts a rich theme as two: change both with the tokens. Before choosing, an older app had the writer's words
@@ -2161,7 +2161,7 @@ ask Claude anything else** (`/api/theme-program`, `web/api/theme.js`, R36, the p
   must name `theme!(`), and from the ```json block the name, a few words and the colours by the
   palette's names as `#rrggbb`; never Claude's own words. A reply without a program is 502.
 - The model is named once (`WRITER`, `claude-opus-5-5`); thinking adaptive at `THEME_EFFORT` or
-  `THEME_EFFORT_RICH` (both `medium`, the same when unset); a model's refusal goes on with the platform's fallback
+  `THEME_EFFORT_RICH` (both `high`, the same when unset); a model's refusal goes on with the platform's fallback
   (`server-side-fallback-2026-07-01`, `fallbacks: "default"`). Not streamed, as a scene is not.
   `THEMES_OFF = "1"` stops it; without a key there is none.
 - **A round not answered within a beat is kept alive** (`keptAlive`, `BEAT_MS` 15 s,

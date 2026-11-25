@@ -1035,7 +1035,7 @@ test("a theme is begun from the writer's words, and only its source and palette 
   assert.equal(key, "a test's key");
   assert.equal(body.model, "claude-opus-5-5");
   assert.equal(body.max_tokens, 128000, "the most a round can cost is the Worker's");
-  assert.deepEqual(body.output_config, { effort: "medium", task_budget: { type: "tokens", total: 110000 } }, "told its room, below the wall");
+  assert.deepEqual(body.output_config, { effort: "high", task_budget: { type: "tokens", total: 110000 } }, "told its room, below the wall");
   assert.ok(beta.split(",").includes("task-budgets-2026-03-13"), beta);
   const system = body.system.map(b => b.text).join("");
   for (const part of ["# Writing a magic theme for Caprice", "pub trait Theme", "package caprice:theme", "The Magic Snow, as a theme program", "theme!(Fireflies)"]) {
@@ -1252,7 +1252,7 @@ test("a rich theme, which only an older app asks for, counts as two, and its lat
   const rich = said => ada("/api/theme-program", { method: "POST", body: said, headers: { "X-Caprice-Tier": "rich" } });
   const { theme } = await (await rich("A village of treehouses")).json();
   assert.equal(claude.asked[0].body.max_tokens, 128000);
-  assert.deepEqual(claude.asked[0].body.output_config, { effort: "medium", task_budget: { type: "tokens", total: 110000 } }, "told its room");
+  assert.deepEqual(claude.asked[0].body.output_config, { effort: "high", task_budget: { type: "tokens", total: 110000 } }, "told its room");
   assert.ok(claude.asked[0].beta.split(",").includes("task-budgets-2026-03-13"), claude.asked[0].beta);
   assert.equal((await round(ada, theme, "errors", "error: one")).status, 200);
   assert.equal(claude.asked[1].body.max_tokens, 128000, "its fix is rich too, whatever the app says");
@@ -1261,7 +1261,7 @@ test("a rich theme, which only an older app asks for, counts as two, and its lat
   assert.match(await more.text(), /A rich theme counts as 2, and today has room for a simple one only/);
   assert.equal((await begin(ada)).status, 200, "a simple one still fits");
   assert.equal(claude.asked[2].body.max_tokens, 128000, "as much room: the model's most");
-  assert.equal(claude.asked[2].body.output_config.effort, "medium", "a simple one at medium too");
+  assert.equal(claude.asked[2].body.output_config.effort, "high", "a simple one at high too");
   assert.equal((await round(ada, theme, "change", "Bluer")).status, 503, "six of the site's seven used (two held back by each theme), and a rich one takes two");
   assert.equal(claude.asked.length, 3);
 });
@@ -1358,6 +1358,7 @@ test("a theme begun from a sketch sends its pictures and strokes, keeps the sket
   const { theme } = await got.json();
 
   // Round 1: whole + per-ink PNGs, ink rules, unit coordinates, and optional words.
+  assert.equal(claude.asked[0].body.output_config.effort, "high");
   const first = claude.asked[0].body.messages[0].content;
   assert.equal(first.length, 4, "3 pictures + prompt text");
   assert.deepEqual(first.slice(0, 3).map(c => c.source.data), pics.map(p => Buffer.from(p).toString("base64")));
