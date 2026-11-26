@@ -559,4 +559,20 @@ mod tests {
         assert_eq!(ago(0, DAY + 5), "yesterday");
         assert_eq!(ago(0, 4 * DAY), "4 days ago");
     }
+
+    #[test]
+    fn an_old_version_is_kept_until_it_is_exactly_a_month_old() {
+        // Twenty-one versions on twenty-one days: the oldest is the only one not among the newest.
+        let times: Vec<u64> = (0..21).map(|d| d * DAY).collect();
+        let month = KEEP_DAYS * DAY;
+        assert!(kept(&times, month - 1)[0], "a second short of a month");
+        assert!(!kept(&times, month)[0], "a month to the second");
+        assert!(kept(&times, month)[1..].iter().all(|k| *k), "the newest twenty all the same");
+    }
+
+    #[test]
+    fn two_days_to_the_second_is_no_longer_yesterday() {
+        assert_eq!(ago(0, 2 * DAY - 1), "yesterday");
+        assert_eq!(ago(0, 2 * DAY), "2 days ago");
+    }
 }

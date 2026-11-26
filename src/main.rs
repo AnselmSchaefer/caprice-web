@@ -11734,4 +11734,125 @@ mod tests {
         assert!(shown.lines().any(|l| l.starts_with("Open")), "the menu is open");
         assert!(!shown.lines().any(|l| l.trim() == "New"), "a new story begins from the welcome there");
     }
+
+    #[test]
+    fn a_story_opened_as_its_newest_version_holds_keeps_no_copy_and_has_no_changes() {
+        let mut h = Harness::new();
+        h.frames(3, vec![], Modifiers::NONE);
+        let dir = test_dir("opened-kept");
+        h.type_text("As it was kept");
+        h.wait(6.0);
+        assert!(h.app.keep.has_changes(), "the changes are seen");
+        (h.app.keep.dir, h.app.keep.clock) = (Some(dir.clone()), Some(4_000_000));
+        // Its newest version, written before, holds just what the story holds now.
+        let mine = dir.join(&h.app.story_id);
+        std::fs::create_dir_all(&mine).unwrap();
+        std::fs::write(mine.join("3000000.caprice"), serde_json::to_string(&h.app.doc_file()).unwrap()).unwrap();
+        let id = h.app.story_id.clone();
+        h.app.keep.opened(&id);
+        assert!(!h.app.keep.has_changes(), "opened, nothing has changed yet");
+        h.app.keep_now();
+        assert_eq!(versions::times_kept(&mine), [3_000_000], "no second copy of the same");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn autosave_waits_the_whole_delay_after_a_change() {
+        let mut h = Harness::new();
+        h.frames(3, vec![], Modifiers::NONE);
+        h.app.keep.autosave = true;
+        let dir = test_dir("autosave-delay");
+        let path = dir.join("story.caprice");
+        h.type_text("Once");
+        h.app.save_to(path.clone());
+        // The clock is well on before the change, so the delay must count from the change, not from the start.
+        h.wait(versions::SAVE_AFTER + 1.0);
+        assert!(!h.app.unsaved());
+        h.type_text(" more");
+        // The change is seen at the next look, and the delay counts from then.
+        h.wait(6.0);
+        assert!(h.app.keep.has_changes());
+        h.wait(versions::SAVE_AFTER / 2.0);
+        assert!(h.app.unsaved(), "half way, not yet");
+        h.wait(versions::SAVE_AFTER / 2.0);
+        assert!(!h.app.unsaved(), "saved once the delay is over");
+        assert!(std::fs::read_to_string(&path).unwrap().contains("Once more"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn autosave_waits_while_the_leaving_question_is_asked() {
+        let mut h = Harness::new();
+        h.frames(3, vec![], Modifiers::NONE);
+        h.app.keep.autosave = true;
+        let dir = test_dir("autosave-leaving");
+        let path = dir.join("story.caprice");
+        h.type_text("Once");
+        h.app.save_to(path.clone());
+        h.type_text(" more");
+        h.app.leaving = Some(fileio::Leaving::Close);
+        h.wait(6.0);
+        h.wait(versions::SAVE_AFTER + 10.0);
+        assert!(h.app.unsaved(), "the writer is still answering");
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("more"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn saving_quietly_leaves_the_status_as_it_was() {
+        let mut h = Harness::new();
+        h.frames(3, vec![], Modifiers::NONE);
+        let dir = test_dir("quiet-save");
+        let path = dir.join("story.caprice");
+        h.type_text("Once");
+        h.app.save_to(path.clone());
+        h.type_text(" more");
+        h.app.status = "- 2 found".into();
+        h.app.save_quietly();
+        assert_eq!(h.app.status, "- 2 found");
+        assert!(!h.app.unsaved());
+        assert!(std::fs::read_to_string(&path).unwrap().contains("Once more"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn saving_quietly_still_tells_when_saving_failed() {
+        let mut h = Harness::new();
+        h.frames(3, vec![], Modifiers::NONE);
+        let dir = test_dir("quiet-save-fails");
+        h.type_text("Once");
+        // A folder is no file to write to.
+        h.app.path = Some(dir.clone());
+        h.app.status = "- 2 found".into();
+        h.app.save_quietly();
+        assert!(h.app.status.starts_with("- save failed"), "{:?}", h.app.status);
+        assert!(h.app.unsaved());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn two_versions_kept_in_one_second_go_to_that_second_and_the_next() {
+        let mut h = Harness::new();
+        h.frames(3, vec![], Modifiers::NONE);
+        let dir = test_dir("same-second");
+        (h.app.keep.dir, h.app.keep.clock) = (Some(dir.clone()), Some(6_000_000));
+        h.type_text("First");
+        h.app.keep_now();
+        h.type_text(", then second");
+        h.app.keep_now();
+        assert_eq!(versions::times_kept(&dir.join(&h.app.story_id)), [6_000_000, 6_000_001]);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_story_taken_in_counts_as_the_next_version_of_the_document() {
+        let mut h = Harness::new();
+        h.frames(3, vec![], Modifiers::NONE);
+        h.type_text("Once");
+        let old = h.app.doc.version;
+        assert!(old > 0, "the typing made a version");
+        let (ctx, file) = (h.ctx.clone(), h.app.doc_file());
+        h.app.adopt(&ctx, file);
+        assert_eq!(h.app.doc.version, old + 1);
+    }
 }
