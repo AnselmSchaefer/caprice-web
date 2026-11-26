@@ -106,6 +106,8 @@ Full list with reasons and tests in `ARCHITECTURE.md` §4.
    The garden's most pages (`Doc::garden`) are not: they never shrink while a story is open, and
    a story opened is counted from its pages (R30).
 9. **Every formatting feature needs a Word mapping** in `export.rs`, or a decision that it has none.
+   Text pasted from elsewhere (`paste.rs`, R37) reads it from HTML and Markdown where they have it,
+   and puts a paragraph's format only on paragraphs all pasted.
 10. **Tests never call Claude** unless marked `#[ignore]` and calling `claude::allow_live()`.
 11. **Print draws `App::underlay`, `PageLayout::ink` and `App::furniture`**, in that order (boxes behind
     the text; the text and pictures; header, footer, boxes in front). Anything new
@@ -131,7 +133,9 @@ Full list with reasons and tests in `ARCHITECTURE.md` §4.
     `ask_path` (in the browser: the shelf, the page's picker, or a download); the time is
     `platform::since_epoch`; a theme program is run by `platform::program` and built by
     `platform::compiler`; requests to Caprice's own server are `platform::send`, through
-    `cloud::Server` (a stand-in in tests). What must happen while the page is hidden goes in `App::logic`.
+    `cloud::Server` (a stand-in in tests); the clipboard beyond egui's plain text is
+    `platform::pasted_html` and `platform::read_clipboard` (a stand-in in tests).
+    What must happen while the page is hidden goes in `App::logic`.
     `clippy.toml` flags the `std` calls that panic or fail in the browser. The browser's
     Content-Security-Policy forbids evaluating code: no library may (`web/csp.mjs`).
 

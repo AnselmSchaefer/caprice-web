@@ -275,6 +275,24 @@ await page.keyboard.press("Control+c");
 await page.waitForTimeout(500);
 const copied = await page.evaluate(() => navigator.clipboard.readText());
 check("typing beyond ASCII and through an input method, and copying", copied.endsWith("Café, naïve, Größe, «Ελληνικά» 你好"));
+
+// Pasting from a word processor: the page keeps the HTML that came with the plain text, and the
+// story takes its paragraphs from there (the plain text has empty lines between them, the HTML none).
+await page.keyboard.press("Control+End");
+await page.keyboard.press("Enter");
+await page.evaluate(() => {
+  const data = new DataTransfer();
+  data.setData("text/plain", "The Inn\r\n\r\nIt was late.");
+  data.setData("text/html", "<meta charset='utf-8'><h1>The Inn</h1><p>It was <b>late</b>.</p>");
+  (document.activeElement || document.body).dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+});
+await page.waitForTimeout(500);
+await page.keyboard.press("Control+a");
+await page.keyboard.press("Control+c");
+await page.waitForTimeout(500);
+const pasted = await page.evaluate(() => navigator.clipboard.readText());
+check("text pasted from a word processor takes its paragraphs from the HTML with it", pasted.endsWith("你好\nThe Inn\nIt was late."), JSON.stringify(pasted.slice(-40)));
+await page.keyboard.press("Control+End");
 await page.waitForTimeout(6000);
 
 // Signed out, nothing was asked of the server; File → Stories online asks it how to sign in.

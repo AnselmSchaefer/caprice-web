@@ -310,6 +310,62 @@ pub fn frame_on_back(ctx: &egui::Context) {
     browser::on_back(wake.unchecked_ref());
 }
 
+thread_local! {
+    /// Tests put formatted text (HTML) and text on the clipboard here.
+    #[cfg(test)]
+    static CLIPBOARD: std::cell::RefCell<(Option<String>, Option<String>)> = const { std::cell::RefCell::new((None, None)) };
+}
+
+/// The formatted text (HTML) that came on the clipboard with the plain `text` just pasted, from
+/// Word, LibreOffice, Google Docs or a web page; taken, so a later paste never finds it. egui
+/// passes on only the plain text. In the browser the page heard the paste first and kept both;
+/// on the desktop the clipboard still holds them.
+pub fn pasted_html(text: &str) -> Option<String> {
+    #[cfg(test)]
+    let html = {
+        let _ = text;
+        CLIPBOARD.with(|c| c.borrow_mut().0.take())
+    };
+    #[cfg(all(target_arch = "wasm32", not(test)))]
+    let html = browser::pasted_html(text);
+    #[cfg(not(any(test, target_arch = "wasm32")))]
+    let html = {
+        let _ = text;
+        arboard::Clipboard::new().ok().and_then(|mut c| c.get().html().ok())
+    };
+    html.filter(|h| !h.trim().is_empty())
+}
+
+/// Tests copy formatted text from another program: the next paste brings `html` with it.
+#[cfg(test)]
+pub fn put_html_on_clipboard(html: &str) {
+    CLIPBOARD.with(|c| c.borrow_mut().0 = Some(html.to_owned()));
+}
+
+/// Tests copy text in another program, for Insert › Paste as Markdown to read.
+#[cfg(test)]
+pub fn put_text_on_clipboard(text: &str) {
+    CLIPBOARD.with(|c| c.borrow_mut().1 = Some(text.to_owned()));
+}
+
+/// The text on the clipboard, read when the writer asks (Paste as Markdown), sent on `tx`: none if
+/// it cannot be read. In the browser the page may first ask the writer whether Caprice may see it,
+/// so it comes later; on the desktop, at once.
+pub fn read_clipboard(tx: std::sync::mpsc::Sender<Option<String>>, wake: Waker) {
+    #[cfg(test)]
+    let _ = tx.send(CLIPBOARD.with(|c| c.borrow().1.clone()));
+    #[cfg(all(target_arch = "wasm32", not(test)))]
+    wasm_bindgen_futures::spawn_local(async move {
+        let text = wasm_bindgen_futures::JsFuture::from(browser::read_clipboard()).await.ok().and_then(|t| t.as_string());
+        let _ = tx.send(text);
+        wake.wake();
+    });
+    #[cfg(not(any(test, target_arch = "wasm32")))]
+    let _ = tx.send(arboard::Clipboard::new().ok().and_then(|mut c| c.get_text().ok()));
+    #[cfg(not(all(target_arch = "wasm32", not(test))))]
+    wake.wake();
+}
+
 /// A file dialog to show: the kinds of file it offers, and the name it suggests.
 #[derive(Clone, Default)]
 pub struct Dialog {
@@ -565,6 +621,26 @@ mod browser {
                 if (ours.has(key) || (key === "r" && !e.shiftKey)) e.preventDefault();
             }, { capture: true });
         }
+        // What a paste brings besides its plain text (`pasted_html`): the formatted text of Word,
+        // LibreOffice, Google Docs and web pages. Heard on the window, capturing, so before eframe,
+        // which takes only the plain text; kept with that text, to be sure it is the same paste.
+        let pasted = null;
+        if (typeof document !== "undefined") {
+            addEventListener("paste", e => {
+                const data = e.clipboardData;
+                pasted = data ? { text: data.getData("text").replace(/\r\n/g, "\n"), html: data.getData("text/html") } : null;
+            }, { capture: true });
+        }
+        export function pasted_html(text) {
+            const was = pasted;
+            pasted = null;
+            return was && was.html && was.text === text ? was.html : undefined;
+        }
+        // The clipboard's text, for Paste as Markdown; the browser may ask the writer first.
+        export function read_clipboard() {
+            if (!navigator.clipboard || !navigator.clipboard.readText) return Promise.resolve(undefined);
+            return navigator.clipboard.readText().catch(() => undefined);
+        }
         export function pick_file(accept) {
             return new Promise(done => {
                 const input = document.createElement("input");
@@ -737,6 +813,8 @@ mod browser {
         pub fn story_entry();
         pub fn took_back() -> bool;
         pub fn on_back(wake: &js_sys::Function);
+        pub fn pasted_html(text: &str) -> Option<String>;
+        pub fn read_clipboard() -> js_sys::Promise;
         #[wasm_bindgen(js_name = show_pdf)]
         fn js_show_pdf(bytes: &[u8]);
         #[wasm_bindgen(js_name = fetch_each)]
