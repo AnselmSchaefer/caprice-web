@@ -209,13 +209,16 @@ impl App {
         self.clip = Some(Clip { piece: Piece { text: plain.clone(), styles }, plain, images });
     }
 
-    /// Paste formatted if the clipboard still holds what was copied here, else as plain text.
+    /// Paste formatted if the clipboard still holds what was copied here; else with the formatting
+    /// of the HTML that came with it from another program (`paste.rs`); else as plain text.
     fn paste(&mut self, ctx: &egui::Context, t: &str) {
         // Another device holds the pen (R34).
         if !self.can_edit() {
             return;
         }
         let plain: String = t.chars().filter(|&c| c != '\r').collect();
+        // Taken whatever is pasted, so that it is never used for a later paste.
+        let html = crate::platform::pasted_html(t);
         match self.clip.take() {
             Some(clip) if clip.plain == plain => {
                 self.paste_clip(ctx, &clip);
@@ -223,9 +226,93 @@ impl App {
             }
             clip => {
                 self.clip = clip;
-                self.insert_text(ctx, t);
+                match html.map(|h| crate::paste::from_html(&h)).filter(|paras| !paras.is_empty()) {
+                    Some(paras) => self.paste_formatted(ctx, &paras),
+                    None => self.insert_text(ctx, t),
+                }
             }
         }
+    }
+
+    /// Insert › Paste as Markdown: the clipboard's text is read as Markdown and pasted with its
+    /// formatting. It is asked for here; the browser may first ask the writer (`tend_markdown`).
+    pub fn paste_markdown(&mut self, ctx: &egui::Context) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        crate::platform::read_clipboard(tx, crate::platform::Waker::new(ctx));
+        self.markdown = Some(rx);
+        self.tend_markdown(ctx);
+    }
+
+    /// The clipboard's text for Paste as Markdown, once it comes: pasted at the caret as it is then.
+    pub fn tend_markdown(&mut self, ctx: &egui::Context) {
+        let Some(rx) = &self.markdown else { return };
+        let text = match rx.try_recv() {
+            Ok(text) => text,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => None,
+        };
+        self.markdown = None;
+        let paras = text.as_deref().map(crate::paste::from_markdown).unwrap_or_default();
+        if paras.is_empty() {
+            self.status = if text.is_some() { "- nothing to paste" } else { "- the clipboard could not be read" }.into();
+            return;
+        }
+        self.paste_formatted(ctx, &paras);
+    }
+
+    /// Paste paragraphs read from elsewhere (`paste.rs`) in place of the selection, as one step of
+    /// undo. Their letters keep their look in the font and size typing would have. A paragraph's
+    /// format (chapter title, list, alignment) goes only onto a paragraph made of pasted text alone,
+    /// as copied formatting does (R25): the first pasted paragraph joins the text before the caret
+    /// and keeps that paragraph's format, the last joins the text after it.
+    pub fn paste_formatted(&mut self, ctx: &egui::Context, paras: &[crate::paste::Para]) {
+        let Some(last) = paras.last() else { return };
+        // Another device holds the pen (R34).
+        if !self.can_edit() {
+            return;
+        }
+        let max = self.max_caret();
+        let (a, b) = self.selection();
+        let (a, b) = (a.min(max), b.min(max));
+        let line = self.doc.para_attrs_at(a);
+        let starts_line = self.doc.para_start(a).0 == a;
+        let ends_line = self.doc.char_at(b).is_some_and(is_terminator);
+        let (mut text, mut styles) = (String::new(), Vec::new());
+        for (i, para) in paras.iter().enumerate() {
+            for (run, look) in &para.runs {
+                let st = para.letters(&self.typing, *look);
+                text.push_str(run);
+                styles.extend(std::iter::repeat_n(st, run.chars().count()));
+            }
+            if i + 1 < paras.len() {
+                let attrs = if i == 0 && !starts_line { line } else { para.attrs(line.spacing) };
+                text.push('\n');
+                styles.push(para.letters(&self.typing, crate::paste::Look::default()).with_para(attrs));
+            }
+        }
+        let (ba, bb) = (self.doc.char_to_byte(a), self.doc.char_to_byte(b));
+        let old = Piece { text: self.doc.flow.text[ba..bb].to_owned(), styles: self.doc.flow.styles[a..b].to_vec() };
+        let end = a + styles.len();
+        let replace = Edit::Replace { at: a, old, new: Piece { text, styles } };
+        let (dchars, dbytes) = replace.delta();
+        // The paragraph the last one ends is all pasted: it takes the last one's format.
+        let mark = &self.doc.flow.styles[b];
+        let formatted = mark.with_para(last.attrs(mark.para.spacing));
+        let restyle = (ends_line && (paras.len() > 1 || starts_line) && formatted != *mark)
+            .then(|| Edit::Restyle { at: end, old: vec![mark.clone()], new: vec![formatted] });
+        let old_end = match restyle {
+            Some(restyle) => {
+                self.doc.apply_group(vec![replace, restyle]);
+                b + 1
+            }
+            None if a == b && end == a => return,
+            None => {
+                self.doc.apply(replace, ctx.input(|i| i.time));
+                b
+            }
+        };
+        self.doc.paginate_after(ctx, &self.typing, a, old_end, dchars, dbytes);
+        self.set_caret(ctx, end, false);
     }
 
     fn paste_clip(&mut self, ctx: &egui::Context, clip: &Clip) {

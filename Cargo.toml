@@ -26,6 +26,8 @@ zip = { version = "9.2.0", default-features = false, features = ["deflate"] }
 wasmparser = { version = "=0.263.0", default-features = false, features = ["std", "validate", "features"] }
 ed25519-compact = { version = "2.6.0", default-features = false }
 sha2 = { version = "0.11.1", default-features = false }
+# Paste as Markdown (R37): Markdown read into paragraphs and their formatting.
+pulldown-cmark = { version = "0.13.6", default-features = false }
 
 [dev-dependencies]
 # Modules written by hand for the check's tests; and the themes of `themes/` built for the machine
@@ -37,6 +39,8 @@ themes-played = { path = "themes/played", version = "0.0.0" }
 wit-component = "0.263.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# The HTML a paste brought, and the clipboard's text (R37): egui's clipboard, asked for what it leaves out.
+arboard = { version = "3.6.1", default-features = false }
 rfd = "0.18.0"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

@@ -28,6 +28,7 @@ mod notes;
 mod numbers;
 mod own;
 mod paginate;
+mod paste;
 mod peek;
 mod platform;
 mod print;
@@ -315,6 +316,8 @@ pub struct App {
     pub may_close: bool,
     /// What was last copied or cut, with its formatting.
     pub clip: Option<editor::Clip>,
+    /// Paste as Markdown asked for the clipboard's text, which the browser may give later.
+    pub markdown: Option<std::sync::mpsc::Receiver<Option<String>>>,
     /// The text box selected, and whether it is being written in.
     pub boxes: textbox::Boxes,
     /// The welcome page, and the stories opened lately.
@@ -381,6 +384,7 @@ impl App {
             pads: HashMap::new(),
             last_page_rect: Rect::NOTHING,
             clip: None,
+            markdown: None,
             last_track: (Pos2::ZERO, Pos2::ZERO),
             caret_seen: None,
             followed: None,
@@ -676,6 +680,7 @@ impl App {
         }
         self.come_back(&ctx);
         self.poll_dialog(&ctx);
+        self.tend_markdown(&ctx);
         self.tend_workshop(&ctx);
         self.tend_making(&ctx);
         self.tend_gallery(&ctx);
@@ -4926,6 +4931,103 @@ mod tests {
         assert_eq!(h.app.doc.images.len(), 2);
         let ids: Vec<u32> = h.app.doc.flow.styles.iter().map(|s| s.image).filter(|&i| i != 0).collect();
         assert_eq!(ids, vec![2, 1], "the pasted picture is a copy with its own id");
+    }
+
+    /// The text of the letters for which `pick` holds, the runs apart by "|".
+    fn letters_where(h: &Harness, pick: impl Fn(&model::Style) -> bool) -> String {
+        let mut out = String::new();
+        let mut last = false;
+        for (c, st) in h.text().chars().zip(&h.app.doc.flow.styles) {
+            let on = pick(st) && !model::is_terminator(c);
+            if on && !last && !out.is_empty() {
+                out.push('|');
+            }
+            if on {
+                out.push(c);
+            }
+            last = on;
+        }
+        out
+    }
+
+    #[test]
+    fn text_copied_from_word_is_pasted_with_its_chapter_titles_lists_and_bold() {
+        let mut h = Harness::new();
+        let ctx = h.ctx.clone();
+        h.frames(3, vec![], Modifiers::NONE);
+        h.type_text(&format!("{}\n", "Opening words of the story. ".repeat(40)));
+        let before = h.text();
+        platform::put_html_on_clipboard("<h1>The Inn</h1><p>It was <b>late</b> and <i>red</i>.</p><ul><li>one</li><li>two</li></ul>");
+        h.frames(1, vec![egui::Event::Paste("The Inn\n\nIt was late and red.\n\none\ntwo".into())], Modifiers::NONE);
+        h.frames(2, vec![], Modifiers::NONE);
+        assert_eq!(h.text(), format!("{before}The Inn\nIt was late and red.\none\ntwo"));
+        let titles: Vec<String> = h.app.doc.chapters(false).into_iter().map(|e| e.title).collect();
+        assert_eq!(titles, ["The Inn"], "the heading is a chapter title");
+        assert_eq!(letters_where(&h, |s| s.bold), "late", "bold where it was, and the title not made bold");
+        assert_eq!(letters_where(&h, |s| s.italic), "red");
+        let at = |w: &str| h.text().find(w).unwrap();
+        assert_eq!(h.app.doc.para_attrs_at(at("one")).list, model::ListKind::Bullet);
+        assert_eq!(h.app.doc.para_attrs_at(at("two")).list, model::ListKind::Bullet, "the last one too, a paragraph of its own");
+        assert_eq!(h.app.doc.para_attrs_at(at("It was")).list, model::ListKind::None);
+        assert!(h.app.doc.flow.styles.iter().all(|s| s.font == h.app.typing.font && s.size == h.app.typing.size), "in the story's own font");
+        assert_eq!(h.app.caret, h.text().chars().count(), "the caret after what was pasted");
+        // The pages are those the story would have from scratch.
+        let shown: Vec<usize> = h.app.doc.spans.iter().map(|s| s.start).collect();
+        let typing = h.app.typing.clone();
+        h.app.doc.full_paginate(&ctx, &typing);
+        assert_eq!(shown, h.app.doc.spans.iter().map(|s| s.start).collect::<Vec<_>>());
+        // One undo takes the whole paste away.
+        h.key(Key::Z, Modifiers::COMMAND);
+        h.frames(2, vec![], Modifiers::NONE);
+        assert_eq!(h.text(), before);
+        assert!(h.app.doc.chapters(false).is_empty());
+        // The formatted text is for that paste only: the next paste of something else is plain.
+        h.frames(1, vec![egui::Event::Paste("**plain**".into())], Modifiers::NONE);
+        h.frames(2, vec![], Modifiers::NONE);
+        assert_eq!(h.text(), format!("{before}**plain**"));
+    }
+
+    #[test]
+    fn pasted_paragraph_formatting_goes_only_onto_paragraphs_made_of_pasted_text() {
+        let mut h = Harness::new();
+        let ctx = h.ctx.clone();
+        h.frames(3, vec![], Modifiers::NONE);
+        h.type_text("Start end");
+        h.app.set_caret(&ctx, 6, false);
+        platform::put_html_on_clipboard("<h1>Title</h1><ul><li>item</li></ul>");
+        h.frames(1, vec![egui::Event::Paste("Title\nitem".into())], Modifiers::NONE);
+        h.frames(2, vec![], Modifiers::NONE);
+        assert_eq!(h.text(), "Start Title\nitemend");
+        assert!(h.app.doc.chapters(false).is_empty(), "the story's own words are not made a title");
+        assert_eq!(h.app.doc.para_attrs_at(0).list, model::ListKind::None);
+        assert_eq!(h.app.doc.para_attrs_at(12).list, model::ListKind::None, "nor an item");
+        // A heading pasted into an empty paragraph is a chapter title.
+        h.key(Key::End, Modifiers::COMMAND);
+        h.type_text("\n");
+        platform::put_html_on_clipboard("<h2>Two</h2>");
+        h.frames(1, vec![egui::Event::Paste("Two".into())], Modifiers::NONE);
+        h.frames(2, vec![], Modifiers::NONE);
+        let titles: Vec<String> = h.app.doc.chapters(false).into_iter().map(|e| e.title).collect();
+        assert_eq!(titles, ["Two"]);
+    }
+
+    #[test]
+    fn paste_as_markdown_pastes_the_clipboards_text_with_its_formatting() {
+        let mut h = Harness::new();
+        let ctx = h.ctx.clone();
+        h.frames(3, vec![], Modifiers::NONE);
+        h.app.paste_markdown(&ctx);
+        h.frames(2, vec![], Modifiers::NONE);
+        assert_eq!(h.text(), "", "nothing could be read");
+        platform::put_text_on_clipboard("# Chapter One\n\nIt was **late**, *very* late.\n\n- a cat\n- a dog\n");
+        h.app.paste_markdown(&ctx);
+        h.frames(2, vec![], Modifiers::NONE);
+        assert_eq!(h.text(), "Chapter One\nIt was late, very late.\na cat\na dog");
+        let titles: Vec<String> = h.app.doc.chapters(false).into_iter().map(|e| e.title).collect();
+        assert_eq!(titles, ["Chapter One"]);
+        assert_eq!(letters_where(&h, |s| s.bold), "late");
+        assert_eq!(letters_where(&h, |s| s.italic), "very");
+        assert_eq!(h.app.doc.para_attrs_at(h.text().find("a dog").unwrap()).list, model::ListKind::Bullet);
     }
 
     #[test]

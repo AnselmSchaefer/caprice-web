@@ -659,6 +659,7 @@ enum InsertAction {
     /// A new header (true) or footer.
     Band(bool, Band),
     PageBreak,
+    Markdown,
 }
 
 /// The looks a text box can have, each drawn as a small box with a few words in it, as the
@@ -1292,6 +1293,12 @@ impl App {
                     out.insert = Some(InsertAction::PageBreak);
                     ui.close();
                 }
+                let markdown = egui::Button::new("Paste as Markdown").frame(false);
+                let tip = "Text copied with **stars**, # signs and - dashes, pasted bold, in italics, as lists and chapter titles";
+                if ui.add(markdown).on_hover_text(tip).clicked() {
+                    out.insert = Some(InsertAction::Markdown);
+                    ui.close();
+                }
             });
     }
 
@@ -1431,6 +1438,7 @@ impl App {
             Some(InsertAction::TextBox(look)) => self.insert_text_box(ctx, look),
             Some(InsertAction::Band(top, band)) => self.set_band(top, band),
             Some(InsertAction::PageBreak) => self.insert_page_break(ctx),
+            Some(InsertAction::Markdown) => self.paste_markdown(ctx),
             None => {}
         }
         match out.file {

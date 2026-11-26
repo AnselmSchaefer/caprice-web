@@ -66,6 +66,7 @@ cast (names, looks, sheets)  ──named_in(what is painted, or just before)─�
 | `dropcap.rs` | Which paragraphs get a drop cap, and the three-piece layout (cap, lines beside it, rest) |
 | `contents.rs` | `Doc::chapters`, splitting the contents over pages, laying out one page of them, migrating the old contents char |
 | `editor.rs` | Caret, selection, typing, deleting, clipboard, keys, mouse, formatting commands, `set_setup`, `turn_to`, the editable page surface |
+| `paste.rs` | Text pasted from elsewhere with its formatting (R37): the HTML that comes on the clipboard with the plain text, and Markdown (Paste as Markdown), read into paragraphs (body, chapter title, list item; alignment) and runs of bold, italic, underline, colour |
 | `main.rs` | `App` state, `main()`, the frame loop, page position animation, `go_to_page`, the app-level tests and their `Harness` |
 | `view.rs` | Camera: fit (to the width on a phone), zoom, panning, two-finger swipe through pages, following the caret (R32); one finger is the editor's `Finger` |
 | `render.rs` | Paperstack look: paper, piles, static pages, sliding pages |
@@ -295,6 +296,8 @@ paginating).
   position is just before it (`max_caret`).
 - Text leaving the app (Claude, the scene, plain clipboard, chapter titles) leaves out `IMAGE_CHAR`
   and turns page breaks into line breaks.
+- Text pasted from elsewhere with its formatting (`paste.rs`, R37) leaves out all three, and
+  every control character but the tab.
 
 ### R9 — Files: only stored state, old files keep opening
 
@@ -1689,6 +1692,12 @@ them; it asks `platform` instead, whose desktop half does what Caprice always di
   Ctrl shortcut in `editor.rs` or `App::frame` goes into that list too. Leaving with changes not
   saved, the browser asks (R22). Hidden, the page draws no frame, so what must happen then is in
   `App::logic`; the page asks for one on `visibilitychange` (`frame_on_visibility_change`).
+- **The clipboard** is egui's for copying and plain pasting. What egui leaves out is
+  `platform`'s: the HTML that came with a paste (`pasted_html`: in the browser heard by the page,
+  capturing, before eframe, and kept with its plain text; on the desktop read with `arboard`), and
+  the clipboard's text read when the writer asks (`read_clipboard`: in the browser
+  `navigator.clipboard`, which may ask the writer first, so it answers on a channel). Tests put
+  both there (`put_html_on_clipboard`, `put_text_on_clipboard`) and never reach the system's (R37).
 - **Claude cannot be asked from the browser itself** (it needs a server, `WEB_PLAN.md` step 6):
   `platform::CLAUDE` is false there, and so `App::claude`. The Claude menu is then shown greyed
   ("Comes to the browser version later"), and Ctrl+Shift+P takes up no pen. Scenes are the
@@ -2965,6 +2974,40 @@ carrier, over the page). `themes/snow` is the Magic Snow ported to it, shape for
   step 5: the Snow drawing on the desk's own colour and snowing in the window, the Vineyard a
   layout of its own and its own sky, all of it zoomed).
 
+### R37 — Text pasted from elsewhere keeps what Caprice has of its look; its paragraphs' format only on paragraphs all pasted
+
+Word, LibreOffice, Google Docs and web pages put HTML on the clipboard beside the plain text.
+`App::paste` uses it when the paste is not Caprice's own copy (`Clip`, which wins): `paste.rs`
+reads it into `Para`s, and `App::paste_formatted` puts them in. Insert › Paste as Markdown reads
+the clipboard's text (`platform::read_clipboard`) as Markdown into the same `Para`s. Without HTML,
+a paste is plain text in the typing style, as before.
+
+- **Only what Caprice has is kept**: every heading is a chapter title (`set_chapter_title`, so
+  centred), list items are bullets or numbered, alignment, and the letters' bold, italic,
+  underline and colour. Font and size are the typing style's, and line spacing the paragraph's
+  where it is pasted (§7). A chapter title's letters are not made bold: it is drawn bold already,
+  and taking the title off gives plain text back. Colour near black is the ink; colours too pale
+  for white paper are dropped.
+- **A pasted paragraph's format goes only onto a paragraph made of pasted text alone**, as the
+  brush's does (R25): the first pasted paragraph joins the text before the caret and its mark
+  takes that paragraph's format (as Enter would); the last joins the text after it and keeps the
+  story's; when the paste ends at a paragraph's end and that paragraph is all pasted, its mark is
+  restyled with the last pasted paragraph's format. So a heading pasted mid-sentence does not make
+  the writer's own words a chapter.
+- It is one `Edit::Replace` (and that restyle) through `Doc::apply` (R1), one undo step,
+  `paginate_after` from the paste's start (R2, R3); pasted chapters show in the contents as typed
+  ones do (R6). The HTML is taken at every paste, used or not, so it never reaches a later one.
+- **A new kind of formatting** (R10's checklist in §5) is read here too, where HTML or Markdown
+  carry it; a new paragraph kind decides what it is when pasted.
+- The HTML is read leniently, as browsers do (elements left open closed by what closes them,
+  Word's conditional parts and its list markers, Google Docs' bold wrapper `font-weight:normal`);
+  each source has a test of its own in `paste.rs`.
+- Tests: `text_copied_from_word_is_pasted_with_its_chapter_titles_lists_and_bold`,
+  `pasted_paragraph_formatting_goes_only_onto_paragraphs_made_of_pasted_text`,
+  `paste_as_markdown_pastes_the_clipboards_text_with_its_formatting`, the reader's in `paste.rs`;
+  in the browser, `smoke.mjs` ("text pasted from a word processor takes its paragraphs from the
+  HTML with it").
+
 ## 5. Checklists for common changes
 
 **Something new in the background** (a rendering, a request): `platform::spawn` with owned data in,
@@ -3008,11 +3051,13 @@ rebuilding them.
 **A new paragraph attribute** (like line spacing or chapter title): `ParaAttrs` → `run_format` /
 `paragraph_job` → the toolbar (`ui.rs`) → file format default (R9) → Word mapping (R10) → whether
 it changes drop caps (`has_drop_cap`) or the contents (`chapters`). The brush copies it with the
-rest of `ParaAttrs` (R25).
+rest of `ParaAttrs` (R25). Pasted from elsewhere: `paste::Para::attrs`, read from HTML and
+Markdown where they have it (R37).
 
 **A new kind of character formatting** (like colour): a `Style` field (in `same_char`) →
 `run_format` → the toolbar and `format_box` → Word's `run_props` (R10). It prints (R20) and the
-brush copies it (R25) without more work.
+brush copies it (R25) without more work. Pasted from elsewhere: a field of `paste::Look`, read from
+HTML (and Markdown, if it has one) and put on in `Para::letters` (R37).
 
 **A new page setting:** `PageSetup` field + default → Page menu (`ui.rs`, applied through
 `set_setup`) → pagination/layout → Word section or settings (R10) → round-trip test.
@@ -3459,5 +3504,11 @@ result sent back, a stand-in answer in `api.test.mjs` and in `cloud::stand_in` (
   theme cost and whether it was kept (R33), the daily limits bound what free costs, and the window
   says it is free for now. Themes kept while it is free stay the writer's. Billing, when it comes,
   is a free allowance and payment beyond it, charged for a theme kept, never for rounds.
+- **2026-11-26 — Pasting from elsewhere keeps the look, not the font.** Text pasted from Word,
+  Google Docs or a web page keeps its bold, italics, underline, colour, lists, alignment and
+  headings (as chapter titles, every level: Caprice has one), and is written in the story's own
+  font and size, so a paste does not bring Arial or 11 pt into a novel. Markdown is read as such
+  only when asked (Insert › Paste as Markdown): a star in prose is not emphasis. A PDF puts only
+  plain text on the clipboard; nothing is recovered from it (R37).
 - **No `.docx` import.** Export only.
 - **Contents heading is "Contents"** (English), in the app and in Word.
