@@ -821,4 +821,89 @@ mod tests {
         let json = r#"{"version":2,"content":[{"text":"one\n","font":"F","size":12.0,"bold":false,"underline":false}]}"#;
         assert!(!serde_json::from_str::<DocFile>(json).unwrap().into_doc().setup.footer.is_on());
     }
+
+    #[test]
+    fn several_scenes_boxes_and_notes_each_open_with_an_id_of_their_own() {
+        let json = r#"{"version":2,"content":[{"text":"One\ntext\n","font":"F","size":12.0,"bold":false,"underline":false}],
+                       "scenes":[{"at":0,"versions":["<svg/>"]},{"at":4,"versions":["<svg/>"]}],
+                       "boxes":[{"at":0,"pos":[0.0,0.0],"size":[50.0,20.0],"text":"a","style":{"text":" ","font":"F","size":12.0,"bold":false,"underline":false}},
+                                {"at":4,"pos":[0.0,0.0],"size":[50.0,20.0],"text":"b","style":{"text":" ","font":"F","size":12.0,"bold":false,"underline":false}}],
+                       "notes":[{"start":0,"end":3,"text":"one"},{"start":4,"end":8,"text":"two"}]}"#;
+        let doc = serde_json::from_str::<DocFile>(json).unwrap().into_doc();
+        assert_eq!(doc.scenes.iter().map(|s| s.id).collect::<Vec<_>>(), [1, 2]);
+        assert_eq!(doc.boxes.iter().map(|b| b.id).collect::<Vec<_>>(), [1, 2]);
+        assert_eq!(doc.notes.iter().map(|n| n.id).collect::<Vec<_>>(), [1, 2]);
+        assert_eq!((doc.next_scene_id, doc.next_box_id, doc.next_note_id), (3, 3, 3), "the next ones get new ids too");
+    }
+
+    #[test]
+    fn a_look_or_scene_version_in_use_past_the_last_one_opens_as_the_last_one() {
+        let json = r#"{"version":2,"content":[{"text":"Mara\n","font":"F","size":12.0,"bold":false,"underline":false}],
+                       "cast":[{"name":"Mara","looks":[{"look":"grey braid"},{"look":"red coat"},{"look":"old hat"}],"active":7}],
+                       "scenes":[{"at":0,"versions":["<svg id='a'/>","<svg id='b'/>","<svg id='c'/>"],"shown":9}]}"#;
+        let doc = serde_json::from_str::<DocFile>(json).unwrap().into_doc();
+        assert_eq!(doc.cast[0].active, 2);
+        assert_eq!(doc.cast[0].look().words, "old hat");
+        assert_eq!(doc.scenes[0].shown, 2);
+    }
+
+    #[test]
+    fn scenes_boxes_and_numbering_changes_pinned_past_the_end_open_on_the_last_char() {
+        let json = r#"{"version":2,"content":[{"text":"One\ntext\n","font":"F","size":12.0,"bold":false,"underline":false}],
+                       "scenes":[{"at":100,"versions":["<svg/>"]}],
+                       "boxes":[{"at":100,"pos":[0.0,0.0],"size":[50.0,20.0],"text":"a","style":{"text":" ","font":"F","size":12.0,"bold":false,"underline":false}}],
+                       "numbers":[{"at":100,"numbering":{"counting":"Off"}}]}"#;
+        let doc = serde_json::from_str::<DocFile>(json).unwrap().into_doc();
+        assert_eq!(doc.total_chars(), 9);
+        assert_eq!(doc.scenes[0].at, 8);
+        assert_eq!(doc.boxes[0].at, 8);
+        assert_eq!(doc.number_marks[0].at, 8);
+    }
+
+    #[test]
+    fn boxes_and_numbering_changes_after_the_old_contents_char_stay_on_their_text() {
+        let json = r#"{"version":2,"content":[{"text":"\fOne\ntext\n","font":"F","size":12.0,"bold":false,"underline":false}],
+                       "boxes":[{"at":6,"pos":[0.0,0.0],"size":[50.0,20.0],"text":"a","style":{"text":" ","font":"F","size":12.0,"bold":false,"underline":false}}],
+                       "numbers":[{"at":6,"numbering":{"counting":"Off"}}]}"#;
+        let doc = serde_json::from_str::<DocFile>(json).unwrap().into_doc();
+        assert_eq!(doc.flow.text, "One\ntext\n");
+        assert_eq!(doc.boxes[0].at, 4, "the box still on \"text\"");
+        assert_eq!(doc.number_marks[0].at, 4, "the change still on \"text\"");
+    }
+
+    #[test]
+    fn things_pinned_on_the_old_contents_chars_themselves_open_on_the_first_char_of_the_story() {
+        let style = r#"{"text":" ","font":"F","size":12.0,"bold":false,"underline":false}"#;
+        for at in [0, 1] {
+            let json = format!(
+                r#"{{"version":2,"content":[{{"text":"\fOne\ntext\n","font":"F","size":12.0,"bold":false,"underline":false}}],
+                     "boxes":[{{"at":{at},"pos":[0.0,0.0],"size":[50.0,20.0],"text":"a","style":{style}}}],
+                     "numbers":[{{"at":{at},"numbering":{{"counting":"Off"}}}}],
+                     "scenes":[{{"at":{at},"versions":["<svg/>"]}}],
+                     "notes":[{{"start":{at},"end":5,"text":"the title"}}]}}"#
+            );
+            let doc = serde_json::from_str::<DocFile>(&json).unwrap().into_doc();
+            assert_eq!(doc.flow.text, "One\ntext\n");
+            assert_eq!(doc.boxes[0].at, 0, "box at {at}");
+            assert_eq!(doc.number_marks[0].at, 0, "numbering change at {at}");
+            assert_eq!(doc.scenes[0].at, 0, "scene at {at}");
+            assert_eq!((doc.notes[0].start, doc.notes[0].end), (0, 3), "post-it from {at}, still on \"One\"");
+        }
+    }
+
+    #[test]
+    fn text_boxes_from_before_box_colours_open_in_the_accent_ink() {
+        let json = r#"{"at":0,"pos":[0.0,0.0],"size":[50.0,20.0],"text":"a","style":{"text":" ","font":"F","size":12.0,"bold":false,"underline":false}}"#;
+        let b = serde_json::from_str::<BoxFile>(json).unwrap();
+        assert_eq!(b.color, crate::model::ACCENT_INK);
+    }
+
+    #[test]
+    fn the_word_count_counts_every_word_across_runs() {
+        let json = r#"{"version":2,"content":[{"text":"Once up","font":"F","size":12.0,"bold":false,"underline":false},
+                                             {"text":"on a  time,\nthe end.\n","font":"F","size":12.0,"bold":true,"underline":false}]}"#;
+        assert_eq!(serde_json::from_str::<DocFile>(json).unwrap().words(), 6, "\"up\" and \"on\" are one word");
+        let empty = r#"{"version":2,"content":[{"text":" \n","font":"F","size":12.0,"bold":false,"underline":false}]}"#;
+        assert_eq!(serde_json::from_str::<DocFile>(empty).unwrap().words(), 0);
+    }
 }
